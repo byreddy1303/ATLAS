@@ -111,6 +111,22 @@ uv run python -m my_atlas_lab   # your code runs — no manual pip, no activate,
 None. This is chapter zero — your workstation. Everything else in the Atlas assumes what you build here. Bring: a terminal, git installed, and one hour of patience. Leave with: a workstation that will still make sense in three years.
 </Prerequisites>
 
+<StudyDepth
+  intro={<>Not every corner of this chapter earns the same real estate in your working memory. Drill the daily-loop commands and the <code>pyproject.toml</code> shape; skim the archaeology and the lock-file internals until they matter.</>}
+  drill={[
+    <><code>uv add</code> / <code>uv sync</code> / <code>uv run</code> — the daily loop</>,
+    <><code>pyproject.toml</code> shape: <code>[project]</code>, dependencies, <code>[tool.ruff]</code></>,
+    <>Ruff format + check as a commit-time reflex</>,
+    <>The two-file reproducibility guarantee: <code>pyproject.toml</code> + <code>uv.lock</code></>,
+  ]}
+  skim={[
+    <>The full history of pip → virtualenv → conda → Poetry — know the story, don&apos;t memorize the players</>,
+    <>Precise <code>uv.lock</code> internals (hash format, marker syntax)</>,
+    <>Every <code>[tool.*]</code> table in <code>pyproject.toml</code></>,
+    <>Non-uv managers (Poetry, PDM) unless you inherit a repo using them</>,
+  ]}
+/>
+
 <Motivation title="The boring hour that saves the next six months">
 
 Every guide to Python starts the same way. *"Install Python 3, open a REPL, print hello world."* Fifteen minutes in you're writing loops, ignoring the environment. Six months later you have four Python installs on your Mac — the system Python (never touch it), the one Homebrew put there, the one that came with Anaconda that a course made you install, and the one you can't remember installing but suspect was pyenv. Your `site-packages` is a museum: `numpy 1.19` for one course, `numpy 1.26` because a tutorial said so, `numpy 2.1` for the newest project. Nothing works. Every fresh clone of a repo takes forty minutes of dependency Tetris before anything runs.

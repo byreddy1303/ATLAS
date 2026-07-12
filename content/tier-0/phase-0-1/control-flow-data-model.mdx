@@ -125,6 +125,22 @@ print(f"mean of first 10000 y-values: {running_mean(synthetic_stream(), 10000):.
   { href: "/learn/foundations/python-craft/environment-tooling", label: "Environment · uv, Ruff", blurb: "You need a working Python 3.12 project you can run cells in." },
 ]} />
 
+<StudyDepth
+  intro={<>The data model is deep. Drill the reflexes you&apos;ll use in every function you write; skim the pattern-matching syntax and identity mechanics until a real bug demands them.</>}
+  drill={[
+    <>Truthiness reflex: <code>if not xs:</code> for &quot;no data yet&quot;</>,
+    <>Iteration vocabulary: <code>for x in xs</code>, <code>enumerate</code>, <code>zip</code>, <code>.items()</code></>,
+    <><code>is None</code> vs <code>== None</code> — the one place identity is right</>,
+    <>Hashability rule: mutable → not hashable → not a dict key</>,
+  ]}
+  skim={[
+    <>Full <code>match/case</code> destructuring grammar — powerful, but you write it monthly, not daily</>,
+    <>Small-int caching mechanics behind the <code>is</code> pitfall</>,
+    <>Custom <code>__hash__</code> / <code>__eq__</code> consistency (returns in the classes chapter)</>,
+    <>Every falsy value across every stdlib type</>,
+  ]}
+/>
+
 <Motivation title="Why 'for x in xs' is one of the deepest ideas in Python">
 
 Every programming language has `if`, `for`, and `while`. In most of them, these are hardwired statements — the compiler knows what a "loop" looks like and can only apply it to specific types. C's `for` iterates over integers. Java's `for-each` requires the collection to implement one specific interface, `Iterable<T>`, from the standard library. Python does something different, and *radically simpler*.
@@ -167,7 +183,7 @@ Every Python object can be evaluated in a boolean context (`if x:`, `while x:`, 
 
 <Angles intro={<>Five lenses on the data model. Each one exposes a different corner of the same underlying idea — objects and protocols, everywhere.</>}>
 
-  <Angle type="code" title="Truthiness — the tyranny of the empty container">
+  <Angle type="taste" title="Truthiness — the tyranny of the empty container">
     <RunnableCode title="what counts as True in Python?" code={truthyCode} />
 
     **Every empty container is falsy. Every non-empty container is truthy.** This uniformity is the language handing you a single tool that works everywhere:
@@ -180,7 +196,7 @@ Every Python object can be evaluated in a boolean context (`if x:`, `while x:`, 
 
   </Angle>
 
-  <Angle type="code" title="`for` over iterables, not indices">
+  <Angle type="workflow" title="`for` over iterables, not indices">
     <RunnableCode title="enumerate + zip" code={forVsIndex} />
 
     Iterating with `for i in range(len(xs))` and then indexing `xs[i]` is a C-and-Java reflex that Python explicitly encourages you to unlearn. There is a better tool for every job:
@@ -195,7 +211,7 @@ Every Python object can be evaluated in a boolean context (`if x:`, `while x:`, 
 
   </Angle>
 
-  <Angle type="algebraic" title="`match`/`case` — pattern matching, not `switch`">
+  <Angle type="runtime" title="`match`/`case` — pattern matching, not `switch`">
     <RunnableCode title="destructuring with match/case" code={matchCode} />
 
     Python 3.10+ added `match/case` and, if you're a Java or C programmer, please stop calling it a switch statement. That name badly undersells what it does. `match/case` is a **destructuring pattern matcher** — the same construct that made OCaml, Haskell, and Rust so pleasant. It matches on the *shape* of the input (list of length 2, dict with certain keys, instance of a class, tuple starting with a specific value) and *extracts* pieces of it into local variables.
@@ -206,7 +222,7 @@ Every Python object can be evaluated in a boolean context (`if x:`, `while x:`, 
 
   </Angle>
 
-  <Angle type="computational" title="Identity vs equality — `is` vs `==`">
+  <Angle type="pitfall" title="Identity vs equality — `is` vs `==`">
 
     Two of Python's most-confused operators. `a is b` is **identity** — "are `a` and `b` the same object in memory?" Concretely, it's a pointer comparison. `a == b` is **equality** — "does `a.__eq__(b)` say they're equal?" Semantic. Overridable per class.
 
@@ -232,7 +248,7 @@ if x == None: ...       # works, but a linter will yell — you meant identity`}
 
   </Angle>
 
-  <Angle type="physical" title="Hashability — the price of being a dict key">
+  <Angle type="contract" title="Hashability — the price of being a dict key">
 
     Only *hashable* objects can be dict keys or set members. Roughly, an object is hashable if its value never changes (immutable) — because the moment its value changes, its hash changes too, and it would be lost inside the dict's bucket structure. Tuples of hashables are hashable. Strings, ints, floats, frozensets: hashable. Lists, dicts, sets: **not** hashable — they're mutable.
 

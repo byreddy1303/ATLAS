@@ -72,6 +72,93 @@ export function Prerequisites({
   );
 }
 
+/* ————————————————————— StudyDepth (drill vs. skim) ————————————————————— */
+
+export function StudyDepth({
+  drill = [],
+  skim = [],
+  intro,
+}: {
+  drill?: React.ReactNode[];
+  skim?: React.ReactNode[];
+  intro?: React.ReactNode;
+}) {
+  return (
+    <section className="not-prose my-10">
+      <BlockHead
+        n="◆"
+        label="Study depth"
+        title="What to drill vs. what to skim"
+      />
+      {intro ? (
+        <div className="mb-4 max-w-[70ch] text-[15px] leading-[1.7] text-ink-2">
+          {intro}
+        </div>
+      ) : null}
+      <div className="grid gap-4 md:grid-cols-2">
+        {/* DRILL — filled, high-contrast, load-bearing */}
+        <div className="relative overflow-hidden rounded-2xl border border-lime/40 bg-lime-soft/50 p-5">
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -right-12 -top-12 h-32 w-32 rounded-full opacity-40 blur-2xl"
+            style={{ background: "var(--lime)" }}
+          />
+          <div className="relative">
+            <div className="mb-2 flex items-center gap-2">
+              <span
+                aria-hidden
+                className="inline-block h-3 w-3 rounded-sm"
+                style={{ background: "var(--lime)" }}
+              />
+              <span className="label-mono !text-lime">▮ Drill</span>
+            </div>
+            <div className="mb-3 text-[13px] font-semibold uppercase tracking-wider text-ink">
+              You&apos;ll write this weekly
+            </div>
+            <ul className="space-y-2 text-[14.5px] leading-[1.55] text-ink">
+              {drill.map((item, i) => (
+                <li key={i} className="flex gap-2.5">
+                  <span
+                    aria-hidden
+                    className="mt-[7px] inline-block h-1.5 w-1.5 shrink-0 rounded-full"
+                    style={{ background: "var(--lime)" }}
+                  />
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+
+        {/* SKIM — outlined, muted, reference-only */}
+        <div className="rounded-2xl border border-line bg-bg-2 p-5">
+          <div className="mb-2 flex items-center gap-2">
+            <span
+              aria-hidden
+              className="inline-block h-3 w-3 rounded-sm border border-ink-3"
+            />
+            <span className="label-mono">▯ Skim</span>
+          </div>
+          <div className="mb-3 text-[13px] font-semibold uppercase tracking-wider text-ink-2">
+            Know it exists, look up when it bites
+          </div>
+          <ul className="space-y-2 text-[14.5px] leading-[1.55] text-ink-2">
+            {skim.map((item, i) => (
+              <li key={i} className="flex gap-2.5">
+                <span
+                  aria-hidden
+                  className="mt-[7px] inline-block h-1.5 w-1.5 shrink-0 rounded-full border border-ink-3"
+                />
+                <span>{item}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 /* ————————————————————— LifeLesson ————————————————————— */
 
 export function LifeLesson({

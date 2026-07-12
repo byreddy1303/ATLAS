@@ -200,6 +200,22 @@ print("final loss history:", [round(h, 3) for h in history])`;
   { href: "/learn/foundations/python-craft/control-flow-data-model", label: "Control flow & the data model", blurb: "Truthiness, iteration protocol, dunders — the foundation this chapter builds on." },
 ]} />
 
+<StudyDepth
+  intro={<>Functions and type hints are daily-use; LEGB internals and closure-cell inspection are debugger-time. Drill the reflexes; skim the mechanics until they bite.</>}
+  drill={[
+    <>The five argument styles: positional, default, <code>*args</code>, keyword-only, <code>**kwargs</code></>,
+    <>Type hints on every function: <code>def f(x: int) -&gt; str:</code></>,
+    <>Recognizing when a function carries state (closure) vs. is pure</>,
+    <><code>nonlocal</code> / <code>global</code> — rare, but recognize them in code review</>,
+  ]}
+  skim={[
+    <>LEGB internal algorithm — the intuition (search outward) is enough; the mechanics are a debugger deep-dive</>,
+    <>Cell inspection via <code>fn.__closure__</code> / <code>.cell_contents</code></>,
+    <>The three fixes for late-binding — know the trap exists, look up the fix when it bites</>,
+    <>Positional-only marker <code>/</code> and bare-<code>*</code> — mostly you inherit these from library APIs</>,
+  ]}
+/>
+
 <Motivation title="The one chapter that unlocks decorators, callbacks, and training loops">
 
 If Python has a *master idea*, it is this: **functions are first-class values**. They are objects, just like numbers and strings and lists. You can assign them to variables. Put them in a list. Pass them to other functions. Return them from other functions. Store them as attributes on other objects. Every consequence of that single fact fills the rest of this chapter.
@@ -259,7 +275,7 @@ A **cell** is Python's internal implementation of a captured variable in a closu
 
   </Angle>
 
-  <Angle type="algebraic" title="LEGB scope resolution — how Python finds a name">
+  <Angle type="runtime" title="LEGB scope resolution — how Python finds a name">
     <RunnableCode title="Local / Enclosing / Global / Built-in — step by step" code={legbCode} />
 
     LEGB is a **name-lookup algorithm**, not a memory layout. When Python encounters a name it needs to *read*, it walks outward from the current function through enclosing functions, out to the module's globals, and finally to the built-ins — stopping at the first place that has the name. When Python encounters a name being *assigned*, the rule flips: it creates or updates in the current *local* scope, unless you've declared `nonlocal` (assign into the nearest enclosing function's scope) or `global` (assign into the module's globals).
@@ -268,7 +284,7 @@ A **cell** is Python's internal implementation of a captured variable in a closu
 
   </Angle>
 
-  <Angle type="physical" title="Closures — functions with private state">
+  <Angle type="anatomy" title="Closures — functions with private state">
     <RunnableCode title="counter closure — separate state per instance" code={closureCode} />
 
     Every call to `make_counter` creates a fresh `count` variable *and* a fresh `tick` function. Python then binds the two together by putting `count` in a **cell**, and giving `tick` a hidden `__closure__` tuple that references the cell. When `make_counter` returns, its local frame is gone — but the cell survives, because `tick` still points to it.
@@ -279,7 +295,7 @@ A **cell** is Python's internal implementation of a captured variable in a closu
 
   </Angle>
 
-  <Angle type="computational" title="Late-binding — the trap every Python dev hits once">
+  <Angle type="pitfall" title="Late-binding — the trap every Python dev hits once">
     <RunnableCode title="the [2, 2, 2] surprise and three fixes" code={closurePitfallCode} />
 
     Closures capture *cells*, not values. When you write `lambda: i` inside a `for` loop, every lambda captures a reference to *the same `i` cell*. When you eventually call any of the lambdas, they all look up `i` — and by then the loop has finished and `i == 2`. This produces the notorious `[2, 2, 2]`.
@@ -294,7 +310,7 @@ A **cell** is Python's internal implementation of a captured variable in a closu
 
   </Angle>
 
-  <Angle type="code" title="Type hints — signatures as executable documentation">
+  <Angle type="contract" title="Type hints — signatures as executable documentation">
     <RunnableCode title="Callable, generics, PEP 695 syntax" code={typedCode} />
 
     Since PEP 484 (Python 3.5, 2015), Python has supported optional **type hints** — annotations on parameters and return values. They are:

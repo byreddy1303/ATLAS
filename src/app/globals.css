@@ -133,6 +133,18 @@ body {
   scrollbar-color: var(--line-2) transparent;
 }
 
+/* ——————————————————— scroll boundary safety ——————————————————— */
+/* Keep wheel events inside inner scrollables from bouncing back to the page
+   when they hit an edge. Prevents the "scroll down pulls up" symptom that
+   happens when a nested scroll (CodeMirror, wide code blocks) is at its
+   extent and the browser cascades the event weirdly. */
+.cm-editor,
+.cm-scroller,
+pre,
+[data-lenis-prevent] {
+  overscroll-behavior: contain;
+}
+
 /* ——————————————————— typography utilities ——————————————————— */
 
 .font-editorial {

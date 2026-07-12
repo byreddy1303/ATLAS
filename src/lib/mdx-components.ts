@@ -19,6 +19,7 @@ import {
   Term,
   MarkDone,
   LifeLesson,
+  StudyDepth,
 } from "@/components/pedagogy";
 import { RunnableCode, CodeBlock } from "@/components/code/RunnableCode";
 import {
@@ -48,6 +49,7 @@ export const mdxComponents = {
   Term,
   MarkDone,
   LifeLesson,
+  StudyDepth,
   RunnableCode,
   CodeBlock,
   FunctionPlot,

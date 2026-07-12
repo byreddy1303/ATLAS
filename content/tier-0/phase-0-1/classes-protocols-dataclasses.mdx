@@ -206,6 +206,22 @@ print(bench)
   { href: "/learn/foundations/python-craft/control-flow-data-model", label: "Control flow & the data model", blurb: "The dunder protocols (`__eq__`, `__len__`, `__iter__`, `__hash__`) — this chapter is where you implement them." },
 ]} />
 
+<StudyDepth
+  intro={<>Modern Python OOP is a handful of load-bearing tools: <code>@dataclass</code>, <code>Protocol</code>, composition. Drill those; the exhaustive dunder catalog and MRO archaeology are look-up-when-needed material.</>}
+  drill={[
+    <><code>@dataclass(frozen=True, slots=True)</code> for every config/record object</>,
+    <><code>field(default_factory=list)</code> for mutable defaults</>,
+    <><code>Protocol</code> for structural typing (duck typing that mypy checks)</>,
+    <>Composition over inheritance — <em>has-a</em> beats <em>is-a</em></>,
+  ]}
+  skim={[
+    <>Every dunder beyond <code>__init__</code>, <code>__repr__</code>, <code>__eq__</code>, <code>__len__</code>, <code>__iter__</code></>,
+    <>C3 MRO — matters if you inherit from three classes, which you shouldn&apos;t</>,
+    <>ABC vs Protocol nuances — <code>Protocol</code> is almost always the right modern choice</>,
+    <>Every <code>field(...)</code> knob — you&apos;ll use <code>default_factory</code>, look up the rest</>,
+  ]}
+/>
+
 <Motivation title="Modern Python OOP is 3 tools, not 30">
 
 Ask a programmer who learned OOP in Java or C++ what a class is, and the answer will involve **inheritance hierarchies**, **abstract base classes**, **interfaces**, **mixins**, `protected` and `private`, and a taxonomy diagram (`Animal → Mammal → Dog → GoldenRetriever`). Do that in Python and your code will become an unreadable maze in six months. **The Python community, over the last ten years, has quietly moved to a much smaller, saner set of tools.**
@@ -267,7 +283,7 @@ Methods in Python are functions with a first parameter conventionally called `se
 
   </Angle>
 
-  <Angle type="physical" title="`field()` — factories for mutable defaults">
+  <Angle type="pitfall" title="`field()` — factories for mutable defaults">
     <RunnableCode title="field(default_factory=list) and other tricks" code={dataclassFieldsCode} />
 
     The classic Python bug — mutable defaults shared across instances — is even more insidious inside dataclasses, because you might think `@dataclass` handles it. It doesn't (fully): Python actually raises a `ValueError` if you write `metrics: list[float] = []` inside a dataclass. The fix is `field(default_factory=list)` — this tells the generated `__init__` to *call* the factory once per instance, giving each a fresh empty list.
@@ -278,7 +294,7 @@ Methods in Python are functions with a first parameter conventionally called `se
 
   </Angle>
 
-  <Angle type="algebraic" title="`Protocol` — structural, not nominal, typing">
+  <Angle type="contract" title="`Protocol` — structural, not nominal, typing">
     <RunnableCode title="duck typing that a type checker can verify" code={protocolCode} />
 
     In Java, if a function accepts a `HasLen` interface, only classes that *inherit from* `HasLen` are accepted. Python's `Protocol` takes the opposite approach: any class that *has* the methods `HasLen` declares is accepted — even classes you didn't write, even classes from libraries you can't modify. This is what makes `sklearn.pipeline.Pipeline` work with your custom estimator without you having to inherit from `sklearn.base.BaseEstimator` — as long as your class has `.fit()`, `.predict()`, and (for classifiers) `.predict_proba()` in the right shape, it counts.
@@ -292,7 +308,7 @@ Methods in Python are functions with a first parameter conventionally called `se
 
   </Angle>
 
-  <Angle type="code" title="Dunder methods — make your class feel native">
+  <Angle type="runtime" title="Dunder methods — make your class feel native">
     <RunnableCode title="__add__, __mul__, __rmul__, __iter__, __len__, __eq__, __hash__" code={dunderCode} />
 
     The pattern in the cell is small and repeats endlessly: **identify a piece of syntax you want your class to support, look up the dunder that implements it, add a method with that name.** `+` needs `__add__` (and optionally `__radd__` for the case when your object is on the right). `*` needs `__mul__` (and `__rmul__`). `for x in obj` needs `__iter__`. `len(obj)` needs `__len__`. `obj[k]` needs `__getitem__`. `obj[k] = v` needs `__setitem__`. `with obj:` needs `__enter__` and `__exit__`. `obj()` (calling like a function) needs `__call__`.
@@ -303,7 +319,7 @@ Methods in Python are functions with a first parameter conventionally called `se
 
   </Angle>
 
-  <Angle type="probabilistic" title="Composition over inheritance — the design taste that saves you">
+  <Angle type="taste" title="Composition over inheritance — the design taste that saves you">
     <RunnableCode title="a class that owns its dependencies, not one that inherits their behaviors" code={compositionCode} />
 
     The single biggest OOP design taste, and the one that separates modern Python from 2005-era Python: **prefer composition over inheritance**. Instead of `class GPU_Sampler(Sampler, GPUMixin, LoggingMixin):` — a class inheriting from three parents, with method resolution order determined by C3 linearization, and behaviors bleeding across the hierarchy — write `class TrainingRun:` that *has-a* logger, *has-a* model, *has-a* optimizer.

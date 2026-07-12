@@ -209,6 +209,23 @@ print(roundtrip_parquet(df).dtypes.to_string())`;
   { href: "/learn/foundations/python-craft/classes-protocols-dataclasses", label: "Dataclasses & protocols", blurb: "The natural shape for the objects flowing across your program's boundaries — configs, records, events." },
 ]} />
 
+<StudyDepth
+  intro={<>The boundaries are where bugs live. Drill the small vocabulary that keeps them sealed (<code>pathlib</code>, streaming, safe defaults). Skim the format encyclopedia until a specific format arrives at your door.</>}
+  drill={[
+    <><code>pathlib.Path</code> operators + methods — <code>Path(&quot;data&quot;) / &quot;sub&quot; / &quot;f.json&quot;</code>, never string surgery again</>,
+    <>argparse or Typer basics: positional required, <code>--flags</code> optional, <code>type=int</code></>,
+    <><code>json.dump</code> / <code>json.load</code> and <code>tomllib.load</code> for configs</>,
+    <>Streaming: <code>for line in f</code>, <code>pd.read_csv(chunksize=...)</code>, <code>iter_batches()</code></>,
+    <><code>Path.mkdir(parents=True, exist_ok=True)</code> and <code>encoding=&quot;utf-8&quot;</code> reflexes</>,
+  ]}
+  skim={[
+    <>Full format trade-off table — memorize Parquet + JSON + TOML; look up the rest by need</>,
+    <>Atomic write patterns (<code>tmp → rename</code>) — matters in prod, skim on first pass</>,
+    <>JSON edge cases (Decimal, datetime, bytes) — look up when a serialization error hits</>,
+    <>Advanced Typer/Click features (subcommands, callbacks) — grow into them</>,
+  ]}
+/>
+
 <Motivation title="Where your program meets the outside world">
 
 Every Python program is a little world with a wall around it. Inside the wall, everything is orderly — objects with types, control flow you designed, invariants you can trust. But nothing useful happens purely inside. Real programs read a CSV, take a `--config` flag, write a checkpoint, ship a log to disk, receive JSON from an API, load a Parquet from S3, dump metrics to a warehouse. Every one of those crossings is a **boundary**, and every boundary is where bugs actually live: the file that isn't there, the argument that's a string when you expected an int, the JSON with a missing field, the 60 GB CSV you tried to load into 16 GB of RAM, the encoding mismatch that turned "café" into "cafÃ©".
@@ -252,7 +269,7 @@ An **encoding** is how a string of characters becomes a sequence of bytes on dis
 
 <Angles intro={<>Six lenses on the boundary of your program. Each corresponds to a real habit you'll form: pathlib-first, argparse or Typer, JSON as lingua franca, streaming for scale, format-by-audience, and safe-reading defaults.</>}>
 
-  <Angle type="code" title="pathlib — paths as objects, not strings">
+  <Angle type="taste" title="pathlib — paths as objects, not strings">
     <RunnableCode title="paths that behave like paths" code={pathlibCode} />
 
     `Path` gives you four things that string paths cannot: **operators** (`root / "sub" / "file.json"` is safe on every OS), **methods** (`.exists()`, `.stat()`, `.glob()`, `.read_text()`, `.write_text()`), **anatomy** (`.name`, `.stem`, `.suffix`, `.parent`, `.parts`), and **cross-platform correctness** (Windows vs POSIX separators are handled for you).
@@ -268,7 +285,7 @@ An **encoding** is how a string of characters becomes a sequence of bytes on dis
 
   </Angle>
 
-  <Angle type="code" title="argparse — the stdlib CLI you'll actually use">
+  <Angle type="workflow" title="argparse — the stdlib CLI you'll actually use">
     <RunnableCode title="argparse basics" code={argparseCode} />
 
     `argparse` parses a list of strings from `sys.argv` into a typed namespace. Four habits separate a professional CLI from a script that surprises its users:
@@ -282,7 +299,7 @@ An **encoding** is how a string of characters becomes a sequence of bytes on dis
 
   </Angle>
 
-  <Angle type="algebraic" title="Typer — the type hints ARE the CLI schema">
+  <Angle type="comparative" title="Typer — the type hints ARE the CLI schema">
     <CodeBlock language="python" title="Typer version of the same CLI" code={typerCode} />
 
     **Typer** takes a fundamentally different angle: it reads your function's type hints and defaults, and *from those alone* builds the CLI schema, help text, tab completion, and error messages. Your Python function is the CLI; there's no separate "argument parser" to maintain.
@@ -300,7 +317,7 @@ An **encoding** is how a string of characters becomes a sequence of bytes on dis
 
   </Angle>
 
-  <Angle type="physical" title="JSON — the lingua franca of every system">
+  <Angle type="ecosystem" title="JSON — the lingua franca of every system">
     <RunnableCode title="json.dump / json.load — round-trip and its edges" code={jsonCode} />
 
     JSON is the format every language speaks. Every language has a native JSON parser; every HTTP API produces or consumes it; every logging platform ingests it. Its type system is minimal by design — **string, number, bool, null, array, object** — which is also its constraint: anything richer needs conversion at the boundary or JSON will raise.
@@ -315,7 +332,7 @@ An **encoding** is how a string of characters becomes a sequence of bytes on dis
 
   </Angle>
 
-  <Angle type="probabilistic" title="Streaming — reading files bigger than memory">
+  <Angle type="performance" title="Streaming — reading files bigger than memory">
     <RunnableCode title="iterate a file line by line" code={streamCode} />
 
     `for line in file:` is not just syntactic sugar. It uses the file's own **iterator protocol** and pulls one line at a time, letting the OS buffer the rest. This is how you scan a 60 GB log on a laptop with 16 GB of RAM. The moment you write `f.read()` or `f.readlines()`, ask yourself: *does this file fit in RAM?* If you're not sure, the answer is **stream**.
@@ -332,7 +349,7 @@ An **encoding** is how a string of characters becomes a sequence of bytes on dis
 
   </Angle>
 
-  <Angle type="computational" title="Formats — the trade-off table you'll live by">
+  <Angle type="comparative" title="Formats — the trade-off table you'll live by">
     Every format is a bet on **who reads it, how fast, and how big**. This table is worth memorizing:
 
     | Format  | Human-readable | Schema | Speed  | Size   | Sweet spot |

@@ -174,6 +174,23 @@ except TrainingDivergedError:
   { href: "/learn/foundations/python-craft/classes-protocols-dataclasses", label: "Classes, protocols & dataclasses", blurb: "Custom exceptions are just classes that inherit from Exception." },
 ]} />
 
+<StudyDepth
+  intro={<>Debugging is the daily activity. Drill the small vocabulary that lets you narrate what your program did (exceptions, tests, logs, retries); skim the philosophical debates and the config trees.</>}
+  drill={[
+    <>Custom exception hierarchies — a base <code>XError(Exception)</code> and specific subclasses</>,
+    <><code>raise X from Y</code> when wrapping low-level exceptions</>,
+    <>pytest basics: <code>test_*</code>, <code>parametrize</code>, <code>pytest.raises</code>, fixtures</>,
+    <>Structured logging with <code>extra=&#123;...&#125;</code> and a JSON formatter</>,
+    <>The retry-with-backoff decorator (every LLM app has one)</>,
+  ]}
+  skim={[
+    <>EAFP vs LBYL philosophy — default to EAFP and move on</>,
+    <>Full <code>logging</code> config hierarchy (loggers, handlers, filters, propagation)</>,
+    <>pytest fixture scoping (<code>function</code>, <code>module</code>, <code>session</code>) — matters when tests slow down</>,
+    <>Every built-in exception — <code>ValueError</code>, <code>TypeError</code>, <code>KeyError</code>, <code>RuntimeError</code> cover 90%</>,
+  ]}
+/>
+
 <Motivation title="Debugging is what you'll actually do most days">
 
 Writing new code is fun. Writing *correct* code that stays correct across a hundred future edits — and diagnosing it when it explodes at 2am on a Tuesday — is the job. The industry secret is that senior engineers don't write code faster than juniors; they spend less time on the wrong things, because they've built (or joined) systems where **errors surface cleanly, tests document behavior, and logs tell the story of what happened.**
@@ -216,7 +233,7 @@ The `logging` module has five standard **levels**, in increasing severity: `DEBU
 
 <Angles intro={<>Five lenses on error handling and observability. Each corresponds to a real habit you'll form: raising precise exceptions, chaining causes, writing minimal expressive tests, choosing EAFP over LBYL, and emitting structured logs your future self can search.</>}>
 
-  <Angle type="code" title="Custom exceptions communicate intent">
+  <Angle type="taste" title="Custom exceptions communicate intent">
     <RunnableCode title="a small exception hierarchy" code={exceptionsCode} />
 
     Two rules make custom exceptions worth their weight:
@@ -234,7 +251,7 @@ The `logging` module has five standard **levels**, in increasing severity: `DEBU
 
   </Angle>
 
-  <Angle type="physical" title="`raise X from Y` — chain the cause into the traceback">
+  <Angle type="runtime" title="`raise X from Y` — chain the cause into the traceback">
     <RunnableCode title="the wrapping pattern for domain-specific errors" code={raiseFromCode} />
 
     A common design need: your code calls a low-level API (a filesystem, a network library, a database driver), and that API raises a low-level exception (`PermissionError`, `ConnectionError`, `IntegrityError`). You don't want to leak those *domain-level* to your callers — they should see something like `ModelLoadError`, not `PermissionError`. But you also don't want to *hide* the original cause: if the loader failed because of permissions, the debugger needs to see that.
@@ -245,7 +262,7 @@ The `logging` module has five standard **levels**, in increasing severity: `DEBU
 
   </Angle>
 
-  <Angle type="code" title="pytest — the assertion is the test">
+  <Angle type="workflow" title="pytest — the assertion is the test">
     <RunnableCode title="tests, parametrize, fixtures" code={pytestCode} />
 
     pytest's genius is that it treats the language's own `assert` as the assertion primitive. You don't call `assertEqual(a, b)`; you write `assert a == b`, and if it fails, pytest *rewrites* the bytecode of the test to introspect both sides and print a helpful diff. This is why pytest tests read like ordinary Python — because they are.
@@ -260,7 +277,7 @@ The `logging` module has five standard **levels**, in increasing severity: `DEBU
 
   </Angle>
 
-  <Angle type="algebraic" title="EAFP vs LBYL — the Python happy-path preference">
+  <Angle type="comparative" title="EAFP vs LBYL — the Python happy-path preference">
 
     Two styles of handling potentially-absent things:
 
@@ -277,7 +294,7 @@ The `logging` module has five standard **levels**, in increasing severity: `DEBU
 
   </Angle>
 
-  <Angle type="computational" title="Structured logging beats `print`">
+  <Angle type="production" title="Structured logging beats `print`">
     <RunnableCode title="JSON logs with `extra={...}`" code={loggingCode} />
 
     `print` is the developer's default and it's fine for scratch code. In anything that will run more than once, use `logging`. Three wins:

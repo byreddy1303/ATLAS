@@ -198,6 +198,22 @@ print("fib(60) =", fib(60))  # would take forever without cache`;
   { href: "/learn/foundations/python-craft/control-flow-data-model", label: "Control flow & the data model", blurb: "Iteration is the substrate — comprehensions and generators both consume iterables." },
 ]} />
 
+<StudyDepth
+  intro={<>Every LLM/RAG app you&apos;ll build uses comprehensions, generator streams, and decorators. Drill those reflexes; the closure-cell archaeology can wait until a bug pulls you into it.</>}
+  drill={[
+    <>List/dict/set comprehensions with an <code>if</code> clause</>,
+    <>Generator expressions for streaming: <code>(x for x in ...)</code></>,
+    <>Reading and writing simple decorators — <code>@retry</code>, <code>@cache</code>, <code>@app.get</code></>,
+    <><code>functools.wraps</code> as a decorator-writing reflex</>,
+  ]}
+  skim={[
+    <>Nested comprehensions with three <code>for</code>s (write-only code — use a real loop)</>,
+    <>Cell-object mechanics behind decorator closures — the <em>idea</em> matters, the mechanics come with a bug</>,
+    <>Writing decorator factories from scratch — you&apos;ll call libraries&apos; first for a long time</>,
+    <>The bytecode difference between comprehensions and <code>for</code>+<code>append</code></>,
+  ]}
+/>
+
 <Motivation title="Why Python isn't just 'C with indentation'">
 
 Three moves separate scripting Python from **Pythonic** Python: **comprehensions** turn multi-line loops into single expressions, **generators** turn those loops into memory-cheap streams that never materialize their full output, and **decorators** turn common wrappers (timing, caching, logging, retries, permissions) into one-line annotations. Learn these three and something shifts — you stop typing four-line boilerplate blocks, and you start actually *reading* the standard library instead of skimming past it.
@@ -236,7 +252,7 @@ A **closure** is a nested function that *remembers* variables from the enclosing
 
 <Angles intro={<>Six lenses on the three moves. Each isolates one property and shows how it changes the shape of real code.</>}>
 
-  <Angle type="code" title="Comprehensions — the loop as an expression">
+  <Angle type="taste" title="Comprehensions — the loop as an expression">
     <RunnableCode title="list / dict / set comprehensions + generator expression" code={compsCode} />
 
     All four sibling shapes:
@@ -259,7 +275,7 @@ A **closure** is a nested function that *remembers* variables from the enclosing
 
   </Angle>
 
-  <Angle type="computational" title="Generators — where laziness saves you">
+  <Angle type="performance" title="Generators — where laziness saves you">
     <RunnableCode title="lazy memory usage, islice, infinite generator" code={memoryCode} />
 
     The dramatic number: a list of 10 million squares occupies hundreds of megabytes. A generator expression producing the *same virtual sequence* occupies about 100 bytes — regardless of how "long" it is. The difference is that the list *materializes* the answers, while the generator *promises* to produce them one at a time. If your consumer only ever looks at the first 100 items, or streams the results into an aggregator, the other 9,999,900 answers were never computed at all. Lazy evaluation, in practice.
@@ -270,7 +286,7 @@ A **closure** is a nested function that *remembers* variables from the enclosing
 
   </Angle>
 
-  <Angle type="physical" title="Generators as pipelines — compose without buffers">
+  <Angle type="ecosystem" title="Generators as pipelines — compose without buffers">
     <RunnableCode title="a lazy pipeline: source → filter → transform → take-5" code={generatorPipelineCode} />
 
     Notice what happened. `synthetic_events(100_000)` "creates" 100k events. `buys_only(...)` "filters" them. `with_tax(...)` "transforms" them. Then we take just 5. In a *list-based* world, the middle stages would each build a full list — 100k → 20k → 20k — before you looked at any of them.
@@ -281,7 +297,7 @@ A **closure** is a nested function that *remembers* variables from the enclosing
 
   </Angle>
 
-  <Angle type="algebraic" title="Decorators — the wrap and the sugar">
+  <Angle type="runtime" title="Decorators — the wrap and the sugar">
     <RunnableCode title="@timed — a decorator built from scratch" code={decoratorTraceCode} />
 
     The sugar `@timed` above the `def` is *exactly equivalent to* writing `slow_sum = timed(slow_sum)` after the `def`. Both replace the name `slow_sum` with the return value of `timed(slow_sum)`, which is a new function that wraps the old one. Nothing more mysterious.
@@ -290,7 +306,7 @@ A **closure** is a nested function that *remembers* variables from the enclosing
 
   </Angle>
 
-  <Angle type="probabilistic" title="Decorators with arguments — a decorator that returns a decorator">
+  <Angle type="runtime" title="Decorators with arguments — a decorator that returns a decorator">
     <RunnableCode title="parameterized decorators: @retry(times=3)" code={decoratorFactoryCode} />
 
     When a decorator takes arguments (`@retry(times=3)`), read it as **two calls**. The first call is `retry(times=3)`, which returns a decorator. The returned decorator then wraps your function. So `retry(3)(flaky)` is what actually happens; `@retry(3)` is just the sugar.

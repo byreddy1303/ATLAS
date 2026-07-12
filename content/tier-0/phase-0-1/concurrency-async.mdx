@@ -145,6 +145,22 @@ def train_epoch(model, batches):
   { href: "/learn/foundations/python-craft/errors-testing-logging", label: "Errors, testing & logging", blurb: "Exceptions cross thread and coroutine boundaries in specific ways — matters here." },
 ]} />
 
+<StudyDepth
+  intro={<>Every LLM/RAG/agent app you build will use the <code>gather</code>-plus-<code>Semaphore</code> pattern. Drill that. GIL archaeology and multiprocessing internals wait until a real perf problem forces you into them.</>}
+  drill={[
+    <>The one decision: I/O-bound → asyncio or threads; CPU-bound → multiprocessing</>,
+    <><code>asyncio.gather</code> + <code>asyncio.Semaphore(n)</code> — the pattern behind every LLM/RAG/agent app</>,
+    <><code>await asyncio.to_thread(sync_fn)</code> to escape sync-in-async traps</>,
+    <><code>ThreadPoolExecutor</code> for simple parallel I/O</>,
+  ]}
+  skim={[
+    <>Deep GIL semantics — knowing &quot;threads help I/O, not CPU&quot; is 90% of what you need</>,
+    <><code>multiprocessing</code> pickling / shared-memory internals — matters when data is huge</>,
+    <><code>asyncio.TaskGroup</code> vs <code>gather</code> — use TaskGroup in new code; familiarity comes with use</>,
+    <>Manual <code>threading.Thread</code> / <code>threading.Lock</code> — prefer executors and async</>,
+  ]}
+/>
+
 <Motivation title="Why one loop is sometimes not enough">
 
 You want your Python program to do more than one thing at a time. Three flavors of "more than one thing" show up over and over:
@@ -205,7 +221,7 @@ The rule: **inside async code, use async libraries.** `httpx` instead of `reques
 
 <Angles intro={<>Four angles on Python concurrency. Each isolates one flavor — threading for I/O, asyncio for I/O at scale, multiprocessing for CPU work, and the friendly unified `concurrent.futures` interface — and shows exactly when to reach for it.</>}>
 
-  <Angle type="computational" title="threading — parallelism for *waiting*">
+  <Angle type="runtime" title="threading — parallelism for *waiting*">
     <RunnableCode title="threads on I/O + a ThreadPoolExecutor variant" code={threadsCode} />
 
     Five HTTP calls take ~5 seconds sequentially and ~1 second threaded. The GIL doesn't hurt here because `urllib.request.urlopen` blocks on the socket — Python releases the GIL while waiting, other threads pick it up, all five requests fly in parallel from the network's point of view. Threads are perfect for embarrassingly-parallel I/O: crawling, hitting many APIs, reading many files, running multiple subprocess calls.
@@ -216,7 +232,7 @@ The rule: **inside async code, use async libraries.** `httpx` instead of `reques
 
   </Angle>
 
-  <Angle type="algebraic" title="asyncio — cooperative single-thread I/O at scale">
+  <Angle type="runtime" title="asyncio — cooperative single-thread I/O at scale">
     <RunnableCode title="asyncio.gather — three tasks concurrent in one thread" code={asyncCode} />
 
     `asyncio` gives you the same wall-clock speedup as threads for I/O-bound work, **without any threads at all.** The magic is `await`. When a coroutine hits `await asyncio.sleep(2)`, it doesn't literally sleep — it says "I'll be ready in 2 seconds; loop, please run something else in the meantime." The event loop pops the coroutine from the "running" queue and puts it in the "waiting for timer" queue. Two seconds later the timer fires; the loop moves the coroutine back to "running" and resumes it. All in one thread.
@@ -233,7 +249,7 @@ The rule: **inside async code, use async libraries.** `httpx` instead of `reques
 
   </Angle>
 
-  <Angle type="physical" title="An asyncio pattern you'll write forever — semaphore + gather">
+  <Angle type="production" title="An asyncio pattern you'll write forever — semaphore + gather">
     <RunnableCode title="rate-limited concurrent API calls" code={asyncPatternCode} />
 
     This is the pattern behind every "embed 10,000 documents" script, every "query 500 LLM endpoints for a benchmark" runner, every RAG bulk-ingest. Read it once and you'll write it many times.
@@ -248,7 +264,7 @@ The rule: **inside async code, use async libraries.** `httpx` instead of `reques
 
   </Angle>
 
-  <Angle type="code" title="multiprocessing — real parallelism for real CPU work">
+  <Angle type="comparative" title="multiprocessing — real parallelism for real CPU work">
     <RunnableCode title="ProcessPoolExecutor for prime checks" code={poolCode} />
 
     Each `multiprocessing` worker is a **separate Python process** — separate interpreter, separate memory, separate GIL. So 4 processes on a 4-core machine really run 4 CPU-bound Python jobs in parallel. This is how you get true speedup from *pure-Python* CPU work.
@@ -264,7 +280,7 @@ The rule: **inside async code, use async libraries.** `httpx` instead of `reques
 
   </Angle>
 
-  <Angle type="probabilistic" title="`concurrent.futures` — the friendly unified interface">
+  <Angle type="ecosystem" title="`concurrent.futures` — the friendly unified interface">
     Both threads and processes have a unified high-level API in `concurrent.futures`:
 
     <CodeBlock language="python" title="ThreadPoolExecutor / ProcessPoolExecutor — same shape" code={`from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
