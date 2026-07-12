@@ -4,7 +4,7 @@ tier: 0
 phase: "0.1"
 ---
 
-export const threadsCode = `# threads for I/O — waiting on network in parallel
+export const threadsCode = `# threading for I/O — parallelism while waiting on the network
 import time, threading, urllib.request
 
 urls = ["https://httpbin.org/delay/1"] * 5
@@ -12,180 +12,592 @@ urls = ["https://httpbin.org/delay/1"] * 5
 def fetch(url):
     urllib.request.urlopen(url).read()
 
-# sequential
+# Sequential — each request waits for the previous to finish
 t = time.perf_counter()
 for u in urls: fetch(u)
-print(f"sequential: {time.perf_counter() - t:.2f}s")
+print(f"sequential: {time.perf_counter() - t:.2f}s   (about 5s)")
 
-# threaded
+# Threaded — all five requests wait in parallel
 t = time.perf_counter()
 ts = [threading.Thread(target=fetch, args=(u,)) for u in urls]
 for th in ts: th.start()
 for th in ts: th.join()
-print(f"threaded  : {time.perf_counter() - t:.2f}s")`;
+print(f"threaded  : {time.perf_counter() - t:.2f}s   (about 1s)")
 
-export const asyncCode = `import asyncio, time
+# Same speedup with a friendlier pool interface
+from concurrent.futures import ThreadPoolExecutor
+t = time.perf_counter()
+with ThreadPoolExecutor(max_workers=5) as pool:
+    list(pool.map(fetch, urls))
+print(f"pool      : {time.perf_counter() - t:.2f}s")`;
+
+export const asyncCode = `# asyncio — thousands of concurrent operations in ONE thread
+import asyncio, time
 
 async def slow_task(name, secs):
     print(f"  {name} start")
-    await asyncio.sleep(secs)    # yields control while it 'sleeps'
+    await asyncio.sleep(secs)         # yields control while it 'sleeps'
     print(f"  {name} done")
     return f"{name}={secs}"
 
 async def main():
     t = time.perf_counter()
+    # gather runs all three concurrently and returns the list of results
     results = await asyncio.gather(
         slow_task("A", 1),
         slow_task("B", 2),
         slow_task("C", 1),
     )
     print("results:", results)
-    print(f"total: {time.perf_counter() - t:.2f}s (would be 4 sequentially)")
+    print(f"total: {time.perf_counter() - t:.2f}s (would be 4s sequentially)")
 
 asyncio.run(main())`;
 
-export const poolCode = `# processes for CPU — no GIL, real parallelism
+export const asyncPatternCode = `# Two async patterns that show up in every LLM pipeline:
+# 1) run many concurrent tasks with a concurrency LIMIT (Semaphore)
+# 2) collect results as they finish (as_completed) so slow ones don't block fast ones
+import asyncio, random, time
+
+async def flaky_embed(text: str) -> int:
+    """Pretend to call an embedding API. Latency varies."""
+    delay = random.uniform(0.05, 0.4)
+    await asyncio.sleep(delay)
+    return len(text)                     # 'embedding' is just its length
+
+async def embed_all(texts, concurrency=5):
+    """At most 'concurrency' embed calls in flight at any moment."""
+    sem = asyncio.Semaphore(concurrency)
+
+    async def worker(text):
+        async with sem:                  # only enters if the sem has a slot
+            return await flaky_embed(text)
+
+    return await asyncio.gather(*(worker(t) for t in texts))
+
+async def main():
+    texts = [f"doc-{i}" for i in range(20)]
+    t = time.perf_counter()
+    results = await embed_all(texts, concurrency=5)
+    print(f"embedded {len(results)} texts in {time.perf_counter()-t:.2f}s")
+    print("first five results:", results[:5])
+
+asyncio.run(main())`;
+
+export const poolCode = `# multiprocessing — real parallelism for real CPU work
 from concurrent.futures import ProcessPoolExecutor
 import time, math
 
-def is_prime(n):
+def is_prime(n: int) -> bool:
     if n < 2: return False
     for i in range(2, int(math.isqrt(n)) + 1):
-        if n % i == 0: return False
+        if n % i == 0:
+            return False
     return True
 
 nums = list(range(10_000_000, 10_000_050))
 
+# Sequential — one core, all Python bytecode, GIL locked to one thread
 t = time.perf_counter()
 seq = [is_prime(n) for n in nums]
 print(f"sequential: {time.perf_counter() - t:.2f}s")
 
+# Multiprocessing — one Python interpreter per worker, one GIL each,
+# so 4 cores can actually run 4 CPU-bound Python jobs in parallel.
 t = time.perf_counter()
 with ProcessPoolExecutor(max_workers=4) as pool:
     par = list(pool.map(is_prime, nums))
 print(f"pool(4)   : {time.perf_counter() - t:.2f}s")
 
-assert seq == par`;
+assert seq == par
+print("results agree; primes found:", sum(par))`;
+
+export const decisionCode = `# The one decision that guides everything
+# ---------------------------------------------------------------
+
+# 1) I/O-bound + library supports async  ->  asyncio
+#    e.g. httpx, aiofiles, asyncpg, redis-py-async
+async def rag_pipeline(query: str):
+    docs = await vector_db.search(query, k=5)          # awaits network
+    context = "\\n".join(await asyncio.gather(*(fetch_body(d) for d in docs)))
+    return await llm.chat(f"Answer using: {context}\\n\\nQ: {query}")
+
+# 2) I/O-bound + only sync libraries  ->  threading (via ThreadPoolExecutor)
+#    e.g. legacy 'requests', sync database drivers, sync boto3
+def scrape_all(urls):
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        return list(pool.map(requests.get, urls))       # requests is sync-only
+
+# 3) CPU-bound pure Python  ->  multiprocessing (via ProcessPoolExecutor)
+#    e.g. custom feature engineering loops, pure-Python hashing, image ops in PIL
+def hash_all_files(paths):
+    with ProcessPoolExecutor() as pool:
+        return list(pool.map(sha256_of_file, paths))
+
+# 4) CPU-bound but the work is really in NumPy/PyTorch/BLAS  ->  DO NOTHING
+#    Those libraries release the GIL internally and already use all your cores.
+def train_epoch(model, batches):
+    for X, y in batches:
+        loss = model(X, y).backward()                    # already parallel in C++/CUDA
+        model.step()`;
 
 <Prerequisites items={[
-  { href: "/learn/foundations/python-craft/functions-scope-closures", label: "Functions & closures", blurb: "Async functions are just another kind of callable." },
-  { href: "/learn/foundations/python-craft/errors-testing-logging", label: "Errors, testing & logging", blurb: "Exceptions across threads/coroutines need care." },
+  { href: "/learn/foundations/python-craft/functions-scope-closures", label: "Functions & closures", blurb: "`async def` is a function; `await` inside it works exactly like the closure/higher-order patterns you already know." },
+  { href: "/learn/foundations/python-craft/errors-testing-logging", label: "Errors, testing & logging", blurb: "Exceptions cross thread and coroutine boundaries in specific ways — matters here." },
 ]} />
 
 <Motivation title="Why one loop is sometimes not enough">
 
-You want your Python program to do more than one thing at a time. Maybe you're fetching 100 URLs — waiting on each individually is unbearable. Maybe you're crunching numbers on a 16-core CPU — using one core is wasteful. Maybe you're building a web server — each request should not block others. These are three completely different situations, and Python gives you three completely different tools: `asyncio`, `threading`, and `multiprocessing`. Confusing them is the classic Python performance mistake. Understanding which is which turns "I/O should be fast" and "why isn't NumPy faster?" from mysteries into decisions.
+You want your Python program to do more than one thing at a time. Three flavors of "more than one thing" show up over and over:
+
+- **Fetch 100 URLs from a slow API.** Doing them one at a time is 100× longer than doing them concurrently. Almost all the time is spent *waiting on the network*, not doing work — so *waiting in parallel* is nearly free.
+- **Crunch numbers on a 16-core CPU.** If your machine has 16 cores and your program uses one, you're leaving 15/16ths of your paid-for hardware idle. This is CPU-bound work — actual computation, not waiting — and to make it faster you need real parallelism.
+- **Serve a web endpoint with many concurrent clients.** Each request should be able to make progress even while another is waiting. A single-threaded server that blocks on one request can only handle one client at a time.
+
+These three situations *look* similar ("do many things at once") but are radically different underneath. Python offers three different tools for them — **`asyncio`** (cooperative single-thread concurrency), **`threading`** (OS threads sharing memory), and **`multiprocessing`** (separate Python processes, each with its own interpreter). Confusing them is the classic Python performance mistake: someone reaches for `threading` to speed up a CPU-bound loop and gets *no speedup* (or slower). Someone reaches for `multiprocessing` to make async I/O faster and pays a massive process-startup cost for zero gain.
+
+**Understanding which is which turns "why is my Python code slow?" from a mystery into a decision.** This is the chapter that lets you look at any workload and say — in the first ten seconds — "asyncio for this, multiprocessing for that, threading for that other one." Everything else in the chapter is why.
 
 </Motivation>
 
-<Intuition title="The one decision chart you actually need">
+<Intuition title="One decision chart that answers everything">
 
-- Is your workload **waiting on I/O** (network, disk, subprocess)? → `asyncio` if the library supports it, else `threading`.
-- Is your workload **CPU-bound in pure Python**? → `multiprocessing`.
-- Is your workload **CPU-bound in NumPy/PyTorch**? → *Don't* reach for concurrency in Python — the underlying C/BLAS libraries already use all your cores. Adding threads on top usually makes things slower.
+Before we go anywhere: memorize this decision tree. Three questions, in order.
 
-Everything else in this chapter is why.
+1. **Is your workload *waiting* on I/O — network, disk, a subprocess, a database?**
+   - Yes, and the library you're calling has an async version: → **`asyncio`**. Thousands of concurrent operations in one thread. This is the modern default for LLM APIs, RAG pipelines, and web servers.
+   - Yes, but the library only offers a sync interface (`requests`, sync `psycopg2`, legacy code): → **`threading`** (via `ThreadPoolExecutor`). Drop-in parallelism for existing sync code.
+
+2. **Is your workload *CPU-bound in pure Python*** — arithmetic, string parsing, tree traversal, all happening in Python bytecode?
+   - Yes: → **`multiprocessing`** (via `ProcessPoolExecutor`). Each process has its own Python interpreter and its own GIL, so N processes really use N cores.
+
+3. **Is your workload *CPU-bound but the actual work happens in NumPy, PyTorch, TensorFlow, or another C-level library?***
+   - Yes: → *Don't* reach for Python-level concurrency. NumPy/BLAS/CUDA already release the GIL internally and use all your cores. Wrapping them in threads or processes usually *slows things down* by adding coordination overhead.
+
+That is the entire chapter. Everything below is *why* these answers are correct.
 
 </Intuition>
 
 <Recall term="The Global Interpreter Lock (GIL)">
 
-CPython (the reference Python implementation) has a **single lock** — the GIL — that only lets one thread execute Python bytecode at a time. That means `threading` in CPython does NOT give you true parallelism for CPU-bound Python code. It *does* give you parallelism for I/O, because a thread waiting on a socket releases the GIL. This one fact explains 90% of "why is my threaded Python not faster?" questions. (Python 3.13 introduced an experimental *no-GIL* build. If you're running that, revisit these rules; otherwise the classic behavior applies.)
+CPython (the reference Python implementation) has a **single lock** — the GIL — that permits only one thread to execute Python bytecode at a time. That means `threading` in CPython does **not** give you true parallelism for CPU-bound pure-Python code: even with 16 threads on a 16-core machine, only one thread runs Python bytecode at any instant. Threads still context-switch, giving the *appearance* of concurrency, but not real speedup.
+
+However — and this is the whole reason `threading` still matters — a thread waiting on a socket, disk, or subprocess **releases the GIL** while it waits. So while thread A is blocked on `urlopen(url_1)`, thread B can grab the GIL and issue `urlopen(url_2)`. Ten threads waiting on the network can all be "in flight" simultaneously. This is why threads work great for I/O and terribly for CPU work.
+
+Python 3.13 introduced an experimental **no-GIL build** ("free-threaded Python"). If you're running that, revisit these rules; otherwise the classic behavior applies to the vast majority of Python code in production.
 
 </Recall>
 
-<Angles>
-  <Angle type="computational" title="threading — parallelism for waiting">
-    <RunnableCode title="threads on I/O" code={threadsCode} />
+<Recall term="Coroutine">
 
-    Five HTTP calls take ~5 seconds sequentially and ~1 second threaded. The GIL doesn't hurt here because `urllib.request.urlopen` blocks on the socket — Python releases the GIL while waiting, other threads run. Threads are perfect for embarrassingly-parallel I/O: crawling, hitting many APIs, reading many files.
+A **coroutine** is a function that can *pause itself in the middle of execution and be resumed later*. `async def` defines one in Python. Inside a coroutine, `await` on an awaitable pauses the coroutine and yields control to the event loop, which can run other coroutines while this one waits. When the awaited thing (a network response, a timer) is ready, the loop resumes this coroutine right where it paused.
+
+That "pause and resume" is what makes asyncio scale to tens of thousands of concurrent operations in one thread — nothing is truly running in parallel *inside Python* (there's just one thread), but everything is *concurrent* because the loop juggles them. Threads scale to hundreds at best because each OS thread has a 1–8 MB stack. Coroutines scale to hundreds of thousands because they're just Python objects.
+
+</Recall>
+
+<Recall term="Blocking vs non-blocking call">
+
+A **blocking call** is one that doesn't return control until its work is finished. `time.sleep(5)` blocks for 5 seconds. `requests.get(url)` blocks until the response arrives. `sock.recv(1024)` blocks until data is available. Inside an asyncio program, a single blocking call *freezes the entire event loop* — all your other coroutines are stuck too — because there's only one thread and it's inside the blocking call. This is the #1 performance foot-gun in async Python: someone imports `requests` inside an async handler, and suddenly the server latency triples during peak because every request-fetch is blocking the loop.
+
+The rule: **inside async code, use async libraries.** `httpx` instead of `requests`. `aiofiles` instead of `open`. `asyncpg`/`aiomysql` instead of sync DB drivers. If you *must* call a blocking library, wrap it: `await asyncio.to_thread(blocking_fn, args)` — this runs the blocking call in a thread pool so the event loop isn't stuck.
+
+</Recall>
+
+<Angles intro={<>Four angles on Python concurrency. Each isolates one flavor — threading for I/O, asyncio for I/O at scale, multiprocessing for CPU work, and the friendly unified `concurrent.futures` interface — and shows exactly when to reach for it.</>}>
+
+  <Angle type="computational" title="threading — parallelism for *waiting*">
+    <RunnableCode title="threads on I/O + a ThreadPoolExecutor variant" code={threadsCode} />
+
+    Five HTTP calls take ~5 seconds sequentially and ~1 second threaded. The GIL doesn't hurt here because `urllib.request.urlopen` blocks on the socket — Python releases the GIL while waiting, other threads pick it up, all five requests fly in parallel from the network's point of view. Threads are perfect for embarrassingly-parallel I/O: crawling, hitting many APIs, reading many files, running multiple subprocess calls.
+
+    The `ThreadPoolExecutor` (via `concurrent.futures`) is a friendlier API than raw `threading.Thread`. It manages a pool of worker threads, handles exception propagation cleanly, and gives you a familiar `.map(...)` interface. In modern Python code, **prefer `ThreadPoolExecutor` over manual `threading.Thread`** unless you have a specific reason.
+
+    **When threading breaks down:** if the number of concurrent I/O operations exceeds a few hundred, thread creation and OS scheduling become the bottleneck. At that scale, switch to asyncio (thousands of coroutines in one thread) — same wall-clock behavior for I/O-bound work, radically lower overhead.
+
   </Angle>
 
-  <Angle type="computational" title="asyncio — cooperative single-thread I/O">
-    <RunnableCode title="asyncio.gather" code={asyncCode} />
+  <Angle type="algebraic" title="asyncio — cooperative single-thread I/O at scale">
+    <RunnableCode title="asyncio.gather — three tasks concurrent in one thread" code={asyncCode} />
 
-    `asyncio` gives you the same speedup as threads for I/O, without the overhead of OS threads. The trick: `await` is a *cooperative yield point*. When one coroutine hits `await`, the event loop runs another. This scales to **10,000+ concurrent operations** in a single thread — a place threads can't reach because each OS thread costs a few MB of stack.
+    `asyncio` gives you the same wall-clock speedup as threads for I/O-bound work, **without any threads at all.** The magic is `await`. When a coroutine hits `await asyncio.sleep(2)`, it doesn't literally sleep — it says "I'll be ready in 2 seconds; loop, please run something else in the meantime." The event loop pops the coroutine from the "running" queue and puts it in the "waiting for timer" queue. Two seconds later the timer fires; the loop moves the coroutine back to "running" and resumes it. All in one thread.
 
-    Rule: everything in the chain must be `async`. Mixing sync I/O into an asyncio program is the #1 performance foot-gun.
+    Three practical rules that separate asyncio wins from asyncio pain:
+
+    1. **Everything in the chain must be async.** If any coroutine calls a sync blocking function, the whole loop freezes. `httpx` instead of `requests`. `asyncpg` instead of `psycopg2`. If forced to call sync code, use `await asyncio.to_thread(sync_fn, arg)` to escape to a thread pool.
+
+    2. **`asyncio.gather(*coros)` is your `for` loop.** It launches all the passed coroutines concurrently and returns the list of results. Exceptions in any coroutine cancel the rest (unless `return_exceptions=True`).
+
+    3. **`asyncio.Semaphore(n)` limits concurrency.** Without it, `gather` of 10,000 coroutines will all try to run at once, likely getting rate-limited or overwhelming the server. Wrap each worker in `async with sem:` and only `n` will run concurrently.
+
+    Scale: threads top out at ~1000 concurrent operations. Asyncio scales to **hundreds of thousands** because coroutines are cheap Python objects, not OS threads with megabyte-sized stacks. Every modern LLM pipeline, every RAG system, every FastAPI server uses asyncio for this reason.
+
   </Angle>
 
-  <Angle type="computational" title="multiprocessing — real parallelism for real CPU work">
-    <RunnableCode title="ProcessPoolExecutor for primes" code={poolCode} />
+  <Angle type="physical" title="An asyncio pattern you'll write forever — semaphore + gather">
+    <RunnableCode title="rate-limited concurrent API calls" code={asyncPatternCode} />
 
-    Each process has its own Python interpreter and its own GIL. So 4 processes = 4 cores. This is how you actually get parallel *pure-Python* CPU work. Downsides: each process has memory overhead (100+ MB for a NumPy import), and passing data between processes requires serialization (pickling). If your task is small, the overhead can dwarf the gain.
+    This is the pattern behind every "embed 10,000 documents" script, every "query 500 LLM endpoints for a benchmark" runner, every RAG bulk-ingest. Read it once and you'll write it many times.
 
-    Sweet spot: CPU-heavy tasks that operate on chunks of independent data and produce small results. Bad fit: shared large arrays (use `multiprocessing.shared_memory` for that).
+    The `Semaphore(5)` says "at most 5 embed calls in flight at any moment." Each `worker(text)` does `async with sem:` at its top — this acquires a semaphore slot before making the call and releases it on exit. `asyncio.gather(*(worker(t) for t in texts))` launches all 20 workers, but only 5 are actually running the API call at any moment; the rest are waiting on the semaphore.
+
+    **Why this pattern is a load-bearing part of every LLM app:** hitting a rate-limited API without a semaphore fails immediately (`429 Too Many Requests`). With just a semaphore, throughput is capped at your concurrency limit. With **semaphore + retry + backoff** (from the errors-testing chapter), your app becomes throughput-optimal *and* resilient. Every serious LLM SDK ships this combination.
+
+    **Alternative: `asyncio.as_completed(coros)`** yields coroutines as they finish (not in submission order). Useful when you're processing results in a streaming way and want the fast ones first.
+
+    **`asyncio.TaskGroup`** (Python 3.11+) is the modern replacement for raw `asyncio.gather`. It provides *structured concurrency* — all child tasks are guaranteed to complete or fail together, with clean grouped exception handling. Reach for `TaskGroup` in new code; `gather` is fine for existing code and quick scripts.
+
   </Angle>
 
-  <Angle type="code" title="concurrent.futures — the friendly interface">
+  <Angle type="code" title="multiprocessing — real parallelism for real CPU work">
+    <RunnableCode title="ProcessPoolExecutor for prime checks" code={poolCode} />
+
+    Each `multiprocessing` worker is a **separate Python process** — separate interpreter, separate memory, separate GIL. So 4 processes on a 4-core machine really run 4 CPU-bound Python jobs in parallel. This is how you get true speedup from *pure-Python* CPU work.
+
+    Downsides you must budget for:
+
+    - **Startup cost.** Each process has to boot a fresh Python interpreter (~50–150 ms on modern hardware, more on macOS since `spawn` became the default). Pool creation is not free; use it for work that takes seconds, not milliseconds.
+    - **Memory overhead.** Each worker imports its own libraries. If your main program imports NumPy/PyTorch/pandas, each worker will too — potentially 100+ MB each just at startup.
+    - **Serialization cost.** Data crosses process boundaries via `pickle`. Sending a 1 GB DataFrame to a worker means 1 GB of pickling, IPC, and unpickling. For very large data, use `multiprocessing.shared_memory` or a memory-mapped file to skip the copy.
+    - **No shared state.** You can't mutate a dict in one worker and have another worker see it. Use `multiprocessing.Queue`, `Manager()`, or (better) design your work to be embarrassingly parallel — each worker gets independent input and returns independent output.
+
+    **The sweet spot:** CPU-heavy Python tasks that operate on chunks of *independent* data and produce small results. Feature engineering loops. Custom scoring functions. Cryptographic hashing. Ad-hoc simulations. **The bad fit:** any task where the actual computation is in NumPy/PyTorch/BLAS — those libraries already parallelize internally, and processes just add coordination overhead.
+
+  </Angle>
+
+  <Angle type="probabilistic" title="`concurrent.futures` — the friendly unified interface">
     Both threads and processes have a unified high-level API in `concurrent.futures`:
 
-    <CodeBlock language="python" title="ThreadPoolExecutor / ProcessPoolExecutor" code={`from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+    <CodeBlock language="python" title="ThreadPoolExecutor / ProcessPoolExecutor — same shape" code={`from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 
-# I/O bound: threads
-with ThreadPoolExecutor(max_workers=8) as pool:
-    for result in pool.map(fetch, urls):
+# I/O-bound → threads
+with ThreadPoolExecutor(max_workers=16) as pool:
+    for result in pool.map(fetch_url, urls):
         handle(result)
 
-# CPU bound: processes
+# CPU-bound → processes
 with ProcessPoolExecutor(max_workers=4) as pool:
-    for result in pool.map(cpu_heavy, chunks):
-        handle(result)`} />
+    for result in pool.map(is_prime, big_numbers):
+        handle(result)
 
-    This is often the *right* place to start — it hides Thread/Process construction, handles exceptions cleanly, and lets you swap between them by changing one class name.
+# Non-blocking submit: get a Future you can query
+with ThreadPoolExecutor() as pool:
+    futures = [pool.submit(fetch_url, u) for u in urls]
+    for f in futures:
+        if f.done():
+            print(f.result())`} />
+
+    This is usually the **right place to start**. It hides the raw thread/process construction, handles exception propagation cleanly (exceptions inside workers are raised on the main thread when you call `.result()`), and lets you swap between them by changing one class name. `.map` for embarrassingly-parallel workloads. `.submit(...)` when you want to interact with individual futures.
+
+    Rule of thumb: for I/O at low-to-medium concurrency (a few dozen simultaneous requests, using sync libraries), use `ThreadPoolExecutor`. For CPU-bound pure-Python work, use `ProcessPoolExecutor`. Only reach for asyncio when concurrency is high or the whole codebase is already async.
+
   </Angle>
+
 </Angles>
 
 <Convergence>
 
-Three tools, one decision. I/O → asyncio (best when library supports it) or threading (when it doesn't). CPU → multiprocessing. NumPy-heavy → let NumPy handle it. The rest of your career you'll answer *"is this I/O-bound or CPU-bound?"* first and pick the tool second.
+Three tools, one decision. **I/O-bound** → asyncio (best when libraries support it, scales to 100k+ concurrent ops) or threading (when they don't). **CPU-bound pure Python** → multiprocessing (each process has its own GIL). **NumPy/PyTorch/BLAS-heavy** → let those libraries handle it; adding Python-level concurrency usually makes things slower. The rest of your career you'll answer *"is this I/O-bound or CPU-bound?"* first and pick the tool second. Miss that first question and no tool will make the code fast.
 
 </Convergence>
 
+<Derivation title="What happens when you `await` a coroutine">
+
+`await` is not magic. It's a well-defined interaction between the coroutine and the event loop. Trace it step by step and asyncio stops being mysterious.
+
+<Step n={1} math={<span>Python encounters <code>await something</code> inside a coroutine.</span>}>
+`something` must be an *awaitable* — a coroutine (from an `async def` call), a Task, or a Future. Python calls the awaitable's `__await__()` method, which returns an iterator.
+</Step>
+
+<Step n={2} math={<span>The current coroutine <em>suspends</em>. Its state is saved.</span>}>
+Python pushes the coroutine's stack frame onto a suspended state and returns control to the event loop. All local variables, the exact line, the pending exception state — all preserved. This is what "pause and resume" means at the byte-code level.
+</Step>
+
+<Step n={3} math={<span>The event loop looks at its queues and picks another ready coroutine to run.</span>}>
+The loop maintains a queue of "ready" coroutines (ones that can make progress now) and various "waiting" queues (for timers, for I/O readiness, for external events). It pops from ready, resumes it, and runs until it either yields or completes.
+</Step>
+
+<Step n={4} math={<span>When the awaited thing becomes ready — timer expires, socket has data, Future is done — the loop moves the original coroutine back to "ready".</span>}>
+For `await asyncio.sleep(N)`, the loop set a timer for N seconds; when the timer fires, this coroutine is ready again. For `await sock.recv()`, the loop registered the socket with `select`/`epoll`; when the OS says "socket has data", this coroutine is ready. This is why asyncio doesn't need OS threads — the OS's own I/O readiness machinery does the multiplexing.
+</Step>
+
+<Step n={5} math={<span>The loop eventually resumes the original coroutine, right after the <code>await</code> — with the awaited value bound to the left-hand side of <code>=</code>.</span>}>
+`x = await some_coro()` becomes: suspend, wait, resume with `x` set to the coroutine's return value. From the coroutine's perspective, the `await` was a normal function call that took some time. From the loop's perspective, it juggled many things in that "some time."
+</Step>
+
+<Step n={6} math={<span>If <em>anywhere</em> in that chain a synchronous blocking call happens, the whole loop is stuck.</span>}>
+Because there's only one thread, and the loop's turn to run depends on the coroutine returning control via `await`. A `time.sleep(5)` inside an async function is 5 seconds where *no other coroutine can run*, no I/O can be processed, no timer can fire. This is why the "async everywhere" rule matters so much — one wrong call and your 10,000-concurrent-request server becomes a 1-request-per-5-seconds server.
+</Step>
+
+</Derivation>
+
+<Example title="The decision chart in code">
+
+<RunnableCode title="four workloads, four correct answers" code={decisionCode} />
+
+Read the cell as a reference card. Each function represents one workload type. The comment tells you the flavor. The body uses the appropriate tool. **This is the decision you'll make dozens of times a year**, so it's worth committing to memory:
+
+- **RAG pipeline** — sequence of network calls, all libraries async → asyncio.
+- **Web scraping with legacy `requests`** — network I/O but library is sync → threading pool.
+- **File hashing at scale** — CPU-bound in pure Python → multiprocessing pool.
+- **Deep-learning training step** — CPU-bound but work is in PyTorch's C++/CUDA kernels → no Python concurrency, let the library handle it.
+
+Get the *first* question — I/O vs CPU — right and the rest falls out.
+
+</Example>
+
 <Nuance>
 
-**Race conditions.** When threads share mutable state — a counter, a dict, a list — they can interleave badly and produce wrong answers. Use `threading.Lock`, `queue.Queue`, or immutable data. asyncio avoids this because there's only ever one coroutine running at a time (until it hits an `await`).
+**Race conditions.** When threads share mutable state — a counter, a dict, a list — they can interleave badly and produce wrong answers. Use `threading.Lock`, `queue.Queue`, or immutable data. asyncio avoids most races because there's only ever one coroutine running at a time (until it hits an `await`), but two coroutines can still interleave *around* awaits, so state changes across await points need care.
 
-**Async everywhere.** Once you go async, every I/O call in the same task must be async, or you'll block the whole event loop. Use `httpx` (async), not `requests`. Use `aiofiles`, not builtin `open()` for large files. Use async database drivers, not sync ones.
+**Async everywhere.** Once you go async, every I/O call in the same task must be async, or you'll block the whole event loop. Use `httpx` (async), not `requests`. Use `aiofiles`, not builtin `open()` for large files inside async code. Use async database drivers (`asyncpg`, `aiosqlite`), not sync ones. If you *must* call sync code, wrap in `await asyncio.to_thread(sync_fn, arg)`.
 
-**Structured concurrency.** Modern Python (3.11+) has `asyncio.TaskGroup` and third-party `anyio` for *structured* concurrency — child tasks that always finish before the parent, with grouped exception handling. Reach for these instead of raw `asyncio.gather` when a task might raise and you need clean shutdown.
+**Structured concurrency.** Modern Python (3.11+) has `asyncio.TaskGroup` and third-party `anyio` for structured concurrency — child tasks that always finish before the parent, with grouped exception handling. Reach for these instead of raw `asyncio.gather` when a task might raise and you need clean shutdown. `TaskGroup` also propagates exceptions properly: if any child fails, all siblings are cancelled and the exceptions are re-raised together.
 
-**Multiprocessing on macOS.** Since 3.8, the default start method is `spawn`, which is slow to boot. If you're launching lots of short pool tasks, batch them into a smaller number of longer ones.
+**Multiprocessing on macOS.** Since Python 3.8, the default start method on macOS is `spawn`, which is slow to boot but safer than the older `fork` (which had issues with libraries that had already forked threads). If you're launching lots of short pool tasks, batch them into a smaller number of longer ones so you amortize the startup cost.
 
-**Don't nest event loops.** Calling `asyncio.run()` from inside an already-running loop errors. In a notebook or FastAPI handler, use `await` directly.
+**Don't nest event loops.** Calling `asyncio.run()` from inside an already-running loop errors. In a Jupyter notebook or FastAPI handler, use `await` directly. `asyncio.run` is only for the *top* of a program, not inside coroutines.
+
+**Cancellation.** `task.cancel()` sends a `CancelledError` into the coroutine at its next await point. Handle it with `try/except CancelledError` if you need cleanup, then re-raise (never swallow — that breaks structured concurrency).
+
+**`asyncio.wait_for(coro, timeout)`** wraps a coroutine with a timeout. Essential for calls to external services that might hang forever.
+
+**`concurrent.futures.Future` vs `asyncio.Future`.** They're different objects with different APIs. If you need to bridge, use `asyncio.wrap_future(concurrent_future)` to await a threading Future from async code.
+
+**Debugging asyncio.** Set `PYTHONASYNCIODEBUG=1` (or `asyncio.run(..., debug=True)`) to enable slow-callback warnings — you'll get a log message when a coroutine blocks for too long. Life-saver for finding accidental blocking calls.
+
+**GIL-free Python.** The 3.13 free-threaded build ("no-GIL Python") is real and shipping. In that build, `threading` gives you actual parallelism for CPU-bound Python code too. It's still opt-in and libraries are still being audited for thread safety; the default builds still have the GIL as of 2026. Watch this space — it will change how this chapter reads within a few years.
 
 </Nuance>
 
+<RealWorldML title="An async RAG pipeline — every load-bearing pattern in one script">
+
+Here's what a production RAG (Retrieval-Augmented Generation) pipeline looks like — the pattern behind every "chat with your docs" application. It combines every asyncio idiom worth knowing: gather for parallel I/O, semaphores for rate-limiting, timeouts, TaskGroup for structured concurrency, and typed exceptions for error handling.
+
+<RunnableCode title="an async RAG pipeline sketch" code={`import asyncio, random, time
+
+class ServiceError(RuntimeError):
+    """An external service call failed after retries."""
+
+# --- fake service clients (in production these hit real APIs)
+async def embed(text: str) -> list[float]:
+    await asyncio.sleep(random.uniform(0.02, 0.15))
+    return [len(text)]
+
+async def vector_search(query_vec: list[float], k: int = 3) -> list[str]:
+    await asyncio.sleep(random.uniform(0.03, 0.1))
+    return [f"doc-{i}" for i in range(k)]
+
+async def fetch_doc(doc_id: str) -> str:
+    await asyncio.sleep(random.uniform(0.05, 0.25))
+    return f"body of {doc_id}"
+
+async def call_llm(prompt: str) -> str:
+    await asyncio.sleep(random.uniform(0.5, 1.0))
+    return f"answer to: {prompt[:60]}..."
+
+# --- the pipeline: bounded concurrency + timeouts + structured concurrency
+async def answer_one(query: str, sem: asyncio.Semaphore) -> str:
+    """Answer a single query. Uses the semaphore to cap concurrent LLM calls."""
+    try:
+        q_vec = await asyncio.wait_for(embed(query), timeout=2.0)
+        doc_ids = await asyncio.wait_for(vector_search(q_vec, k=3), timeout=2.0)
+        # fetch the k doc bodies in parallel
+        bodies = await asyncio.gather(*(fetch_doc(d) for d in doc_ids))
+        prompt = f"Q: {query}\\nContext:\\n" + "\\n".join(bodies)
+        async with sem:                          # rate-limit LLM concurrency
+            return await asyncio.wait_for(call_llm(prompt), timeout=10.0)
+    except asyncio.TimeoutError as e:
+        raise ServiceError(f"timeout on query: {query!r}") from e
+
+async def answer_many(queries: list[str], llm_concurrency=3):
+    """Answer many queries, but never more than llm_concurrency LLM calls in flight."""
+    sem = asyncio.Semaphore(llm_concurrency)
+    async with asyncio.TaskGroup() as tg:
+        tasks = [tg.create_task(answer_one(q, sem)) for q in queries]
+    return [t.result() for t in tasks]
+
+async def main():
+    queries = [f"what is topic {i}?" for i in range(8)]
+    t = time.perf_counter()
+    answers = await answer_many(queries)
+    print(f"answered {len(answers)} queries in {time.perf_counter()-t:.2f}s")
+    for a in answers[:3]:
+        print("  ->", a)
+
+asyncio.run(main())`} />
+
+**Line by line, why this is a genuine production shape:**
+
+1. **`embed`, `vector_search`, `fetch_doc`, `call_llm`** are the four canonical steps of any RAG pipeline. In production they hit external services (OpenAI/Anthropic embeddings API, Pinecone/Weaviate/pgvector, S3/CDN, LLM API). All are I/O-bound. All are wrapped in `async def`.
+
+2. **`answer_one(query, sem)`** is one query's whole journey. Notice `asyncio.wait_for(...)` around every external call — hard timeouts prevent hung requests from freezing your whole pipeline. `asyncio.gather(*(fetch_doc(d) for d in doc_ids))` fetches all the retrieved documents *in parallel* — this alone saves several hundred milliseconds versus a sequential fetch loop.
+
+3. **`async with sem:` around the LLM call.** The LLM API is expensive and rate-limited. The semaphore ensures at most `llm_concurrency` LLM calls are in flight at any moment, regardless of how many queries are being answered. Without this, a burst of 100 queries would all hit the LLM API simultaneously and get rate-limited.
+
+4. **`asyncio.TaskGroup`** wraps all the concurrent `answer_one` calls in structured concurrency. If any query fails (with `ServiceError` from a timeout), all sibling queries are cancelled, and the exceptions are grouped and raised together at the `async with` exit. No orphan tasks, no partial results, no cleanup bugs.
+
+5. **`ServiceError`** is a domain-typed exception — a caller can `except ServiceError:` specifically and, say, fall back to a cached answer, without hiding unrelated bugs.
+
+**Where you'll see this exact shape:** LangChain's async `Runnable` pipelines, LlamaIndex's async retrieval, every commercial LLM app's inference backend. The pattern is stable because the problem is stable — I/O-bound calls to expensive rate-limited services with strict latency budgets.
+
+</RealWorldML>
+
 <CodeItYourself
   title="Rate-limited async downloader"
-  spec={<>Write an async function <code>download_all(urls, concurrency=10)</code> that fetches all URLs concurrently but with at most <code>concurrency</code> in flight at once. (Hint: <code>asyncio.Semaphore</code>.) Return the list of response bodies in the same order as the input URLs.</>}
+  spec={<>Write an async function <code>download_all(urls, concurrency=10, timeout=5.0)</code> that fetches all URLs concurrently but with at most <code>concurrency</code> in flight at once. Each individual fetch has a <code>timeout</code>-second timeout. Return the list of response bodies in the same order as the input URLs. Failed fetches (timeout, HTTP error) should produce <code>None</code> in the result list — don't let one failure stop the others.</>}
   hints={[
-    "Semaphore(n) allows n coroutines past `async with sem:` at a time.",
-    "Use asyncio.gather to collect results — it preserves order.",
-    "Wrap each fetch in a coroutine that acquires the semaphore before making the request."
+    "asyncio.Semaphore(n) allows n coroutines past `async with sem:` at a time.",
+    "Use asyncio.gather with return_exceptions=True to capture exceptions per task, then map exceptions to None.",
+    "Or wrap each per-URL coroutine in try/except and return None on failure.",
+    "For real HTTP you'd use httpx.AsyncClient(); the solution uses a stub to stay Pyodide-runnable."
   ]}
-  solution={<CodeBlock language="python" title="download_all" code={`import asyncio
-import httpx
+  solution={<CodeBlock language="python" title="download_all" code={`import asyncio, random
 
-async def download_all(urls, concurrency=10):
+async def _fetch(url: str) -> str:
+    # In real code: async with httpx.AsyncClient() as client: return (await client.get(url)).text
+    await asyncio.sleep(random.uniform(0.05, 0.4))
+    if random.random() < 0.1:                # 10% failure rate for demo
+        raise RuntimeError(f"transient failure for {url}")
+    return f"body of {url}"
+
+async def download_all(urls, concurrency=10, timeout=5.0):
     sem = asyncio.Semaphore(concurrency)
-    async with httpx.AsyncClient() as client:
-        async def fetch(u):
-            async with sem:
-                r = await client.get(u)
-                return r.text
-        return await asyncio.gather(*(fetch(u) for u in urls))
 
-# usage: asyncio.run(download_all(urls, concurrency=20))`} />}
+    async def one(url):
+        async with sem:
+            try:
+                return await asyncio.wait_for(_fetch(url), timeout=timeout)
+            except (asyncio.TimeoutError, RuntimeError):
+                return None
+
+    return await asyncio.gather(*(one(u) for u in urls))
+
+# usage
+urls = [f"https://example.com/doc/{i}" for i in range(20)]
+results = asyncio.run(download_all(urls, concurrency=5, timeout=1.0))
+print(f"succeeded: {sum(r is not None for r in results)}/{len(results)}")`} />}
 />
 
+<LifeLesson title="Wait in parallel, work in parallel, know the difference">
+
+The mental model this chapter installs is worth carrying far past Python. **There are two kinds of "busy" — waiting-busy and working-busy — and they respond to completely different remedies.**
+
+Waiting-busy is what you do most of the day, in code and in life. You're waiting on the API. You're waiting on the compile. You're waiting on the response to the email. In life: you're waiting on the reply, waiting on the delivery, waiting on the meeting. The remedy for waiting-busy is *do more things in parallel* — start the next task instead of watching the previous one — precisely what asyncio and threading do for code. The bottleneck is not throughput; it's *serialization of things that could have been concurrent*.
+
+Working-busy is what you do when the CPU is actually pegged. You're compiling. You're computing. You're actually reading, writing, deciding. The remedy for working-busy is *do fewer things* — because you can't parallelize thought the way you parallelize network calls. In life this is what "deep work" means. The bottleneck isn't concurrency; it's *contention on a single resource that can't be duplicated*. If you're really working-busy on task A and start task B in parallel, both tasks slow down. That's not asyncio; that's multiprocessing, and the "process" here is your attention.
+
+The design mistake in code is confusing them — threading a CPU-bound workload doesn't help. The design mistake in life is confusing them too — multi-tasking during deep work makes you slower at both. The people who look like they get twice as much done know this instinctively: **they aggressively parallelize waiting, and aggressively serialize working.** They batch emails and Slack (waiting) while they're already waiting for something else. They ruthlessly protect focus blocks (working) with no interruptions. Same principle as this chapter, applied outside code.
+
+Every time you feel busy, ask: *is this waiting or working?* The answer changes what you should do next.
+
+</LifeLesson>
+
+<MLConnection>
+
+Concurrency is load-bearing infrastructure in every ML system that touches the real world:
+
+- **Data loaders** use worker *processes* (PyTorch `DataLoader(num_workers=N)`) to preprocess batches in parallel — CPU-bound work (image decoding, tokenization, augmentation) done off the GPU's critical path so the GPU never idles.
+- **LLM inference APIs** are async top-to-bottom. Every OpenAI/Anthropic/HuggingFace SDK offers `async` client methods precisely because typical usage is many concurrent requests, each I/O-bound.
+- **RAG pipelines** and **agent frameworks** (LangChain, LlamaIndex, LangGraph) are async by default. The pattern in the RealWorldML section — semaphore + gather + TaskGroup + typed exceptions — is a real production shape.
+- **Distributed training** (`torch.distributed`, DeepSpeed, FSDP) is technically multiprocessing across GPUs/nodes, but with heavy library support. You rarely write `multiprocessing.Pool` for this — the frameworks abstract it.
+- **Serving frameworks** (`vllm`, `tgi`, Ray Serve, FastAPI+uvicorn) use asyncio to handle many concurrent inference requests per worker, plus multiprocessing across workers to fill all CPU cores.
+- **Retry-with-backoff decorators** wrap every external service call in production ML pipelines — from the errors-testing chapter, combined with asyncio in this chapter. Standard shape.
+- **NumPy/PyTorch/BLAS-heavy training loops** rarely wrap in Python-level concurrency because the underlying kernels already parallelize. Instead, batch size and pipeline-stage overlap (mixed-precision, gradient accumulation) are the levers. This chapter's "don't wrap NumPy in threads" rule is why you don't see many `ThreadPoolExecutor` calls in production training code.
+- **Notebook UI freezing.** If you've ever hit Ctrl-C in a Jupyter notebook and had it not respond, you likely wrote sync code in an async context. Understanding this chapter is the fix.
+
+Concurrency is not the exciting part of ML — it's the plumbing that makes the exciting parts possible.
+
+</MLConnection>
+
 <Summary bullets={[
-  "GIL = one thread of Python bytecode at a time in CPython.",
-  "I/O-bound → asyncio (many thousands of tasks) or threading (drop-in with sync libraries).",
-  "CPU-bound pure Python → multiprocessing (each process has its own GIL).",
-  "NumPy/torch already use all your cores at the C level — don't wrap them in threads.",
-  "`concurrent.futures` gives a unified API for both thread and process pools."
+  "GIL = one thread of Python bytecode at a time in CPython. Threads still work for I/O because waiting releases the GIL.",
+  "I/O-bound → asyncio (best when library supports it, scales to 100k+ concurrent ops) or threading (for sync libraries, up to ~1k).",
+  "CPU-bound pure Python → multiprocessing (each process has its own interpreter and its own GIL).",
+  "NumPy/PyTorch/BLAS already use all your cores at the C level — don't wrap them in threads or processes.",
+  "asyncio: `async def` + `await`; `asyncio.gather` for parallel; `asyncio.Semaphore(n)` for rate-limiting; `asyncio.TaskGroup` for structured concurrency.",
+  "Async foot-gun: one sync blocking call freezes the whole loop. Use async libs or `asyncio.to_thread(...)` to escape.",
+  "`concurrent.futures` gives a unified API for both thread and process pools — the friendliest starting point.",
+  "Every LLM pipeline you write will have: semaphore + gather + wait_for + retry — memorize the shape."
 ]} />
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>You have a Python function <code>hash_file(path)</code> that reads a file and computes its SHA-256. You have 8 CPU cores and 500 files. Which concurrency tool speeds it up closest to 8×?</>,
+      hint: <>File I/O plus pure-Python hashing. Which is the bottleneck?</>,
+      answer: <>Depends on where the time actually goes. If most time is disk I/O, threading helps (and 8 threads on a fast NVMe likely won't be 8× because you're bottlenecked by disk, not CPU). If most time is the hashing itself (large files, small disk read), then multiprocessing wins (each process bypasses the GIL). Real answer: try both and measure. In practice, `hashlib.sha256` releases the GIL during its C-level work, so threading actually helps for CPU-bound hashing too — one of the few cases where threading gives real parallelism for what looks like CPU work. Multiprocessing still tends to be safer and faster for pure-Python hashing (e.g., a custom hash implemented in Python).</>
+    },
+    {
+      difficulty: "easy",
+      q: <>Predict output: <br/><code>async def f():</code><br/><code>&nbsp;&nbsp;&nbsp;&nbsp;return 42</code><br/><code>x = f()</code><br/><code>print(x)</code></>,
+      hint: <>Calling an async function returns a coroutine, not the result.</>,
+      answer: <>Prints something like <code>&lt;coroutine object f at 0x...&gt;</code>. Calling <code>f()</code> does NOT execute the body — it returns a coroutine object. You need <code>await f()</code> (inside another async function) or <code>asyncio.run(f())</code> (at the top level) to actually run it and get 42. Python will also emit a warning: "coroutine was never awaited". This is the #1 asyncio surprise for newcomers.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>Why does <code>time.sleep(5)</code> inside an async function break asyncio?</>,
+      hint: <>`time.sleep` is synchronous — it blocks the thread.</>,
+      answer: <>`time.sleep` is a synchronous, blocking call — it stops the whole Python thread for 5 seconds. In an asyncio program there's only ONE thread, and that thread is the event loop. `time.sleep(5)` inside async means the entire event loop is frozen for 5 seconds: no other coroutines can run, no I/O can be processed, no timers can fire. Use <code>await asyncio.sleep(5)</code> instead — that yields control back to the loop, which can run other tasks during those 5 seconds.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Explain what <code>asyncio.Semaphore(5)</code> does inside an async function. Show a minimal usage pattern with `async with`.</>,
+      hint: <>It's a counting gate that lets N concurrent tasks pass.</>,
+      answer: <><CodeBlock language="python" title="usage" code={`sem = asyncio.Semaphore(5)
+
+async def worker(url):
+    async with sem:              # blocks until a slot is available
+        return await fetch(url)
+
+results = await asyncio.gather(*(worker(u) for u in urls))`} /> The semaphore is initialized with a count. Each <code>async with sem:</code> decrements the count on entry, waits if the count is zero (some other worker holds all slots), and increments the count on exit. Result: at most 5 workers can be inside the <code>async with</code> body at any moment. This is the standard pattern for rate-limiting concurrent access to a shared resource (an API, a database connection pool, a filesystem).</>
+    },
+    {
+      difficulty: "medium",
+      q: <>You're writing a script that hits 10,000 URLs. Rank the following by wall-clock speed (fastest to slowest), assuming all libraries have async versions: (a) sequential for loop, (b) asyncio.gather with no limit, (c) asyncio.gather with Semaphore(50).</>,
+      hint: <>Rate limits, server throttling, and thundering herd all matter.</>,
+      answer: <>(c) &gt; (b) &gt; (a) in <em>practice</em>. Sequential (a) is the slowest — 10,000 sequential requests at 100ms each is 17 minutes. Uncapped gather (b) is <em>theoretically</em> the fastest — all 10,000 requests in flight simultaneously — but in reality the server rate-limits you, your OS runs out of sockets, TCP handshakes fail, and the actual throughput is worse than (c). Semaphore-capped gather (c) is the sweet spot — throughput matches what the server can handle, no thundering herd, no socket exhaustion, and total time is roughly <code>(10,000 / 50) × per-request-latency</code> ≈ 20 seconds. This is why every production script uses semaphores.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Explain why <code>ProcessPoolExecutor().map(fn, data)</code> can be *slower* than a sequential for loop when <code>data</code> is very small or <code>fn</code> is very fast.</>,
+      hint: <>Setup and IPC costs.</>,
+      answer: <>Multiprocessing has three costs that don't exist in a sequential loop: (1) process startup — spawning a new Python interpreter is expensive (50-150 ms per worker), (2) data serialization — arguments must be pickled to send them to the worker and unpickled on arrival, and (3) IPC — the pipe or socket between master and worker adds latency per call. If `fn` runs in a few microseconds and the data is small, the overhead of shipping the work over dwarfs the actual computation. Rule of thumb: multiprocessing wins only when each task takes at least a few tens of milliseconds. For faster work, batch multiple items per call, or use threading (no serialization needed).</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Design an async function <code>race(coros, timeout)</code> that runs several coroutines concurrently and returns the result of the first one to finish, cancelling the rest. If none finish within timeout, raise <code>asyncio.TimeoutError</code>.</>,
+      hint: <>asyncio.wait with FIRST_COMPLETED, then cancel pending tasks.</>,
+      answer: <><CodeBlock language="python" title="race" code={`async def race(coros, timeout: float):
+    tasks = [asyncio.create_task(c) for c in coros]
+    try:
+        done, pending = await asyncio.wait(
+            tasks, timeout=timeout, return_when=asyncio.FIRST_COMPLETED
+        )
+        if not done:
+            raise asyncio.TimeoutError(f"no coroutine finished within {timeout}s")
+        # got a winner — cancel the losers, return the winner's result
+        for p in pending:
+            p.cancel()
+        return done.pop().result()
+    finally:
+        # cleanup: any still-pending tasks get cancelled and awaited
+        for t in tasks:
+            if not t.done():
+                t.cancel()
+                try:
+                    await t
+                except (asyncio.CancelledError, Exception):
+                    pass`} /> Notice the discipline: <code>asyncio.wait(..., return_when=FIRST_COMPLETED)</code> gives you the winner as soon as one finishes; you cancel the rest; the <code>finally</code> ensures cleanup even if the outer code errors. This is the standard shape of "hedged" requests in production systems — send the query to two backends, take whichever answers first, cancel the slower one.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>You have a function <code>process(chunk)</code> that takes ~100ms and is CPU-bound in Python (parsing text, no NumPy). You have a million chunks to process on an 8-core machine. Sketch three implementations and rank them: (a) sequential, (b) ThreadPoolExecutor(max_workers=8), (c) ProcessPoolExecutor(max_workers=8) with batching.</>,
+      hint: <>Consider the GIL, the startup cost, and the batching.</>,
+      answer: <>(c) &gt; (a) &gt; (b) is the likely ranking. **Sequential (a):** 1M × 100ms = 27 hours. **Threads (b):** ~27 hours <em>still</em> — the GIL means only one thread runs Python bytecode at a time, and there's no I/O to yield the GIL on. Threads don't help pure Python CPU-bound work. **Processes with batching (c):** the naive `ProcessPoolExecutor(8).map(process, chunks)` pays IPC cost per chunk (a million times) — could be worse than sequential. But if you <em>batch</em>, e.g. `pool.map(process_batch, [chunks[i:i+1000] for i in range(0, len(chunks), 1000)])`, you pay IPC once per 1000 chunks and get near-8× speedup: ~3.5 hours. This is the actual pattern used in ML feature engineering. Also try `multiprocessing.Pool.imap_unordered(process, chunks, chunksize=1000)` — same effect, one line. **The lesson:** processes are the right tool but their startup and IPC cost has to be amortized over enough work per call.</>
+    },
+  ]}
+/>
 
 <Quiz items={[
   {
@@ -206,7 +618,7 @@ async def download_all(urls, concurrency=10):
       { text: "The entire event loop blocks for 2 seconds", correct: true },
       { text: "Python raises SyntaxError" },
     ],
-    explanation: <>`time.sleep` is synchronous — it blocks the thread the loop is on. Use <code>await asyncio.sleep(2)</code> to sleep cooperatively.</>
+    explanation: <><code>time.sleep</code> is synchronous — it blocks the thread the loop is on. Use <code>await asyncio.sleep(2)</code> to sleep cooperatively.</>
   },
   {
     q: "A NumPy `x @ y` between two 10000×10000 matrices is slow. Wrapping it in `ProcessPoolExecutor` will:",
@@ -217,5 +629,25 @@ async def download_all(urls, concurrency=10):
       { text: "Return NaN" },
     ],
     explanation: <>NumPy's matmul dispatches to OpenBLAS/MKL, which already parallelize across cores. Adding process pools on top ships the arrays across process boundaries (very slow) for no gain.</>
+  },
+  {
+    q: "What does `asyncio.Semaphore(3)` do?",
+    choices: [
+      { text: "Sleeps for 3 seconds" },
+      { text: "Allows at most 3 coroutines past `async with sem:` at a time", correct: true },
+      { text: "Runs 3 subprocesses" },
+      { text: "Sets the number of retries" },
+    ],
+    explanation: <>A semaphore is a counting gate. `Semaphore(3)` permits 3 concurrent holders; the 4th and beyond wait until one of the current 3 releases. Standard rate-limiting pattern for external APIs.</>
+  },
+  {
+    q: "You have 10,000 HTTP requests to make and every library is sync-only (`requests`). Best approach?",
+    choices: [
+      { text: "asyncio + `requests` inside async" },
+      { text: "ThreadPoolExecutor with a few dozen workers", correct: true },
+      { text: "multiprocessing with 10,000 workers" },
+      { text: "One thread and a while loop" },
+    ],
+    explanation: <>Threading is the right tool for I/O-bound work with sync libraries. asyncio wrapping `requests` blocks the loop; multiprocessing for I/O adds massive overhead for no gain.</>
   }
 ]} />

@@ -172,7 +172,7 @@ const tier0: Tier = {
             "Streaming large files; context managers",
           ],
           priority: "mandatory",
-          status: "outline",
+          status: "written",
         },
       ],
     },

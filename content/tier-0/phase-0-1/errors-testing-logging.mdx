@@ -4,20 +4,22 @@ tier: 0
 phase: "0.1"
 ---
 
-export const exceptionsCode = `# Custom exceptions — cheap and communicative.
-
+export const exceptionsCode = `# Custom exceptions — cheap to write, huge for clarity of intent
 class ConfigError(Exception):
-    "Raised when configuration is missing or invalid."
+    """Raised when configuration is missing or invalid."""
 
 class MissingKeyError(ConfigError):
-    "The specific config key was not found."
+    """The specific config key was not found."""
+
+class InvalidRangeError(ConfigError):
+    """Value is present but outside the acceptable range."""
 
 def get_temperature(cfg: dict) -> float:
     if "temperature" not in cfg:
         raise MissingKeyError("temperature not in config")
     t = cfg["temperature"]
     if not (0 < t <= 2):
-        raise ConfigError(f"temperature {t} out of range (0, 2]")
+        raise InvalidRangeError(f"temperature {t} out of range (0, 2]")
     return t
 
 for cfg in [{"temperature": 0.7}, {"temperature": 3.0}, {}]:
@@ -25,10 +27,30 @@ for cfg in [{"temperature": 0.7}, {"temperature": 3.0}, {}]:
         print("ok:", get_temperature(cfg))
     except MissingKeyError as e:
         print("MISSING:", e)
-    except ConfigError as e:
+    except InvalidRangeError as e:
+        print("OUT OF RANGE:", e)
+    except ConfigError as e:                # base class — catches anything above
         print("BAD CONFIG:", e)`;
 
-export const pytestCode = `# tests/test_stats.py
+export const raiseFromCode = `# 'raise X from Y' — chain the original cause into the traceback
+class ModelLoadError(Exception):
+    """Could not load a model from disk."""
+
+def load_model(path):
+    try:
+        # pretend we're deserializing bytes; the real error is a permission problem
+        raise PermissionError(f"cannot read {path}")
+    except OSError as e:
+        # wrap the low-level error in a domain-specific one, preserving the cause
+        raise ModelLoadError(f"failed to load model at {path}") from e
+
+try:
+    load_model("/models/frozen/big.pt")
+except ModelLoadError as e:
+    print("outer error :", type(e).__name__, e)
+    print("underlying  :", type(e.__cause__).__name__, e.__cause__)`;
+
+export const pytestCode = `# tests/test_stats.py  —  each test_* function is an assertion
 import pytest
 
 def mean(xs):
@@ -47,22 +69,31 @@ def test_mean_empty_raises():
     ([0], 0),
     ([1, 1, 1, 1], 1),
     ([-2, 2], 0),
+    ([1, 2, 3, 4, 5], 3),
 ])
 def test_mean_parametrized(xs, expected):
     assert mean(xs) == expected
 
-# Fixtures for shared setup
 @pytest.fixture
 def sample_data():
+    """Fixture — a value pytest passes to any test that names it."""
     return [10, 20, 30, 40]
 
 def test_mean_with_fixture(sample_data):
-    assert mean(sample_data) == 25`;
+    assert mean(sample_data) == 25
 
-export const loggingCode = `import logging, sys, json, time
+# run these tests: uv run pytest -v`;
 
-# Structured JSON logs — production-friendly, grep-friendly
+export const loggingCode = `# Structured JSON logs — filterable, grep-able, production-friendly
+import logging, sys, json, time
+
 class JsonFormatter(logging.Formatter):
+    """Emit each record as one line of JSON with any extra={} fields."""
+    RESERVED = {"name","msg","args","levelname","levelno","pathname","filename",
+                "module","exc_info","exc_text","stack_info","lineno","funcName",
+                "created","msecs","relativeCreated","thread","threadName",
+                "processName","process","message","asctime","taskName"}
+
     def format(self, record):
         base = {
             "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(record.created)),
@@ -72,12 +103,9 @@ class JsonFormatter(logging.Formatter):
         }
         if record.exc_info:
             base["exc"] = self.formatException(record.exc_info)
-        # merge any extra={...} kwargs
+        # merge any extra={...} kwargs — the "structured" part
         for k, v in record.__dict__.items():
-            if k not in ("name","msg","args","levelname","levelno","pathname","filename",
-                         "module","exc_info","exc_text","stack_info","lineno","funcName",
-                         "created","msecs","relativeCreated","thread","threadName",
-                         "processName","process","message","asctime"):
+            if k not in self.RESERVED:
                 base[k] = v
         return json.dumps(base)
 
@@ -87,107 +115,352 @@ handler = logging.StreamHandler(sys.stdout)
 handler.setFormatter(JsonFormatter())
 log.handlers = [handler]
 
-log.info("training started", extra={"model":"tiny-gpt","epochs":3})
-log.warning("gradient norm high", extra={"step":42,"grad_norm":18.7})
+log.info("training started", extra={"model": "tiny-gpt", "epochs": 3})
+log.warning("gradient norm high", extra={"step": 42, "grad_norm": 18.7})
 try:
-    1/0
+    1 / 0
 except ZeroDivisionError:
     log.exception("something exploded")`;
 
+export const trainingRobustCode = `# What a robust ML training loop looks like: try/except + logging + tests
+import logging, random
+from dataclasses import dataclass
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
+log = logging.getLogger("train")
+
+class TrainingDivergedError(RuntimeError):
+    """Loss went to NaN/inf — abort and let the caller decide what to do."""
+
+@dataclass
+class Batch:
+    x: float
+    y: float
+
+def load_batch() -> Batch:
+    x = random.gauss(0, 1)
+    return Batch(x=x, y=3 * x + 2 + random.gauss(0, 0.1))
+
+def train_step(w: float, batch: Batch, lr: float) -> tuple[float, float]:
+    pred = w * batch.x
+    loss = (pred - batch.y) ** 2
+    grad = 2 * (pred - batch.y) * batch.x
+    if loss != loss:                                     # NaN check (NaN != NaN)
+        raise TrainingDivergedError(f"loss is NaN at w={w}, lr={lr}")
+    return w - lr * grad, loss
+
+def train(epochs: int = 5, lr: float = 0.05):
+    random.seed(0)
+    w = 0.0
+    for epoch in range(epochs):
+        try:
+            for step in range(20):
+                w, loss = train_step(w, load_batch(), lr)
+            log.info(f"epoch {epoch}: w={w:.3f} loss={loss:.4f}")
+        except TrainingDivergedError as e:
+            log.error("training diverged, aborting", exc_info=e)
+            raise                                        # let caller decide
+
+train()
+
+# a lr that's TOO high — diverges
+try:
+    train(epochs=3, lr=1e6)
+except TrainingDivergedError:
+    log.warning("we caught the divergence at the outer level; would trigger auto-lr-halving")`;
+
 <Prerequisites items={[
-  { href: "/learn/foundations/python-craft/functions-scope-closures", label: "Functions, scope & closures", blurb: "Decorators show up in pytest fixtures and parametrize." },
-  { href: "/learn/foundations/python-craft/classes-protocols-dataclasses", label: "Classes, protocols & dataclasses", blurb: "Custom exceptions are just classes." },
+  { href: "/learn/foundations/python-craft/functions-scope-closures", label: "Functions, scope & closures", blurb: "Decorators show up throughout pytest (`@fixture`, `@parametrize`) and in retry/log wrappers." },
+  { href: "/learn/foundations/python-craft/classes-protocols-dataclasses", label: "Classes, protocols & dataclasses", blurb: "Custom exceptions are just classes that inherit from Exception." },
 ]} />
 
 <Motivation title="Debugging is what you'll actually do most days">
 
-Writing code is fun. Writing correct code that stays correct as it changes — and diagnosing it when it breaks at 2am on a Tuesday — is the job. Three tools carry the load: **exceptions** (the language's way of saying "this didn't work"), **tests** (the code that proves the code works), and **logs** (the trail of breadcrumbs your future self follows to find the bug). Every senior engineer's first move on a new codebase is: are there logs, are there tests, and how do errors surface? If any answer is "no", they build one.
+Writing new code is fun. Writing *correct* code that stays correct across a hundred future edits — and diagnosing it when it explodes at 2am on a Tuesday — is the job. The industry secret is that senior engineers don't write code faster than juniors; they spend less time on the wrong things, because they've built (or joined) systems where **errors surface cleanly, tests document behavior, and logs tell the story of what happened.**
+
+Three tools carry that entire load. **Exceptions** are the language's way of saying "something went wrong here, and here's what and why." Handled well, they turn a stack trace from a punishment into a diagnostic. **Tests** are the code that proves your code. A well-named test says "here is what this function is *supposed* to do"; if it passes, that statement is still true, forever. **Logs** are the runtime's narrative — the story your future self reads to reconstruct what happened when the code met the real world. Every senior engineer's first move on an unfamiliar codebase is the same trio of questions: are there tests, are there logs, how do errors surface? If any answer is *no*, that's the first thing they fix.
+
+In ML work these three tools become especially load-bearing. **Training runs are long and unattended** — a bug that surfaces two hours in must produce a diagnosable message, or you'll waste the whole run. **Data pipelines fail on edge cases** — missing columns, corrupt bytes, unexpected schemas — and the fix has to be findable, not "restart and hope." **Model behavior is stochastic** — logs are how you tell "diverged because lr too high" from "diverged because bad seed" from "diverged because someone shipped a bug last week." Every serious ML platform (Weights & Biases, MLflow, HuggingFace Trainer) is built on this exact stack: typed exceptions, tested code, structured logs. Get comfortable with it now and you save yourself years of wandering.
 
 </Motivation>
 
-<Intuition title="Three mental models">
+<Intuition title="Three mental models that make debugging tractable">
 
-- **Exceptions are values that carry a message and a stack trace.** They're not just error-signaling; they're a way to *communicate* what happened, structured enough that upstream code can decide what to do.
-- **Tests are documentation you can execute.** A well-named test says "here's what this function is supposed to do". If it passes, that's still true.
-- **Logs are your model's story.** Every meaningful state transition should leave a trace. When something goes wrong, logs are what you have when the debugger isn't attached.
+- **Exceptions are values that carry a message and a stack trace.** They aren't just "error signals" — they're *messages* between one part of your code and another. Well-designed exceptions communicate not only *that* something went wrong but *what* went wrong, *where*, and *why* — structured enough that upstream code can decide (retry? fallback? abort?) based on the type.
+
+- **Tests are executable documentation.** A test named `test_mean_of_empty_list_raises_ValueError` is a sentence in English. Any developer can read it and know what the function is supposed to do in that case. And unlike English documentation, it's checked continuously — the moment behavior drifts from the description, CI fails.
+
+- **Logs are the model's story.** Every meaningful state transition should leave a trace: what config was used, what data was loaded, when a checkpoint was written, why a step was skipped. When something misbehaves, logs are your only view into the past — the debugger isn't attached, the training already ran. Structured logs (key-value fields) beat free-form strings because they can be filtered, aggregated, and searched in production observability tools.
+
+Together these three form a **feedback loop**: exceptions surface bugs, tests prove fixes, logs identify what broke and where. Every serious codebase has all three. If any is missing, the missing one is where the next mystery bug will hide.
 
 </Intuition>
 
 <Recall term="Traceback">
 
-When an exception isn't caught, Python prints a **traceback** — the chain of function calls that led to the failure, most-recent-call-last. The traceback is the map back to the bug. Read from the bottom.
+When an exception isn't caught, Python prints a **traceback** — the chain of function calls that led to the failure, most-recent-call *last*. The bottom line of the traceback is the actual exception (`ValueError: ...`); the lines above it show the call stack. Read tracebacks bottom-up: start at the exception, walk *up* to see how you got there. The frame *just above* the exception is usually where the fix goes; frames further up are usually just relaying blame. This one habit — start at the bottom of the traceback — will save you thousands of hours over a career.
 
 </Recall>
 
-<Angles>
-  <Angle type="code" title="Custom exceptions communicate intent">
-    <RunnableCode title="ConfigError hierarchy" code={exceptionsCode} />
+<Recall term="Exception hierarchy">
 
-    Two rules: **inherit from Exception** (never from `BaseException` directly — that catches KeyboardInterrupt too, which you don't want). **Make the class name informative** — `ConfigError` beats `Exception("bad config")` because callers can `except ConfigError` specifically, letting good messages through and blocking anything else.
+Every exception in Python inherits from `BaseException`, but almost every exception you'll actually raise or catch inherits from **`Exception`** — a subclass of `BaseException` that specifically *excludes* `KeyboardInterrupt` (Ctrl-C) and `SystemExit` (`sys.exit()`). Rule of thumb: **raise from and catch `Exception` and its subclasses; leave `BaseException` alone** so that Ctrl-C still works. Well-known standard exceptions form their own mini-hierarchy: `ValueError`, `TypeError`, `KeyError`, `IndexError`, `AttributeError`, `RuntimeError`, `IOError` (now aliased to `OSError`), and so on. Learn to reach for the right one instead of always raising `Exception`.
+
+</Recall>
+
+<Recall term="Log level">
+
+The `logging` module has five standard **levels**, in increasing severity: `DEBUG` (details only useful when investigating), `INFO` (normal operation events), `WARNING` (something odd but recoverable), `ERROR` (something failed but the program continues), `CRITICAL` (something failed and the program may not continue). A logger's level acts as a **filter** — messages below the current level are dropped without formatting cost. In production, INFO is usually the default; you turn on DEBUG when investigating.
+
+</Recall>
+
+<Angles intro={<>Five lenses on error handling and observability. Each corresponds to a real habit you'll form: raising precise exceptions, chaining causes, writing minimal expressive tests, choosing EAFP over LBYL, and emitting structured logs your future self can search.</>}>
+
+  <Angle type="code" title="Custom exceptions communicate intent">
+    <RunnableCode title="a small exception hierarchy" code={exceptionsCode} />
+
+    Two rules make custom exceptions worth their weight:
+
+    - **Inherit from `Exception`, never `BaseException`.** `BaseException` is the root and includes `KeyboardInterrupt` and `SystemExit`. Catching or raising at that level breaks Ctrl-C and clean shutdown.
+    - **Name the class after the *concept*, not the mechanism.** `MissingKeyError` says what happened. `Exception("bad config")` says nothing structured. When a caller wants to react to *specifically* missing keys, they can `except MissingKeyError` — but if you'd raised a bare `Exception`, they'd have to string-match.
+
+    Notice the shape in the example: a base `ConfigError`, with `MissingKeyError` and `InvalidRangeError` as more specific subclasses. Now the caller can catch at whatever granularity they want:
+
+    - `except MissingKeyError:` — only handle missing keys.
+    - `except InvalidRangeError:` — only handle out-of-range.
+    - `except ConfigError:` — handle any config problem generically (the base class catches all subclasses).
+
+    This is called an **exception hierarchy**, and every good library (requests, sqlalchemy, pytorch) has one. It's the difference between *forcing* a caller to catch-and-string-match versus *offering* a menu of precision levels they can choose from.
+
+  </Angle>
+
+  <Angle type="physical" title="`raise X from Y` — chain the cause into the traceback">
+    <RunnableCode title="the wrapping pattern for domain-specific errors" code={raiseFromCode} />
+
+    A common design need: your code calls a low-level API (a filesystem, a network library, a database driver), and that API raises a low-level exception (`PermissionError`, `ConnectionError`, `IntegrityError`). You don't want to leak those *domain-level* to your callers — they should see something like `ModelLoadError`, not `PermissionError`. But you also don't want to *hide* the original cause: if the loader failed because of permissions, the debugger needs to see that.
+
+    `raise ModelLoadError(...) from e` is the pattern. It sets `ModelLoadError.__cause__ = e`, and Python's traceback formatter prints both: "The above exception was the direct cause of the following exception:". Your caller sees `ModelLoadError`; when they print the full traceback, they see `PermissionError` too. **Best of both worlds — abstract at the interface, transparent for debugging.**
+
+    Two variants worth knowing: `raise X from None` explicitly suppresses the chain (say, if the original exception was expected and you want a clean re-raise). `raise X` inside an `except` block *implicitly* chains too (`__context__` instead of `__cause__`) — Python does this for you when you re-raise inside a handler.
+
   </Angle>
 
   <Angle type="code" title="pytest — the assertion is the test">
-    <RunnableCode title="test file" code={pytestCode} />
+    <RunnableCode title="tests, parametrize, fixtures" code={pytestCode} />
 
-    Pytest turns any function starting with `test_` into an assertion the runner will check. `pytest.raises` verifies that code *does* fail as expected. `parametrize` collapses a whole table of test cases into one function. `@pytest.fixture` provides shared setup — think "value that's cached per test".
+    pytest's genius is that it treats the language's own `assert` as the assertion primitive. You don't call `assertEqual(a, b)`; you write `assert a == b`, and if it fails, pytest *rewrites* the bytecode of the test to introspect both sides and print a helpful diff. This is why pytest tests read like ordinary Python — because they are.
 
-    Run with `uv run pytest -v`. A failed assertion prints both sides and the diff — no `assertEqual` gymnastics.
+    Three constructs cover 95% of what you'll write:
+
+    - **`test_*` functions.** Any function in a `test_*.py` (or `*_test.py`) file whose name starts with `test_` is a test. That's it. No decorators, no base classes.
+    - **`pytest.raises(ExceptionType, match=...)`.** Assert that a block *does* raise the expected exception, optionally with a message that matches a regex. This is how you write "does this function fail on bad input" tests.
+    - **`@pytest.mark.parametrize`** turns one test function into many by looping through argument tuples. Instead of copy-pasting the same test structure with different data, you list the cases in a table. This is the single biggest readability win when testing pure functions with many edge cases.
+
+    Beyond the basics, **fixtures** (`@pytest.fixture`) are pytest's way of injecting shared setup into tests. Any test whose parameter list contains a name matching a fixture receives the fixture's return value. This lets you build DB connections once per session, temp directories once per test, mocks once per class — no need for `setUp`/`tearDown` boilerplate. Fixtures also compose: a fixture can request other fixtures by name, and pytest resolves the dependency graph automatically.
+
   </Angle>
 
-  <Angle type="computational" title="EAFP vs LBYL">
-    Two styles of "handling absence":
+  <Angle type="algebraic" title="EAFP vs LBYL — the Python happy-path preference">
 
-    - **LBYL** (Look Before You Leap): `if 'k' in d: d['k']`
-    - **EAFP** (Easier to Ask Forgiveness than Permission): `try: d['k'] except KeyError: ...`
+    Two styles of handling potentially-absent things:
 
-    Python prefers EAFP because (a) it's atomic (no race between check and use in threaded code) and (b) the happy path is faster. LBYL wins when the *check* is cheap and the *action* is expensive.
+    - **LBYL** (Look Before You Leap): `if 'key' in d: value = d['key']`.
+    - **EAFP** (Easier to Ask Forgiveness than Permission): `try: value = d['key'] except KeyError: ...`.
+
+    Python's community strongly prefers EAFP. Two reasons:
+
+    1. **Atomicity in the face of concurrency.** With LBYL, between `if 'key' in d` and `value = d['key']`, another thread could delete the key. The check-then-use races. `try: d['key'] except KeyError:` is atomic in the single-thread sense — you either get the value or catch the exception; nothing in between.
+
+    2. **The happy path is faster.** `try/except` is very cheap when *no* exception fires; the JIT knows this. `if 'key' in d` does a hash lookup, then `d['key']` does another hash lookup — twice the work in the happy case. In a tight loop over millions of items where the key is usually present, EAFP is measurably faster.
+
+    LBYL wins in one specific case: when the **check is cheap** and the **action is very expensive or has side effects**. E.g., `if user.has_permission("write"): expensive_write(...)` — you want to fail before doing the expensive action, not partway through with a rollback. Otherwise, reach for EAFP.
+
   </Angle>
 
-  <Angle type="code" title="Structured logging beats print()">
-    <RunnableCode title="JSON logs with extra={}" code={loggingCode} />
+  <Angle type="computational" title="Structured logging beats `print`">
+    <RunnableCode title="JSON logs with `extra={...}`" code={loggingCode} />
 
-    In production, logs go to a search index (Datadog, Grafana Loki, CloudWatch). **Structured logs** — key/value fields you can filter on — beat freeform strings every time. Even for local dev, `logging` beats `print` because you get levels (INFO/WARNING/ERROR), a logger name to filter by, and one flag to silence everything below a threshold.
+    `print` is the developer's default and it's fine for scratch code. In anything that will run more than once, use `logging`. Three wins:
+
+    - **Levels.** `log.debug(...)` for details, `log.info(...)` for milestones, `log.warning(...)` for oddities, `log.error(...)` for failures, `log.exception(...)` for errors *with* traceback. One line at the top (`log.setLevel(...)`) filters everything else.
+    - **Logger names.** `logging.getLogger("atlas.train")` gives you a named logger you can filter on. In production this is how you turn on DEBUG for one subsystem without drowning in everything else's DEBUG.
+    - **Structured fields.** Pass `extra={"step": 42, "loss": 0.812}` and, with a JSON formatter, those fields become searchable columns in your log storage. In Datadog, Grafana Loki, CloudWatch, or Splunk, you can `filter by loss > 1.0 in last 6h across all training runs` — the exact query you can't do with a freeform `print(f"step 42, loss 0.812")`.
+
+    The JSON formatter in the cell is ~20 lines and enough for real work. Production ML platforms use libraries like `structlog` or `loguru` that handle this and more (context binding, per-request context, redaction of secrets). But even the stdlib `logging` is a huge upgrade over `print` the moment you go past prototype.
+
   </Angle>
+
 </Angles>
 
 <Convergence>
 
-Exceptions are the *language's* error channel. Tests are the *codebase's* correctness proof. Logs are the *runtime's* narrative. Get comfortable with all three and debugging shifts from a stressful hunt to a routine trace-follow. The bugs still happen; you find them faster.
+Exceptions are the *language's* error channel — a structured message from "something went wrong here" to "here's who has to deal with it." Tests are the *codebase's* correctness proof — living documentation that CI keeps honest. Logs are the *runtime's* narrative — the past-tense story you read when you can't attach a debugger. **Master all three and debugging shifts from a stressful hunt into a routine trace-follow.** The bugs still happen; you find them faster, fix them more surgically, and prevent regressions with a test that captures the fix.
 
 </Convergence>
 
+<Derivation title="What happens when `raise` is executed inside a `try` block">
+
+Exceptions aren't magic. They're a controlled flow-of-control mechanism. Trace what actually happens step by step and the machinery stops being mysterious.
+
+<Step n={1} math={<span>The <code>raise ExceptionType(msg)</code> statement creates an exception instance.</span>}>
+`raise MissingKeyError("temperature not in config")` first constructs `MissingKeyError("temperature not in config")` — that's a normal function-call-like operation producing an object. This object has attributes like `args`, `__traceback__` (populated shortly), and `__cause__` (if `from Y` was used).
+</Step>
+
+<Step n={2} math={<span>Python captures the current stack frame's line info into the exception's <code>__traceback__</code>.</span>}>
+The traceback is a linked list of frame objects — one per active call, from innermost to outermost. Each frame records the file, line number, and function name where the raise happened.
+</Step>
+
+<Step n={3} math={<span>Python unwinds the stack, searching for a matching <code>except</code> clause.</span>}>
+Starting from the current frame, Python walks *outward*. At each frame, it checks for an active `try` block whose `except` clauses could catch this exception. A clause matches if the exception is an instance of the listed type (checked via `isinstance`, so subclasses match parent-class handlers too).
+</Step>
+
+<Step n={4} math={<span>The first matching <code>except</code> clause receives the exception.</span>}>
+Python jumps into the matched `except` block, binding the exception to the `as e:` name (if any). All frames it unwound through are gone — their local variables freed, their execution abandoned. The exception is now "handled" (though the handler can still re-raise).
+</Step>
+
+<Step n={5} math={<span>If no handler matches by the time the stack is empty, the interpreter itself catches it.</span>}>
+Python's top-level exception hook prints the traceback and the exception message, then exits with a non-zero code. In an interactive REPL, it prints the traceback and returns you to the prompt. In a Jupyter cell, it prints the traceback in the cell output and the notebook keeps running. Same mechanism, different environment.
+</Step>
+
+<Step n={6} math={<span>Handler options: swallow, re-raise, or wrap.</span>}>
+Inside the `except` block, three moves are canonical. **Swallow** — do nothing more; the exception is gone. **Re-raise** — `raise` alone (no arguments) preserves the original with its chain intact. **Wrap** — `raise MyError(...) from e` chains the original as `__cause__` and lets a caller see both.
+</Step>
+
+<Step n={7} math={<span>The <code>finally</code> clause always runs, even on <code>raise</code>.</span>}>
+If the `try` had a `finally` block, it runs regardless of whether the try succeeded, raised and was caught, raised and *wasn't* caught, or returned. This is why `finally` is used for cleanup that must happen no matter what — closing files, releasing locks, restoring state. The modern replacement, however, is a `with` block whose context manager handles cleanup for you.
+</Step>
+
+</Derivation>
+
+<Example title="A robust ML training loop">
+
+<RunnableCode title="try/except + logging + custom exception, in a training loop" code={trainingRobustCode} />
+
+Read the training loop as a design showcase. **`TrainingDivergedError`** is a domain-specific exception — a caller can catch it specifically (`except TrainingDivergedError:`) without swallowing unrelated bugs. **The NaN check** (`if loss != loss`) uses the fact that NaN is not equal to itself — the only value in Python where this is true. **`log.info(...)`** at epoch boundaries produces a searchable narrative of the run. **`log.error("...", exc_info=e)`** includes the exception traceback in the log message, so post-mortem debugging has everything it needs. **The outer training call catches divergence** and *decides what to do* — in the example, it re-raises so an outer supervisor could halve the learning rate and try again. That decision layering — low-level raise, high-level policy — is the whole discipline of error handling in mature systems.
+
+**Where this shape shows up in the real world:**
+
+- **PyTorch Lightning's `Trainer`** wraps every training step in a try/except that logs and can auto-checkpoint before propagating.
+- **HuggingFace's `Trainer.train`** logs metrics every N steps via a structured logger, catches OOM errors and can auto-reduce batch size.
+- **Ray Tune** catches trial exceptions and reports them to a central scheduler, which can restart failed trials.
+
+The pattern is *always the same*: low-level operations raise typed exceptions, a middle layer logs and decides, an outer layer applies policy (retry, halve lr, alert on-call, checkpoint and abort).
+
+</Example>
+
 <Nuance>
 
-**Don't catch bare `except:`.** It swallows `KeyboardInterrupt` and `SystemExit` and turns Ctrl-C into "please stop… eventually." Catch specific exception types.
+**Don't catch bare `except:`.** It catches `KeyboardInterrupt`, `SystemExit`, and every subclass of `BaseException`. Suddenly Ctrl-C is caught and swallowed, and your users can't stop the program. Catch specific types, or `except Exception:` (which excludes those two). If you must catch broadly (e.g., a top-level supervisor), catch `Exception` explicitly.
 
-**Re-raise with context.** `raise ConfigError("bad config") from e` chains the underlying cause into the traceback — you see both what wrapped and what caused it.
+**Assertions are not error handling.** `assert x > 0` is stripped when Python runs with `-O` (optimization flag). Use `assert` only for **invariants during development** — things you're saying "this should never be false; if it is, my logic is broken." For real user-facing error paths (bad input, missing config), raise a proper exception.
 
-**Assertions are not error handling.** `assert x > 0` is stripped when Python runs with `-O`. Use assertions to state invariants during development; use raises for real error paths.
+**Logging is expensive if you format eagerly.** `log.debug(f"tensor: {big_tensor}")` interpolates the tensor into a string *every time the line executes*, even if DEBUG is disabled. Use `log.debug("tensor: %s", big_tensor)` (older style) or wrap the log call in a level check. `logging`'s lazy `%s` formatting only pays cost when the message will actually be emitted.
 
-**Logging is expensive if you format eagerly.** `log.debug(f"tensor: {tensor}")` formats the string every time even if DEBUG is off. Prefer `log.debug("tensor: %s", tensor)` — Python only formats if the level is active.
+**pytest fixtures are scoped.** Default scope is `function` (fresh per test); `class`, `module`, `session` scopes reuse across bigger units. Use `session` for expensive setup like DB connections that shouldn't be rebuilt per test. Use `function` (the default) when a test could taint the fixture state for the next one.
 
-**pytest fixtures are memoized per scope.** Default scope is `function` (fresh each test); `session` scope reuses across the whole run. Use `session` for expensive setup like DB connections.
+**`pytest.raises(match=...)`** takes a regex, not a literal string. Escape metacharacters if you're matching a specific value.
+
+**Re-raise inside an `except` with a bare `raise`.** `raise` alone (no argument) re-raises the *current* exception, preserving its traceback. `raise e` (with the caught exception) works but is subtly different — it can double-up the chain. Prefer the bare `raise`.
+
+**Chained exceptions read bottom-up.** `raise X from Y` prints Y first, then "The above exception was the direct cause of the following exception:", then X. Read the *bottom* exception to find the domain-level error your code raised; read *up* to find the root cause.
+
+**Log rotation.** Production log files must rotate. `logging.handlers.RotatingFileHandler` (size-based) and `TimedRotatingFileHandler` (time-based) are the stdlib options. In containerized environments, log to stdout and let the platform (Kubernetes, Docker) rotate for you.
+
+**Sensitive data in logs.** Never log passwords, API keys, or personally identifiable information. Structured loggers make this easier because you can whitelist which `extra` fields are safe to log. Consider automated redaction (`structlog`, `loguru`) if the codebase has many hands.
+
+**pytest markers.** `@pytest.mark.slow`, `@pytest.mark.gpu` let you tag tests and run subsets: `uv run pytest -m "not slow"`. Great for keeping the fast test suite fast.
 
 </Nuance>
 
+<RealWorldML title="Retry-with-backoff for a flaky embedding API">
+
+Almost every production ML system depends on an external service — an embedding API, a model gateway, a vector database. These services rate-limit, occasionally return 5xx errors, and occasionally just time out. Naïve code fails every N-hundredth call, silently drops that request, and produces mysterious downstream bugs. The industry-standard fix is **retry with exponential backoff, structured logging of each attempt, and a typed exception for permanent failures.**
+
+<RunnableCode title="A production-shape retry decorator" code={`import logging, random, time
+from functools import wraps
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
+log = logging.getLogger("embed")
+
+class APIError(Exception):
+    """Permanent error from the embedding API."""
+
+class TemporaryAPIError(APIError):
+    """Transient error — safe to retry."""
+
+def with_backoff(*, tries=4, base=0.1, cap=2.0, on=TemporaryAPIError):
+    """Retry a function with exponential backoff and jitter."""
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            last = None
+            for attempt in range(1, tries + 1):
+                try:
+                    return fn(*args, **kwargs)
+                except on as e:
+                    last = e
+                    sleep_for = min(cap, base * 2 ** (attempt - 1))
+                    sleep_for += random.random() * base   # jitter
+                    log.warning(
+                        f"attempt {attempt}/{tries} failed: {e} — sleeping {sleep_for:.2f}s"
+                    )
+                    time.sleep(sleep_for)
+            log.error(f"gave up after {tries} attempts, re-raising last error")
+            raise last
+        return wrapper
+    return decorator
+
+# --- fake embedding API that fails the first 2 times, then succeeds
+_state = {"n": 0}
+
+@with_backoff(tries=4, base=0.05, cap=0.5)
+def embed(text: str) -> list[float]:
+    _state["n"] += 1
+    if _state["n"] < 3:
+        raise TemporaryAPIError(f"503 service unavailable (call {_state['n']})")
+    log.info(f"embed('{text}') succeeded on call {_state['n']}")
+    return [0.1, 0.2, 0.3]
+
+vec = embed("hello world")
+print("got vector:", vec)`} />
+
+**Line by line, why this is the actual pattern shipped in production:**
+
+1. **A two-level exception hierarchy** — `APIError` (permanent) and `TemporaryAPIError` (transient). The retry decorator only catches the temporary kind; permanent errors bubble up immediately (no point retrying a `401 Unauthorized`).
+
+2. **Exponential backoff with a cap.** Wait 0.1s, then 0.2s, then 0.4s, ... capped at `cap`. This is the standard TCP-inspired backoff that gives the downstream service time to recover without hammering it.
+
+3. **Jitter.** Adding a small random component prevents "thundering herds" — if 1000 clients all fail at t=0 and all wait exactly 100ms, they all retry at t=100ms simultaneously and knock the service over again. Jitter spreads the retries out.
+
+4. **Structured logging per attempt.** Every retry emits a `WARNING` with the attempt number and sleep time. In production, aggregating these tells you which endpoints are flakiest, which retry counts are exhausted, and whether your SLO budget is being burned.
+
+5. **Give up cleanly.** After `tries` attempts, re-raise the last exception. The caller now knows this operation is genuinely broken (not just slow) and can decide policy — fall back to a different model, queue for later, alert on-call.
+
+**Where you'll see this shape in production ML code:** OpenAI/Anthropic API clients wrap every call in retry-with-backoff. HuggingFace Inference API SDK does it. Every LangChain LLM adapter does it. Every embedding-server SDK does it. **The pattern is universal because the failure mode is universal.** Ship this decorator once and you protect every downstream service call in your system.
+
+</RealWorldML>
+
 <CodeItYourself
   title="Retry decorator with logging"
-  spec={<>Write a decorator <code>@retry(n=3, on=Exception, log=None)</code> that re-runs the wrapped function up to <code>n</code> times, catching exceptions of type <code>on</code>, and logging each failed attempt using the provided logger. If all attempts fail, re-raise the last exception. Test it on a function that fails the first two calls then succeeds.</>}
+  spec={<>Write a decorator <code>@retry(n=3, on=Exception, log=None)</code> that re-runs the wrapped function up to <code>n</code> times, catching exceptions of type <code>on</code>, and logging each failed attempt using the provided logger. If all attempts fail, re-raise the last exception (chained with the previous ones). Test it on a function that fails the first two calls then succeeds. Bonus: also expose a <code>.stats</code> attribute on the wrapped function that reports total attempts across all calls.</>}
   hints={[
-    "Use functools.wraps to preserve the wrapped function's name and docstring.",
+    "Use `functools.wraps` to preserve the wrapped function's name and docstring.",
     "Track the last exception in a local variable so you can re-raise it at the end.",
-    "Use logger.warning(...) with `extra={'attempt': i}` to keep logs structured."
+    "Use `logger.warning(...)` with `extra={'attempt': i}` to keep logs structured.",
+    "For .stats, use a mutable dict on the wrapper — functions can carry attributes."
   ]}
   solution={<CodeBlock language="python" title="@retry" code={`from functools import wraps
 import logging
 
 def retry(n=3, on=Exception, log=None):
     log = log or logging.getLogger("retry")
-    def deco(fn):
+
+    def decorator(fn):
         @wraps(fn)
-        def inner(*args, **kwargs):
+        def wrapper(*args, **kwargs):
             last = None
             for attempt in range(1, n + 1):
+                wrapper.stats["attempts"] += 1
                 try:
                     return fn(*args, **kwargs)
                 except on as e:
@@ -197,8 +470,9 @@ def retry(n=3, on=Exception, log=None):
                         extra={"attempt": attempt, "of": n, "err": str(e)},
                     )
             raise last
-        return inner
-    return deco
+        wrapper.stats = {"attempts": 0}
+        return wrapper
+    return decorator
 
 state = {"calls": 0}
 
@@ -209,16 +483,187 @@ def flaky():
         raise RuntimeError("network blip")
     return "done"
 
-print(flaky())          # "done" after 3 attempts`} />}
+print(flaky())            # "done" after 3 attempts
+print("stats:", flaky.stats)   # {'attempts': 3}`} />}
 />
 
+<LifeLesson title="Handle failures loudly, silently — never in the middle">
+
+Software error handling teaches a design principle whose reach is much wider than code: **failures should either be handled loudly at the boundary (where you have context to decide policy) or handled silently at the source (where the failure is recoverable and unremarkable) — but never in the middle, where you have neither context nor authority.**
+
+Watch the pattern in a well-designed system. Deep in a function that does one small thing, a low-level failure (network glitch, disk hiccup, integer overflow) is either quietly recovered from *right there* (a small retry, a clamp to zero, a skip) or bubbled up as an exception with a clear name. The middle layers don't *guess* what to do — they don't wrap error-handling logic around every call, they don't decide whether to retry or crash. They just forward. And at the top — at the "trainer decides what to do about divergence" layer, or the "app decides what to show the user" layer, or the "operator decides whether to page on-call" layer — the decision is made *once*, with full context.
+
+The same shape applies to teams and to personal life. Small setbacks either get *quietly absorbed* by the person best positioned (skip a set at the gym; that's a source-level fix) or *bubble up loudly* to whoever can decide policy (a project is off-track; the lead calls a scope reset). Middle-layer heroics — pretending everything is fine, patching over broken decisions, silently absorbing costs that belong elsewhere — is where teams and relationships accumulate hidden debt that later explodes. When you find yourself wrapping a mysterious failure with `try/except: pass`, or covering for a broken process at work, ask: *is this the right layer to decide what to do?* If not, forward the signal upward.
+
+The strongest people, systems, and teams are not the ones that never fail. They're the ones where failures are **legible and load-balanced** — small failures die quietly at their source, and big ones surface loudly to the person who can act on them. The middle stays clean. That's what "error handling" really means, and it's why this chapter deserves as much care as the ones on training loops or transformers.
+
+</LifeLesson>
+
+<MLConnection>
+
+Every mature ML system leans hard on the three tools in this chapter:
+
+- **Training loops** wrap steps in typed exception handling (`OutOfMemoryError`, `NaNLossError`, `DivergenceError`) — the framework catches specific types and can react (halve batch size on OOM, checkpoint and abort on NaN, log and continue on divergent step).
+- **Data pipelines** catch and log per-record parse failures with `extra={"row": row_num, "err": str(e)}` — you get a searchable log of "which rows failed" without stopping the pipeline for one bad record.
+- **Model registries** raise `ModelNotFoundError` and `ModelIncompatibleError` — typed exceptions that let downstream orchestration retry, fall back, or alert.
+- **Pytest is the standard test runner across every ML shop.** scikit-learn, PyTorch, transformers all publish their test suites publicly, all use pytest, all use fixtures and parametrize. Reading their tests is often the fastest way to learn a library.
+- **`pytest.raises`** is how ML libraries test that `fit(X, y)` with mismatched shapes raises the right exception — "you can't train a 100-sample X against a 200-sample y."
+- **Structured logs** are what Weights & Biases, MLflow, TensorBoard, and Comet ingest. Every metric event is a JSON record with a step, a metric name, and a value. This chapter's `extra={...}` pattern is literally the shape that flows into those systems.
+- **Retry decorators with backoff** wrap every external-service call in production LLM pipelines — OpenAI, Anthropic, HuggingFace Inference, embedding APIs, vector DBs. All of them rate-limit; all of them occasionally 5xx. The pattern is universal.
+- **Log-based observability** in ML platforms (Datadog for latency, Loki for logs, Sentry for exceptions) all consume structured logs and exception chains. The structured practices in this chapter are what those tools need to work well.
+- **CI/CD gates on tests.** Every push that fails the `pytest` step blocks merge. Every ML repo of any size has hundreds of tests that assert dataset shapes, loss values on tiny examples, deterministic behavior with seeded RNG.
+
+Errors, tests, and logs aren't the exciting part of ML. They're the part that makes the exciting parts possible.
+
+</MLConnection>
+
 <Summary bullets={[
-  "Custom exceptions communicate intent — inherit from Exception, name informatively.",
-  "pytest: functions starting with test_ are assertions; parametrize + fixtures compress boilerplate.",
-  "EAFP > LBYL in Python — try/except is idiomatic error handling.",
-  "Use `logging` with levels; prefer structured logs (extra={...}) so you can filter in production.",
-  "Never `except:` bare; never use assert for real error handling."
+  "Custom exceptions communicate intent — inherit from Exception, name informatively, form a small hierarchy for graceful catching.",
+  "`raise X from Y` chains the underlying cause into the traceback — abstract at the interface, transparent for debugging.",
+  "pytest: `test_*` functions are assertions; `parametrize` scales tests; `pytest.raises(match=...)` verifies expected failures.",
+  "EAFP > LBYL in Python — `try/except` is atomic and often faster in the happy path. LBYL wins only when the action is expensive.",
+  "Use `logging` with levels; prefer structured logs (`extra={...}`) so you can filter, aggregate, and search in production.",
+  "Never `except:` bare; never use `assert` for user-facing error handling; never format log messages eagerly (`%s` beats f-string for debug logs).",
+  "Retry with exponential backoff + jitter + a typed permanent-error class — the standard pattern for flaky external services.",
+  "In ML: training loops raise typed errors; data pipelines log per-record; pytest gates every merge; structured logs flow to W&B/MLflow/Sentry."
 ]} />
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>Rewrite this LBYL code in EAFP style: <br/><code>if 'name' in cfg: name = cfg['name']</code><br/><code>else: name = 'default'</code></>,
+      hint: <>Two options: try/except, or `dict.get`.</>,
+      answer: <>Either <code>name = cfg.get('name', 'default')</code> (idiomatic for exactly this case) or <code>try: name = cfg['name']; except KeyError: name = 'default'</code>. The first is preferred for dict lookups; the second is the general EAFP pattern for any operation with a specific "absent" exception.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>Which of these is a valid pytest test file and what does the runner do?<br/><code>def test_add(): assert add(1, 2) == 3</code></>,
+      hint: <>pytest discovers test files by prefix.</>,
+      answer: <>It's valid <em>if</em> the file is named <code>test_*.py</code> or <code>*_test.py</code>. Pytest scans matching files, imports them, and runs any top-level function whose name starts with <code>test_</code>. If the assertion fails, pytest introspects both sides of the <code>==</code> and prints a helpful diff. Zero boilerplate.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>Why is <code>assert user.is_admin</code> a bug in a production login function?</>,
+      hint: <>Python's -O flag.</>,
+      answer: <>When Python runs with <code>-O</code> (production optimization), <em>all</em> assert statements are stripped. So in production, `assert user.is_admin` becomes a no-op, and non-admin users pass the check silently. Fix: <code>if not user.is_admin: raise PermissionError(...)</code>. Assertions are for invariants during development, never for user-facing checks.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Write a small pytest fixture that returns a temporary directory that is cleaned up after the test, using <code>tmp_path</code>. Show a test that uses it.</>,
+      hint: <>pytest's built-in `tmp_path` fixture returns a fresh Path.</>,
+      answer: <><CodeBlock language="python" title="tests/test_write.py" code={`# tmp_path is built-in — no need to define it. It's a Path unique to each test.
+def test_write_reads_back(tmp_path):
+    p = tmp_path / "hello.txt"
+    p.write_text("world")
+    assert p.read_text() == "world"
+
+# pytest automatically deletes tmp_path after the test — no cleanup needed`} /> `tmp_path` (introduced in modern pytest) is the go-to way to test any code that touches the filesystem. No manual `os.mkdir`, no `shutil.rmtree` in a `finally`.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Given this partial code, add exception handling so the outer caller sees a <code>ConfigError</code> but the underlying <code>FileNotFoundError</code> is still visible in the traceback:<br/><CodeBlock language="python" title="setup" code={`def load_config(path):
+    with open(path) as f:
+        return json.load(f)`} /></>,
+      hint: <>Wrap the open in try/except and use `raise ... from`.</>,
+      answer: <><CodeBlock language="python" title="fixed" code={`class ConfigError(Exception):
+    pass
+
+def load_config(path):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except FileNotFoundError as e:
+        raise ConfigError(f"config file not found: {path}") from e
+    except json.JSONDecodeError as e:
+        raise ConfigError(f"config file is not valid JSON: {path}") from e`} /> The caller sees <code>ConfigError</code> (their domain-level error); the traceback shows the underlying <code>FileNotFoundError</code> or <code>JSONDecodeError</code> so the debugger has the full picture.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>You want to configure your logger to (1) emit JSON, (2) show INFO and above, (3) also send warnings to a separate file. Sketch it.</>,
+      hint: <>Multiple handlers with per-handler levels and formatters.</>,
+      answer: <><CodeBlock language="python" title="logger setup" code={`import logging, json, sys
+
+log = logging.getLogger("atlas")
+log.setLevel(logging.INFO)
+
+# handler 1: JSON to stdout, INFO+
+stream = logging.StreamHandler(sys.stdout)
+stream.setLevel(logging.INFO)
+stream.setFormatter(JsonFormatter())     # from earlier in the chapter
+log.addHandler(stream)
+
+# handler 2: WARNING+ to a file
+file = logging.FileHandler("warnings.log")
+file.setLevel(logging.WARNING)
+file.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+log.addHandler(file)
+
+log.info("started")            # only stdout
+log.warning("something odd")   # both stdout and file`} /> Each handler has its own level and formatter — the logger fans out to all of them. This is how production ML services separate "operational" logs (stdout → Datadog) from "audit" logs (file → S3).</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Explain why <code>except: pass</code> in a training-loop step is almost always a bug, and what pattern to use instead.</>,
+      hint: <>Bare `except` catches KeyboardInterrupt; `pass` hides real bugs.</>,
+      answer: <><b>Two problems.</b> First, bare `except:` catches `KeyboardInterrupt` and `SystemExit` too — Ctrl-C is swallowed, and the training loop can't be stopped cleanly. Second, `pass` hides <em>every</em> failure — a bug that would produce a diagnosable stack trace becomes a mysterious "training silently produced wrong numbers." <b>The right pattern:</b> catch <em>specific</em> types you can meaningfully handle, log the exception with `log.exception(...)` (which includes the traceback), and either re-raise or continue based on policy: <CodeBlock language="python" title="the right pattern" code={`try:
+    step()
+except (RuntimeError, ValueError) as e:
+    log.exception("step failed, continuing")
+    metrics["failures"] += 1
+except KeyboardInterrupt:
+    log.info("training interrupted by user")
+    raise                          # let the interpreter handle Ctrl-C`} /> The key discipline: <b>never silently swallow an exception you didn't expect</b>. If you don't know how to react, log it with full context and re-raise; someone upstream will decide.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Design a pytest suite for a hypothetical <code>mean_absolute_error(y_pred, y_true)</code> function. Include at least: basic correctness, edge cases (empty, length-mismatch, NaN), and property-style parametrized tests.</>,
+      hint: <>parametrize + pytest.raises + a fixture for common shapes.</>,
+      answer: <><CodeBlock language="python" title="test_mae.py" code={`import pytest, math
+from mypkg.metrics import mean_absolute_error
+
+# 1) basic correctness
+def test_mae_zero_when_equal():
+    assert mean_absolute_error([1, 2, 3], [1, 2, 3]) == 0
+
+def test_mae_positive_when_different():
+    assert mean_absolute_error([1, 2, 3], [2, 3, 4]) == 1.0
+
+# 2) edge case: empty
+def test_mae_empty_raises():
+    with pytest.raises(ValueError, match="empty"):
+        mean_absolute_error([], [])
+
+# 3) edge case: length mismatch
+def test_mae_length_mismatch_raises():
+    with pytest.raises(ValueError, match="length"):
+        mean_absolute_error([1, 2], [1, 2, 3])
+
+# 4) edge case: NaN in input
+def test_mae_nan_propagates():
+    result = mean_absolute_error([1, float("nan")], [1, 2])
+    assert math.isnan(result)
+
+# 5) property: MAE(a, b) == MAE(b, a) — symmetry
+@pytest.mark.parametrize("a,b", [
+    ([1, 2, 3], [4, 5, 6]),
+    ([0], [1]),
+    ([-1, -2], [1, 2]),
+])
+def test_mae_symmetry(a, b):
+    assert mean_absolute_error(a, b) == mean_absolute_error(b, a)
+
+# 6) property: MAE is non-negative
+@pytest.mark.parametrize("a,b", [
+    ([1, 2, 3], [10, 20, 30]),
+    ([-100], [100]),
+    ([0.5, 1.5], [0.7, 1.4]),
+])
+def test_mae_non_negative(a, b):
+    assert mean_absolute_error(a, b) >= 0`} /> Notice the pattern: correctness cases, edge cases (empty, mismatch, NaN), and <em>property tests</em> (symmetry, non-negativity) that must hold for <em>any</em> valid input. Property tests are the closest you can get to a mathematical proof without a formal verifier — and they catch a whole class of bugs unit tests miss.</>
+    },
+  ]}
+/>
 
 <Quiz items={[
   {
@@ -229,7 +674,7 @@ print(flaky())          # "done" after 3 attempts`} />}
       { text: "Use hasattr(d, k)" },
       { text: "None of the above — use d[k] and hope for the best" },
     ],
-    explanation: <>EAFP: try d[k], catch KeyError. Atomic under concurrency and faster in the happy path.</>
+    explanation: <>EAFP: try d[k], catch KeyError. Atomic under concurrency and often faster in the happy path. <code>d.get(k, default)</code> is even better for this specific case.</>
   },
   {
     q: "What does `raise NewError('...') from original` do?",
@@ -239,16 +684,36 @@ print(flaky())          # "done" after 3 attempts`} />}
       { text: "Converts the new error to a warning" },
       { text: "Skips the current stack frame" },
     ],
-    explanation: <>`raise X from Y` sets `X.__cause__ = Y`, and Python prints both — 'The above exception was the direct cause of the following exception:'. It's the cleanest way to wrap while preserving the original.</>
+    explanation: <><code>raise X from Y</code> sets <code>X.__cause__ = Y</code>, and Python prints both — 'The above exception was the direct cause of the following exception:'. It's the cleanest way to wrap while preserving the original.</>
   },
   {
     q: "Your pytest test asserts `assert result == 42` and it fails. What does pytest print by default?",
     choices: [
       { text: "Only 'AssertionError'" },
-      { text: "The values of result and 42 side by side, plus a diff", correct: true },
+      { text: "The values of `result` and `42` side by side, plus a diff", correct: true },
       { text: "The full source of the test file" },
       { text: "Nothing — you need `-v`" },
     ],
     explanation: <>pytest's assertion rewriting shows both operands and a helpful diff, which is why you almost never need to write custom error messages on your assertions.</>
+  },
+  {
+    q: "Why is `except: pass` almost always a bug?",
+    choices: [
+      { text: "It's syntactically invalid" },
+      { text: "It catches KeyboardInterrupt/SystemExit and hides all failures silently", correct: true },
+      { text: "It's slower than try/finally" },
+      { text: "It only works in Python 2" },
+    ],
+    explanation: <>Bare <code>except:</code> catches every subclass of <code>BaseException</code> — including <code>KeyboardInterrupt</code>, so Ctrl-C stops working — and <code>pass</code> silently swallows the exception, hiding real bugs. Catch specific types and either handle meaningfully or re-raise.</>
+  },
+  {
+    q: "You want to filter logs so that only the DEBUG-level events for the 'atlas.train' logger are shown. Which is the right approach?",
+    choices: [
+      { text: "log.setLevel(DEBUG) on the root logger" },
+      { text: "logging.getLogger('atlas.train').setLevel(DEBUG) leaving others at INFO", correct: true },
+      { text: "print statements only" },
+      { text: "Add `if DEBUG:` around every log call" },
+    ],
+    explanation: <>Named loggers form a hierarchy (<code>atlas</code>, <code>atlas.train</code>, <code>atlas.data</code>), and each can have its own level. Setting <code>atlas.train</code> to DEBUG while leaving others at INFO is the fine-grained way to zoom in on one subsystem without drowning in noise.</>
   }
 ]} />

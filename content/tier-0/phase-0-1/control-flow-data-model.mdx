@@ -4,33 +4,33 @@ tier: 0
 phase: "0.1"
 ---
 
-export const truthyCode = `# Truthiness demo
+export const truthyCode = `# Every empty container is falsy in Python — a single, uniform rule
 things = [0, 0.0, "", [], {}, set(), None, False,
           1, -1, "x", [0], {0: 0}, {0}, True]
 for t in things:
     marker = "TRUE " if t else "false"
     print(f"{marker}  {type(t).__name__:8s} = {t!r}")`;
 
-export const forVsIndex = `# Two ways to iterate — one is Pythonic, the other isn't.
-
+export const forVsIndex = `# Two ways to iterate — one is Pythonic, the other isn't
 xs = ["arrival", "matrix", "solaris"]
 
-# Anti-pattern: index-then-look-up
+# Anti-pattern (C/Java reflex): index, then look up
+print("--- index-then-lookup (avoid) ---")
 for i in range(len(xs)):
     print(i, xs[i])
 
-# Idiomatic: enumerate gives you both
-print("-" * 20)
+# Idiomatic: enumerate gives you both index and value in one pass
+print("--- enumerate (do this) ---")
 for i, x in enumerate(xs):
     print(i, x)
 
-# When you need to walk two lists together
+# Walking two lists in parallel — zip is the tool
+print("--- zip (parallel iteration) ---")
 ys = [2016, 1999, 1972]
-print("-" * 20)
 for x, y in zip(xs, ys):
     print(x, y)`;
 
-export const matchCode = `# Pattern matching, not "switch"
+export const matchCode = `# Pattern matching (Python 3.10+) — NOT a switch statement
 def describe(obj):
     match obj:
         case []:
@@ -48,114 +48,457 @@ def describe(obj):
         case _:
             return "something else"
 
-for o in [[], [1], [1,2], [1,2,3,4], {"name":"a","age":20}, {"name":"b"}, 42]:
+for o in [[], [1], [1, 2], [1, 2, 3, 4],
+          {"name": "a", "age": 20}, {"name": "b"}, 42]:
     print(f"{o!r:30}  ->  {describe(o)}")`;
 
+export const protocolTraceCode = `# Every 'for' loop is really this:
+def manual_for(iterable, body):
+    it = iter(iterable)          # 1. get an iterator by calling __iter__
+    while True:
+        try:
+            item = next(it)      # 2. pull the next item via __next__
+        except StopIteration:    # 3. loop exits cleanly on this signal
+            break
+        body(item)               # 4. run the body
+
+xs = [10, 20, 30]
+manual_for(xs, print)            # exactly the same effect as: for x in xs: print(x)
+
+# Not just lists — strings, dicts, files, generators, sets, ranges all obey the same protocol
+manual_for("abc", print)
+manual_for({"a": 1, "b": 2}, print)      # iterates keys by default`;
+
+export const customIterCode = `# A custom iterable — you implement one protocol, Python treats it as first-class
+class Fibonacci:
+    """Yields the first n Fibonacci numbers."""
+    def __init__(self, n):
+        self.n = n
+
+    def __iter__(self):
+        a, b = 0, 1
+        for _ in range(self.n):
+            yield a          # 'yield' inside __iter__ makes a fresh iterator each call
+            a, b = b, a + b
+
+fib = Fibonacci(8)
+
+# Works with every builtin that consumes iterables — no magic, just protocol conformance
+print(list(fib))                 # -> [0, 1, 1, 2, 3, 5, 8, 13]
+print(sum(fib))                  # -> 33
+print(max(Fibonacci(20)))        # -> 4181
+print(", ".join(str(x) for x in Fibonacci(6)))
+
+# Even destructuring works
+a, b, c, *rest = Fibonacci(6)
+print("first three:", a, b, c, "  rest:", rest)`;
+
+export const streamMLCode = `# Streaming an ML dataset — the iteration protocol at work
+# In real ML this is exactly how HuggingFace 'datasets' and PyTorch 'IterableDataset' behave
+import random
+
+def synthetic_stream(n_samples=1_000_000, seed=0):
+    """Pretend infinite dataset — generates (x, y) pairs lazily.
+    Notice: no 1M rows in memory. Just a generator with state."""
+    rng = random.Random(seed)
+    for i in range(n_samples):
+        x = rng.gauss(0, 1)
+        y = 3 * x + 2 + rng.gauss(0, 0.1)   # linear relationship + noise
+        yield x, y
+
+def running_mean(stream, take):
+    """Iterate the stream once, compute mean of y in a rolling fashion."""
+    s = 0.0
+    n = 0
+    for i, (x, y) in enumerate(stream):
+        if i >= take: break
+        s += y
+        n += 1
+    return s / n
+
+# We can pull 1000 samples out of a "1M-sample" dataset with no upfront cost
+print(f"mean of first 1000 y-values : {running_mean(synthetic_stream(), 1000):.3f}")
+# Or the first 10,000. Nothing on disk, nothing preallocated in RAM.
+print(f"mean of first 10000 y-values: {running_mean(synthetic_stream(), 10000):.3f}")`;
+
 <Prerequisites items={[
-  { href: "/learn/foundations/python-craft/environment-tooling", label: "Environment · uv, Ruff", blurb: "Have a working Python 3.12 project you can run cells in." },
+  { href: "/learn/foundations/python-craft/environment-tooling", label: "Environment · uv, Ruff", blurb: "You need a working Python 3.12 project you can run cells in." },
 ]} />
 
 <Motivation title="Why 'for x in xs' is one of the deepest ideas in Python">
 
-Every programming language has `if` and `for`. Only Python (and a handful of others) makes them so *dead-simple* that beginners underestimate what's underneath. When you write `for x in xs`, Python is invoking a **protocol** — a formal contract that any object can implement to say "I know how to be looped over." That single protocol is why numpy arrays, pandas DataFrames, generators, dictionaries, files, and even your own custom classes all behave uniformly in a `for` loop.
+Every programming language has `if`, `for`, and `while`. In most of them, these are hardwired statements — the compiler knows what a "loop" looks like and can only apply it to specific types. C's `for` iterates over integers. Java's `for-each` requires the collection to implement one specific interface, `Iterable<T>`, from the standard library. Python does something different, and *radically simpler*.
 
-Understanding this lifts you from "using Python" to "reading it fluently".
+In Python, `for x in xs` is not really a statement about `xs`; it's an *ask*. Python asks `xs`: "Do you know how to be looped over? If yes, hand me an iterator." That is the entire mechanism. There is no special-cased list type, no special-cased dict type. `for` doesn't know or care what `xs` is. It only cares that `xs` fulfills a **protocol** — a small, informal contract that any object can implement to say "yes, I know how to be iterated."
+
+This single design choice is why numpy arrays, pandas DataFrames, PyTorch DataLoaders, HuggingFace datasets, generators, dictionaries, files, os.walk(), and even *your own custom classes* all behave uniformly in a `for` loop. It's why `sum(open('log.txt'))` works. It's why you can `for row in df.iterrows():` on a pandas DataFrame. It's why `for batch in loader:` on a PyTorch data loader streams billions of samples through your GPU without ever loading them all at once. **Everything you'll ever loop over in ML — from a two-element list to an infinite stream — is a variation on the same six-line protocol.**
+
+Understanding this lifts you from *using Python* to *reading it fluently*. In this chapter we unwrap the data model — the invisible contracts that make Python's simple surface work — and see how they turn into the very mechanisms your future ML pipelines depend on.
 
 </Motivation>
 
 <Intuition title="Two ideas that make Python make sense">
 
-1. **Everything is an object.** Ints, functions, classes, modules, exceptions — all objects. They all have a type. They all can be assigned to a variable, passed to a function, stored in a list.
+**1. Everything is an object.** Ints, floats, strings, functions, classes, modules, exceptions, even *types themselves* — all objects. They all have a type. They all can be assigned to variables, passed to functions, stored in containers, printed, compared. There is no split between "primitives" (like Java's `int`) and "real objects" (like Java's `Integer`). It's uniform, all the way down. This is why `sorted([1, 2, 3], key=abs)` — passing the `abs` *function* as an argument — works without ceremony. Functions are values.
 
-2. **Behavior is negotiated through protocols.** A `for` loop calls `iter(obj)` and then `next(...)` until it raises `StopIteration`. A `len(obj)` calls `obj.__len__()`. `a + b` calls `a.__add__(b)`. Every operator you write is really a method lookup. This is why writing an `__iter__` method on your class instantly makes it work in `for` loops — you didn't inherit anything, you just implemented the contract.
+**2. Behavior is negotiated through protocols.** When you write `len(xs)`, Python calls `xs.__len__()`. When you write `a + b`, Python calls `a.__add__(b)`. When you write `for x in xs`, Python calls `iter(xs)` — which calls `xs.__iter__()` — and then `next(...)` on the result until it raises `StopIteration`. Every operator, every builtin, every syntax rule that "just works" is really a **method lookup on a dunder method** ("dunder" = **d**ouble **under**score, like `__iter__`). Implement the dunder and the syntax works on your class instantly. You didn't inherit anything, you just *satisfied the contract*.
+
+These two ideas cover 90% of what makes Python read the way it does. Everything else in this chapter is a *consequence*.
 
 </Intuition>
 
 <Recall term="Iterable vs iterator">
 
-An **iterable** is any object that answers `iter()` — e.g. `list`, `dict`, `str`, `range`. An **iterator** is what `iter()` returns; it maintains state and yields the next item on each `next()` call. Iterables can be looped many times; iterators are one-shot.
+An **iterable** is any object that answers `iter()` — for example `list`, `dict`, `str`, `range`, or your own class if it implements `__iter__`. An **iterator** is what `iter()` returns; it maintains state (a cursor) and yields the next item on each `next()` call, raising `StopIteration` when exhausted. **Iterables can typically be looped many times** (each `iter()` call produces a fresh iterator). **Iterators are one-shot** — once exhausted, calling `next` again just keeps raising `StopIteration`. This distinction bites everyone once; usually the fix is calling `iter()` again on the iterable, not on the exhausted iterator.
 
 </Recall>
 
-<Angles>
+<Recall term="Dunder methods">
+
+A **dunder** ("double under") method is any method whose name starts and ends with two underscores: `__init__`, `__iter__`, `__len__`, `__eq__`, `__hash__`, `__add__`, `__enter__`, `__repr__`, and about fifty more. Each corresponds to a piece of Python syntax or a builtin function. Implementing the dunder gives your class a first-class relationship with that piece of syntax. This is the *entire* mechanism of "operator overloading" in Python — there is no special declaration, just a method with a specific name.
+
+</Recall>
+
+<Recall term="Truthiness">
+
+Every Python object can be evaluated in a boolean context (`if x:`, `while x:`, `not x`). By default an object is *truthy*; the rule is that specific objects are *falsy*: `None`, `False`, `0`, `0.0`, `""`, `[]`, `()`, `{}`, `set()`, and any user object whose `__bool__` returns False (or whose `__len__` returns 0). This is why `if not results:` reads as "if there are no results" — the empty list evaluates false. This uniformity across container types is a language design choice, not an accident.
+
+</Recall>
+
+<Angles intro={<>Five lenses on the data model. Each one exposes a different corner of the same underlying idea — objects and protocols, everywhere.</>}>
+
   <Angle type="code" title="Truthiness — the tyranny of the empty container">
     <RunnableCode title="what counts as True in Python?" code={truthyCode} />
 
-    **Every container's emptiness is falsy.** `[]`, `{}`, `""`, `set()`, `0`, `None`, `False`` — all fall through an `if x:` check. This is a feature, not a bug: `if not results` reads better than `if len(results) == 0`. But: `if x is None` when you specifically mean *None* — the empty list `[]` should not be conflated with "missing".
+    **Every empty container is falsy. Every non-empty container is truthy.** This uniformity is the language handing you a single tool that works everywhere:
+
+    - `if not results:` works whether `results` is a list, dict, set, string, or DataFrame.
+    - `while queue:` runs while there's anything in the queue and stops naturally when it's drained.
+    - Default arguments like `x = x or []` fold "user gave me nothing" and "user gave me an empty thing" into one branch.
+
+    The **trap** is when you specifically mean *None*, not *empty*. A caller passing an empty list `[]` might be saying "no data yet" while a caller passing `None` might be saying "I don't know". If those two cases require different responses, use `if x is None:` — the strict check — instead of `if not x:`. This is one of the most common bugs in early ML code: a function returns `[]` on "nothing matched" but the caller checks `if result is None`, silently discarding valid empty results.
+
   </Angle>
 
-  <Angle type="code" title="for over iterables, not indices">
+  <Angle type="code" title="`for` over iterables, not indices">
     <RunnableCode title="enumerate + zip" code={forVsIndex} />
 
-    Java-style `for i in range(len(xs))` is almost always the wrong reflex in Python. Reach for `enumerate` when you actually need the index and `zip` when you're walking parallel sequences. This isn't cosmetic — `enumerate` avoids off-by-one bugs, and `zip` stops at the shortest sequence for you.
+    Iterating with `for i in range(len(xs))` and then indexing `xs[i]` is a C-and-Java reflex that Python explicitly encourages you to unlearn. There is a better tool for every job:
+
+    - **Just the values:** `for x in xs:` — the shortest possible form.
+    - **Values with their index:** `for i, x in enumerate(xs):` — one pass, no off-by-one.
+    - **Two lists in lockstep:** `for x, y in zip(xs, ys):` — stops at the shortest input; use `zip(..., strict=True)` (3.10+) to error if lengths differ.
+    - **Sorted / reversed:** `for x in sorted(xs):` or `reversed(xs)`.
+    - **With a `dict`:** `for key in d`, `for value in d.values()`, `for k, v in d.items()`.
+
+    These aren't cosmetic differences. They're a whole family of iteration helpers that ride on top of the iteration protocol. Every one of them takes any iterable — list, dict, generator, DataFrame column, PyTorch dataset — and produces the "right shape" of output. Learn the little vocabulary once; it will be your reading vocabulary for the rest of your Python life.
+
   </Angle>
 
-  <Angle type="algebraic" title="Match statements — pattern matching, not switch">
-    <RunnableCode title="match/case with structural patterns" code={matchCode} />
+  <Angle type="algebraic" title="`match`/`case` — pattern matching, not `switch`">
+    <RunnableCode title="destructuring with match/case" code={matchCode} />
 
-    Python 3.10+ `match/case` isn't just a switch. It *destructures*: patterns match on shape, extract sub-parts as variables, and guard with `if`. If you've written OCaml, Rust, or Haskell, this is the same idea — and it makes AST-style code readable.
+    Python 3.10+ added `match/case` and, if you're a Java or C programmer, please stop calling it a switch statement. That name badly undersells what it does. `match/case` is a **destructuring pattern matcher** — the same construct that made OCaml, Haskell, and Rust so pleasant. It matches on the *shape* of the input (list of length 2, dict with certain keys, instance of a class, tuple starting with a specific value) and *extracts* pieces of it into local variables.
+
+    The result is that code which used to look like `if isinstance(x, list) and len(x) == 2: a, b = x; ...` becomes `case [a, b]:`. Code that used to be nested `isinstance` checks on JSON responses becomes `case {"status": "ok", "data": [first, *rest]}:`. This is what makes writing parsers, tree walkers, and API handlers in modern Python enjoyable rather than tedious.
+
+    Guard clauses (`case X if condition:`) let you add extra constraints. The wildcard `_` matches anything. The order of `case` arms matters: the first match wins, so put more specific patterns first.
+
   </Angle>
 
-  <Angle type="probabilistic" title="Identity vs equality">
-    `is` compares identity (same object in memory). `==` calls `__eq__`. `1 == 1.0` is `True` but `1 is 1.0` is `False`. **Use `is` only for the singletons: `None`, `True`, `False`.** Everything else: `==`.
+  <Angle type="computational" title="Identity vs equality — `is` vs `==`">
+
+    Two of Python's most-confused operators. `a is b` is **identity** — "are `a` and `b` the same object in memory?" Concretely, it's a pointer comparison. `a == b` is **equality** — "does `a.__eq__(b)` say they're equal?" Semantic. Overridable per class.
+
+    <CodeBlock language="python" title="the pit that catches every Python beginner exactly once" code={`# Numbers with the same value are equal but may not be identical
+1 == 1.0        # True (equality: same numeric value)
+1 is 1.0        # False (identity: different objects, one int + one float)
+
+# Small ints are cached, so this happens to be True — an implementation detail, don't rely on it
+a = 256
+b = 256
+a is b          # True (CPython caches small ints)
+
+# ... but with a large enough number, the cache stops applying
+a = 10_000
+b = 10_000
+a is b          # False in a fresh interpreter — cached separately per compilation
+
+# None, True, False are singletons — checking identity is the right move
+if x is None: ...       # correct
+if x == None: ...       # works, but a linter will yell — you meant identity`} />
+
+    **Rule:** use `is` only for the singletons: `None`, `True`, `False`. Everything else: `==`. Doing `if x is 3:` might work for years due to int-caching quirks and then break on a new number. Save the pain, use `==`.
+
   </Angle>
+
+  <Angle type="physical" title="Hashability — the price of being a dict key">
+
+    Only *hashable* objects can be dict keys or set members. Roughly, an object is hashable if its value never changes (immutable) — because the moment its value changes, its hash changes too, and it would be lost inside the dict's bucket structure. Tuples of hashables are hashable. Strings, ints, floats, frozensets: hashable. Lists, dicts, sets: **not** hashable — they're mutable.
+
+    <CodeBlock language="python" title="hashable = usable as a key" code={`d = {}
+d[(1, 2)] = "a tuple key works"            # OK, tuples are hashable
+d["hello"] = "strings are hashable"         # OK
+
+d[[1, 2]] = "won't work"                   # TypeError: unhashable type: 'list'
+d[{1, 2}] = "also won't work"              # TypeError: unhashable type: 'set'
+d[frozenset({1, 2})] = "frozen set is OK"  # frozensets are hashable`} />
+
+    **The consistency rule:** if `a == b`, then `hash(a) == hash(b)`. If you override `__eq__` on a custom class, override `__hash__` to match. Fail this and a set will contain apparent "duplicates" (they're in different buckets because their hashes disagree) — a bug that will burn hours before you spot it. This is why `@dataclass(frozen=True)` auto-derives `__hash__` for you: the class becomes immutable and its hash is derived from its fields, keeping the contract intact.
+
+  </Angle>
+
 </Angles>
 
 <Convergence>
 
-If you internalize *iteration is a protocol* and *empty is false*, you'll read half the standard library at a glance. `sum(open('data.txt'))` iterates lines. `max(xs, key=len)` calls `len` on each. `dict(pairs)` iterates two-tuples. These aren't tricks — they're one idea repeated.
+The whole chapter reduces to *four sentences you should internalize*: **Everything is an object. Behavior is negotiated through dunder protocols. Iteration is a protocol (`__iter__` returns an iterator; iterators raise `StopIteration` when done). Empty is false, non-empty is true, and equality is what `__eq__` says.** If you get these four sentences into your fingers, you can read half the Python standard library at a glance. `sum(open('data.txt'))` iterates lines. `max(xs, key=len)` calls `len` on each. `dict(pairs)` iterates two-tuples. `sorted(rows, key=lambda r: r['age'])` iterates and sorts. **These aren't tricks — they're the same idea, repeated.**
 
 </Convergence>
 
+<Derivation title="What a `for` loop actually compiles to">
+
+The `for` statement in Python isn't magic — it's syntax sugar for a specific dance involving `iter()`, `next()`, and `StopIteration`. Once you see the desugaring, you can predict how *any* iterable behaves in *any* context.
+
+<Step n={1} math={<span>Python evaluates the expression to the right of <code>in</code>: <br/> <code>it = iter(iterable)</code></span>}>
+`iter()` is a builtin that calls the object's `__iter__` method. That method must return an **iterator** — an object with a `__next__` method. For a list, `list.__iter__()` returns a fresh list_iterator each time. For a generator function, calling it *is* the iterator (generators are iterators). For a file object, `file.__iter__()` returns the file itself, positioned at its current byte offset.
+</Step>
+
+<Step n={2} math={<span>Python calls <code>next(it)</code>:<br/> <code>item = next(it)</code></span>}>
+Under the hood, `next(it)` is `it.__next__()`. The iterator returns the next value in its sequence, or raises the `StopIteration` exception if there are no more values. This is *not* an error — `StopIteration` is Python's official "we're done" signal. Any function that iterates catches it and interprets it as "loop ends here."
+</Step>
+
+<Step n={3} math={<span>Python binds the value to the loop variable(s):<br/> <code>x = item</code>  (or destructured, e.g. <code>i, x = item</code>)</span>}>
+This is why `for i, x in enumerate(xs):` works — `enumerate` yields two-tuples, and Python's tuple-destructuring in assignment kicks in. It also works for arbitrarily nested shapes: `for (a, b), c in pairs_of_pairs:` binds `a`, `b`, `c` correctly.
+</Step>
+
+<Step n={4} math={<span>Python runs the loop body with those bindings, then jumps back to step 2.</span>}>
+Every iteration, the whole cycle repeats: call `next`, bind, run body. Nothing about the *body* affects the mechanics of iteration. That's why `break` (jump out) and `continue` (jump to step 2 early) work uniformly. It's also why modifying the iterable *during* the loop is dangerous — the iterator holds internal state that assumes the underlying container isn't being changed under it.
+</Step>
+
+<Step n={5} math={<span>On <code>StopIteration</code>, Python cleanly exits the loop.</span>}>
+If the loop had a `for ... else:` clause, the `else` block runs *now* — because the loop finished normally, without `break`. This is why `for/else` is used for search patterns: "look for something; if you never found it, do the else." Not a common idiom, but very readable when it fits.
+</Step>
+
+<Step n={6} math={<span>Sanity check: this exact same protocol applies to <em>every</em> iterable.</span>}>
+The `for` loop doesn't know or care whether it's iterating a list, a dict, a generator, a file, a torch DataLoader, or your custom `Countdown` class. The abstraction is *airtight* — implement `__iter__` correctly and Python promotes your object to first-class citizen of every function that takes an iterable: `sum`, `max`, `min`, `list`, `tuple`, `set`, `dict`, `sorted`, `reversed`, `enumerate`, `zip`, `map`, `filter`, `any`, `all`, `next` — plus every third-party library that uses iteration internally, which is most of them.
+</Step>
+
+</Derivation>
+
+<Example title="Tracing the protocol by hand">
+
+<RunnableCode title="a manually-implemented for loop, then confirming it matches" code={protocolTraceCode} />
+
+The cell above defines `manual_for` — a function that does exactly what a Python `for` loop does, using only `iter`, `next`, and `try/except StopIteration`. Run it once with a list, once with a string, once with a dict. All three work identically, because all three implement the same protocol.
+
+**Take away:** every `for` you write in the rest of your career is that six-line function. When it doesn't behave the way you expect, you now know exactly where to look: either `__iter__` returned the wrong thing, or `__next__` isn't raising `StopIteration` at the right time.
+
+</Example>
+
+<Example title="Building your own iterable in one class">
+
+<RunnableCode title="a Fibonacci iterable — first-class citizen of the language" code={customIterCode} />
+
+Notice we defined `__iter__` as a **generator** (using `yield`). That's a shortcut: any time you write `yield` inside `__iter__`, Python turns the method into a generator function, and calling it returns a fresh iterator every time. This is by far the easiest way to make a class iterable, and it plays perfectly with the protocol — no need to write `__next__` yourself.
+
+Now `Fibonacci(8)` is a first-class citizen of Python. Every function that expects an iterable works: `list`, `sum`, `max`, `", ".join(...)`, destructuring assignment `a, b, *rest = fib`. No inheritance, no framework, no registration. **This is what "duck typing" means concretely — walks like an iterable, quacks like an iterable, is treated as an iterable by the entire language.**
+
+</Example>
+
 <Nuance>
 
-**Mutable default arguments are a trap.** `def append(x, out=[]):` — the `[]` is created *once* at definition time and shared across all calls. Use `out=None` and set inside.
+**Mutable default arguments are a trap that catches every Python programmer exactly once.** `def append(x, out=[]):` — the `[]` is evaluated *once at function-definition time* and shared across every call. Subsequent calls see the modifications from previous calls. The fix is universal: use `out=None` in the signature and set `out = [] if out is None else out` inside. Same story for `dict`, `set`, and any mutable default.
 
-**`for/else` and `while/else` exist.** The `else` runs when the loop finishes *without* `break`. Useful for search-style loops. Read-friendly but rare in the wild.
+**`for/else` and `while/else` exist.** The `else` block runs when the loop finishes *without* hitting `break`. Useful for search-style loops: "look for X; if you never found it, do else." Rare in practice; when it appears, read carefully — the semantics are unlike any other language's `else`.
 
-**Hashability = immutability, roughly.** Tuples and strings are hashable; lists and dicts are not. Only hashable objects can be dict keys or set members. If `__eq__` says two objects are equal, `__hash__` must agree — else your set will contain "duplicates" that don't appear equal.
+**Hashability = immutability (roughly).** Tuples of hashables are hashable; frozensets are; strings and numbers are. Lists, dicts, sets are not — they're mutable, and putting a mutable object in a set would break the set's invariant the moment the object mutated.
+
+**`__eq__` and `__hash__` must agree.** If you override `__eq__` on a class, you *must* also override `__hash__` — or set `__hash__ = None` to explicitly forbid using the class as a dict key. Python enforces this: by default, if you override `__eq__` without touching `__hash__`, `__hash__` is set to `None` automatically and hashing the object raises. This is the language protecting you from a devastating class of bugs.
+
+**`is not` is one operator, not a negation.** `if x is not None:` is the idiomatic form. Don't write `if not x is None:` — it's harder to read and precedence-fragile.
+
+**`match` is not `switch` and doesn't fall through.** Each `case` is either taken or not; there is no fall-through to the next case. Also: `case x:` binds a variable named `x` (matches anything), which is almost never what you want — use `case _:` for "anything" or `case value if value > 0:` for a guarded match. Beginners get bitten by `case DEFAULT:` "matching" and binding a local `DEFAULT` instead of comparing against a constant; use `case DEFAULT_CONSTANT:` where the name is dotted or all-caps *from an enum*, or explicitly `case value if value == DEFAULT:`.
+
+**Iterator exhaustion.** Once an iterator is exhausted, iterating it again just returns nothing — no error. This is the source of the classic bug `data = zip(xs, ys); list(data); list(data)` — the second `list(data)` is empty. If you need the results twice, materialize once: `data = list(zip(xs, ys))`.
+
+**Dict iteration order is insertion order** (guaranteed since Python 3.7). This is a language-level guarantee, not an implementation detail. You can rely on it.
 
 </Nuance>
 
+<RealWorldML title="Iteration protocols in a real ML data pipeline">
+
+The single most important use of custom iterables in ML is **streaming datasets** — feeding a model examples one batch at a time without ever loading the full dataset into memory. This lets you train on datasets bigger than RAM (or disk!), stream from URLs, do on-the-fly augmentation, and so on. Every major framework — PyTorch's `IterableDataset`, TensorFlow's `tf.data`, HuggingFace's `datasets` streaming mode — is built on Python's iteration protocol.
+
+<RunnableCode title="a streaming dataset — no memory, no preallocation" code={streamMLCode} />
+
+**Line by line, why this is what a real ML pipeline looks like:**
+
+1. `synthetic_stream` is a *generator function* — the `yield` inside it makes calling it produce a generator (which is an iterator) instead of running the function body. Nothing is generated until you start pulling items with `next` or `for`.
+2. Each call to the generator's `__next__` runs the function body until the next `yield`, returns that value, and pauses. State (`i`, `rng`, `x`, `y`) is preserved between yields. **This is a coroutine-in-disguise, and it's the reason streaming works at all.**
+3. `running_mean` iterates the stream with a plain `for` loop. Nothing framework-specific. It doesn't know it's being fed by a generator — as far as `for` is concerned, it's just some iterable.
+4. Because the generator is lazy, "1M samples" never exist in memory simultaneously. Only one sample is alive at any moment — the one currently between `yield` and the next iteration of the caller.
+
+**Substitute a real dataset for `synthetic_stream` and you have exactly the shape of a PyTorch `IterableDataset`:**
+
+```python
+class MyDataset(torch.utils.data.IterableDataset):
+    def __iter__(self):
+        for line in open("giant_dataset.jsonl"):
+            record = json.loads(line)
+            x = preprocess(record["input"])
+            y = record["label"]
+            yield x, y
+```
+
+That's a fully functional PyTorch dataset. Wrap it in a `DataLoader` and it batches for you. Feed the loader to your training loop with `for batch in loader:` and — you guessed it — the same six-line iteration protocol runs the show. **Every deep-learning training loop is fundamentally a `for` over `iter()` and `next()`. The rest is bookkeeping.**
+
+</RealWorldML>
+
 <CodeItYourself
   title="Implement a tiny 'iterable' class"
-  spec={<>Write a class <code>Countdown(n)</code> that when iterated yields <code>n, n-1, ..., 1</code>, then stops. Confirm <code>list(Countdown(3)) == [3, 2, 1]</code>. Also make <code>len(Countdown(3))</code> return 3.</>}
+  spec={<>Write a class <code>Countdown(n)</code> that when iterated yields <code>n, n-1, ..., 1</code>, then stops. Confirm <code>list(Countdown(3)) == [3, 2, 1]</code>. Also make <code>len(Countdown(3)) == 3</code> and make the same instance re-iterable (calling <code>for x in cd:</code> twice on the same instance should each produce the full countdown).</>}
   hints={[
-    "Iteration protocol: __iter__ returns an iterator (often self); __next__ returns the next value or raises StopIteration.",
-    "For len() support you need __len__.",
-    "The iterator is stateful — store the current value on the instance."
+    "Iteration protocol: __iter__ returns an iterator. If __iter__ uses yield, Python automatically makes a fresh generator each call — perfect for re-iterability.",
+    "For len() support you need __len__. The container's declared length is n, not how many items are 'left'.",
+    "If you write __iter__ with 'yield' (a generator method), you don't need __next__ at all — the generator is the iterator."
   ]}
   solution={<CodeBlock language="python" title="Countdown" code={`class Countdown:
-    def __init__(self, n):
+    def __init__(self, n: int):
         self.n = n
-        self._current = n
 
     def __iter__(self):
-        # reset so the same instance can be iterated fresh
-        self._current = self.n
-        return self
+        # 'yield' makes this a generator method — a new generator per call,
+        # so re-iteration works out of the box
+        for i in range(self.n, 0, -1):
+            yield i
 
-    def __next__(self):
-        if self._current <= 0:
-            raise StopIteration
-        v = self._current
-        self._current -= 1
-        return v
-
-    def __len__(self):
+    def __len__(self) -> int:
         return self.n
 
-print(list(Countdown(3)))  # [3, 2, 1]
-print(len(Countdown(5)))   # 5`} />}
+# All of these work because we satisfied the two protocols
+print(list(Countdown(3)))        # [3, 2, 1]
+print(len(Countdown(5)))         # 5
+print(sum(Countdown(4)))         # 10
+print(max(Countdown(10)))        # 10
+
+# Re-iterable: each 'for' calls __iter__ fresh, gets a new generator
+cd = Countdown(3)
+print(list(cd))                   # [3, 2, 1]
+print(list(cd))                   # [3, 2, 1] — full countdown again, not empty`} />}
 />
 
+<LifeLesson title="Protocols beat inheritance — a mindset for building anything">
+
+Python's data model teaches a design lesson that goes far beyond programming: **describe the ability, not the identity.** A `for` loop doesn't need `xs` to *be* a specific type; it just needs `xs` to *know how to hand over an iterator*. A `len()` call doesn't need the object to inherit from anything; it just needs `__len__`. This is called **duck typing** — if it walks like a duck and quacks like a duck, treat it as a duck.
+
+The same pattern shows up everywhere real work happens. Great teams don't hire people because of their job title (an "identity"); they hire people because of demonstrated ability to *ship, communicate, take feedback, and level up others* (the "protocols" that matter). Great habits aren't defined by what you call yourself ("I'm a runner"); they're defined by the small daily behaviors that fulfill the contract of the identity ("I run three miles most mornings"). Great codebases don't work because of an elaborate inheritance hierarchy; they work because a small set of well-defined contracts — protocols — let independent pieces plug into each other.
+
+The trap is inheritance. It's tempting to say "well, my class should extend Loader, which extends BaseLoader, which extends AbstractIO, ..." — until three years later no one can explain how a change propagates. The Python answer, and often the right answer in life, is: **specify the smallest contract you need, and let anything that fulfills it plug in.** In software this is called the *interface principle*. In work it's called *hiring for behaviors, not credentials*. In life it's called *judging by fruit, not by roots*. Same idea, different domain.
+
+Every time you write a class in the rest of this course, ask: *what protocol am I fulfilling?* If you can name it (iterable, container, context manager, hashable), you're building on Python's biggest strength. If you can't, you're probably writing a class where a function would do.
+
+</LifeLesson>
+
+<MLConnection>
+
+The data model shows up in every corner of modern ML — you'll spot it once you know what to look for:
+
+- **Data loaders.** PyTorch's `DataLoader`, TensorFlow's `tf.data.Dataset`, HuggingFace's `datasets` all implement `__iter__` (and sometimes `__len__`). Your training loop just `for batch in loader:` — the loader might be streaming from S3, shuffling in-memory, or reading a distributed shard, and the code doesn't care. That's the iteration protocol earning its keep.
+- **PyTorch Modules.** `nn.Module` overrides `__call__` so `model(x)` runs the forward pass. It overrides `__setattr__` to auto-register submodules. It overrides `__iter__` to iterate parameters. Every convenience you love about `torch.nn` is a dunder.
+- **Custom collate functions.** When you write a `collate_fn(batch)` for a DataLoader, you're processing a *list of samples* pulled by iteration and returning a batched tensor. Iteration comes in, tensor goes out.
+- **DataFrame iteration.** `for row in df.iterrows():` and `for col in df.columns:` — both use the iteration protocol. `df @ M` uses `__matmul__`. `df + s` uses `__add__`. All dunders.
+- **RAG and vector stores.** `for chunk in retriever.retrieve(query):` — retrieval is often a generator that yields matches lazily, backed by a vector database.
+- **Config libraries.** Pydantic models override `__init__` for validation, `__repr__` for logging, `__eq__` for testing. `hydra` uses `__getitem__` for dotted-key access.
+- **Custom types.** When you write your own `Sample` or `Batch` dataclass, you'll often add `__len__` for size, `__iter__` for unpacking, `__getitem__` for indexing. Each dunder lets your object slot into a piece of Python syntax as if it were built in.
+
+Learn the data model and you can *read* half of PyTorch's, scikit-learn's, and pandas' source code with your feet up.
+
+</MLConnection>
+
 <Summary bullets={[
-  "Everything is an object; behavior is negotiated through dunder protocols (__iter__, __len__, __eq__, ...).",
-  "Empty containers are falsy — use `if xs:` not `if len(xs) > 0:`.",
-  "Iterate values with `for x in xs`, indices with `enumerate`, parallel with `zip`.",
-  "`match/case` destructures — use it for tree-shaped data.",
-  "`is` for identity (None/True/False), `==` for equality."
+  "Everything is an object; behavior is negotiated through dunder protocols (__iter__, __len__, __eq__, __hash__, __add__, ...).",
+  "`for x in xs` desugars to iter/next/StopIteration — this is the entire mechanism, and it applies to every iterable.",
+  "Empty containers are falsy — use `if xs:` not `if len(xs) > 0:`. Use `if x is None:` when None specifically matters.",
+  "Iterate values with `for x in xs`, indices with `enumerate`, parallel with `zip`. Dict iteration order = insertion order.",
+  "`match/case` destructures (list length, dict keys, class shape) — treat it as pattern matching, not a switch.",
+  "`is` for identity (None/True/False), `==` for equality. Small-int caching is an implementation detail, don't rely on it.",
+  "Hashable ≈ immutable. `__eq__` and `__hash__` must agree, or sets misbehave silently.",
+  "Every ML data loader you'll use is a class implementing __iter__. Same six-line protocol, all the way down."
 ]} />
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>Which of these are falsy? <code>0, "0", [], [0], None, False, "False", {}</code></>,
+      hint: <>"Empty" is the pattern; check each container's emptiness.</>,
+      answer: <>Falsy: <code>0, [], None, False, {}</code>. Truthy: <code>"0"</code> (non-empty string), <code>[0]</code> (non-empty list), <code>"False"</code> (non-empty string — the letters False are not the value False!). The last one catches beginners.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>Write the idiomatic form of <code>for i in range(len(xs)): print(i, xs[i])</code>.</>,
+      hint: <>Two variables come out of one builtin.</>,
+      answer: <><code>for i, x in enumerate(xs): print(i, x)</code>. Never write <code>range(len(...))</code> — <code>enumerate</code> is safer, shorter, and works on any iterable (not just sequences with <code>len</code>).</>
+    },
+    {
+      difficulty: "easy",
+      q: <>Predict the output: <br/> <code>a = "hello"; b = "hello"</code><br/><code>print(a == b, a is b)</code></>,
+      hint: <>String interning is an implementation detail.</>,
+      answer: <>Prints <code>True True</code> in CPython for short literal strings due to interning. But <b>never rely on this</b>: <code>a = "hello world"*1000; b = "hello world"*1000; a is b</code> is False. Use <code>==</code> for equality, <code>is</code> only for None/True/False.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Explain why this raises: <br/><code>{"{'a': 1}"} in a set.</code></>,
+      hint: <>Dicts are mutable.</>,
+      answer: <>Dicts are unhashable because they're mutable — the hash could change while the dict sits in the set. Sets require hashable members (they use hashes to place items in buckets). Fix: convert to <code>frozenset(d.items())</code> or use a tuple of key-value pairs.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>What is wrong with this function and how do you fix it?<br/><code>def append_item(item, target=[]):</code><br/><code>&nbsp;&nbsp;&nbsp;&nbsp;target.append(item)</code><br/><code>&nbsp;&nbsp;&nbsp;&nbsp;return target</code></>,
+      hint: <>Default arguments are evaluated once.</>,
+      answer: <>The list <code>[]</code> in the default is created *once* at function-definition time and shared across every call. So <code>append_item(1); append_item(2)</code> returns <code>[1, 2]</code>, not two independent <code>[1]</code>, <code>[2]</code>. Fix: use <code>target=None</code> and set <code>target = [] if target is None else target</code> inside.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Predict and explain:<br/><code>pairs = zip([1,2,3], "abc")</code><br/><code>list(pairs)</code><br/><code>list(pairs)</code></>,
+      hint: <>Iterators are one-shot.</>,
+      answer: <>First <code>list(pairs)</code> yields <code>[(1,'a'), (2,'b'), (3,'c')]</code>. Second <code>list(pairs)</code> yields <code>[]</code>. <code>zip</code> returns an iterator, and iterators exhaust after one pass. To keep the result, materialize once: <code>pairs = list(zip(...))</code>.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Write a class <code>ReversibleRange(start, stop)</code> that supports <em>both</em> forward iteration (<code>for x in r</code>) and reversed iteration (<code>for x in reversed(r)</code>), and also <code>len(r)</code>. Do it minimally — override the smallest set of dunders that satisfies all three.</>,
+      hint: <>__reversed__, __iter__, __len__.</>,
+      answer: <><CodeBlock language="python" title="ReversibleRange" code={`class ReversibleRange:
+    def __init__(self, start: int, stop: int):
+        self.start, self.stop = start, stop
+    def __iter__(self):
+        return iter(range(self.start, self.stop))
+    def __reversed__(self):
+        return iter(range(self.stop - 1, self.start - 1, -1))
+    def __len__(self) -> int:
+        return max(0, self.stop - self.start)
+
+r = ReversibleRange(3, 8)
+print(list(r))           # [3, 4, 5, 6, 7]
+print(list(reversed(r))) # [7, 6, 5, 4, 3]
+print(len(r))            # 5`} /> The lesson: adding one dunder unlocks one piece of syntax. The whole language is composed this way.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Explain why the following is a set with two "duplicate" items despite the two Points being equal. What's the fix?<br/><CodeBlock language="python" title="broken Point" code={`class Point:
+    def __init__(self, x, y):
+        self.x, self.y = x, y
+    def __eq__(self, other):
+        return (self.x, self.y) == (other.x, other.y)
+
+s = {Point(1, 2), Point(1, 2)}
+print(len(s))   # 2 !`} /></>,
+      hint: <>__eq__ and __hash__ must agree.</>,
+      answer: <>Overriding <code>__eq__</code> without overriding <code>__hash__</code> makes Python set <code>__hash__</code> to <code>None</code> — the class becomes unhashable. But the two Points still land in the set because sets check by hash first, and if hash isn't None, only equal-hash items get compared. Actually here Python <em>should</em> refuse to hash the Points at all — meaning the code above throws <code>TypeError</code>. If you set <code>__hash__ = None</code> explicitly, it will. If Python's automatic policy misfires (older versions, subclassing quirks), the fix is universal: whenever you override <code>__eq__</code>, override <code>__hash__</code> to be consistent (usually <code>hash((self.x, self.y))</code>) or set <code>__hash__ = None</code> to explicitly forbid hashing. Better still — use <code>@dataclass(frozen=True)</code> which does all this correctly for you.</>
+    },
+  ]}
+/>
 
 <Quiz items={[
   {
@@ -169,7 +512,7 @@ print(len(Countdown(5)))   # 5`} />}
     explanation: <>The <code>for</code> loop calls <code>iter(obj)</code>, which calls <code>obj.__iter__()</code>. That returns something with a <code>__next__</code>. No <code>__len__</code> or <code>__hash__</code> is needed.</>
   },
   {
-    q: "Which check is idiomatic Python?",
+    q: "Which check is idiomatic Python for 'results is non-empty'?",
     choices: [
       { text: "if len(results) == 0:" },
       { text: "if results == []:" },
@@ -186,6 +529,26 @@ print(len(Countdown(5)))   # 5`} />}
       { text: "[1, 2, 3]", correct: true },
       { text: "42" },
     ],
-    explanation: <>Lists are mutable and unhashable. Tuples, strings, and numbers are all hashable.</>
+    explanation: <>Lists are mutable and therefore unhashable. Tuples, strings, and numbers are all hashable.</>
+  },
+  {
+    q: "What is `list(zip([1,2,3], [10,20]))`?",
+    choices: [
+      { text: "[(1,10), (2,20), (3,None)]" },
+      { text: "[(1,10), (2,20)]", correct: true },
+      { text: "TypeError" },
+      { text: "[(1,10,None), (2,20,None), (3,None,None)]" },
+    ],
+    explanation: <>Plain <code>zip</code> stops at the shortest input. If you want strict length-matching, use <code>zip(..., strict=True)</code> (Python 3.10+), which raises ValueError on length mismatch.</>
+  },
+  {
+    q: "You override `__eq__` on a custom class but forget `__hash__`. What happens when you put instances in a set?",
+    choices: [
+      { text: "It works; Python auto-hashes based on id" },
+      { text: "Python raises TypeError because __hash__ is auto-set to None", correct: true },
+      { text: "Equal objects are silently treated as duplicates" },
+      { text: "The set works but contains extra items" },
+    ],
+    explanation: <>Python's rule: if you override <code>__eq__</code>, <code>__hash__</code> is automatically set to <code>None</code>, and hashing (or set membership) raises <code>TypeError</code>. This is the language forcing you to think about the eq/hash consistency rule.</>
   }
 ]} />
