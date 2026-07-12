@@ -194,7 +194,7 @@ const tier0: Tier = {
             "Random state & seeding for reproducibility",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "numpy-broadcasting-slicing",

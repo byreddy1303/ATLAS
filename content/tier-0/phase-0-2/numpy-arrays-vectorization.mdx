@@ -1,0 +1,684 @@
+---
+title: NumPy — arrays & vectorization
+tier: 0
+phase: "0.2"
+---
+
+export const introCode = `import numpy as np
+
+# an ndarray from a Python list — one line, but a completely different object
+a = np.array([1, 2, 3, 4, 5])
+print("value :", a)
+print("shape :", a.shape)         # (5,)   — a 1-D array of length 5
+print("dtype :", a.dtype)         # int64  — every element is a 64-bit signed int
+print("ndim  :", a.ndim)          # 1      — one dimension
+print("size  :", a.size)          # 5      — total number of elements
+print("nbytes:", a.nbytes)        # 40     — 5 elements × 8 bytes each
+
+# a 2-D array — rows and columns
+b = np.array([[1, 2, 3],
+              [4, 5, 6]])
+print()
+print("value:", b)
+print("shape:", b.shape)          # (2, 3)   — 2 rows, 3 columns
+print("dtype:", b.dtype)          # int64
+print("ndim :", b.ndim)           # 2
+
+# make one from scratch
+zeros = np.zeros((2, 4))          # 2×4 of float64 zeros
+ones  = np.ones(6, dtype=np.int32)     # 6 of int32 ones
+rng   = np.arange(0, 10, 2)       # [0 2 4 6 8]  — like Python's range but returns array
+lin   = np.linspace(0, 1, 5)      # [0.   0.25 0.5  0.75 1.  ]  — 5 evenly spaced points
+print()
+print("zeros :", zeros)
+print("ones  :", ones)
+print("arange:", rng)
+print("linsp :", lin)`;
+
+export const anatomyCode = `import numpy as np
+
+# The four fields inside every ndarray
+a = np.arange(12).reshape(3, 4)    # 3 rows, 4 cols — [[0,1,2,3],[4,5,6,7],[8,9,10,11]]
+print(a)
+print()
+print("shape   :", a.shape)        # (3, 4)
+print("dtype   :", a.dtype)        # int64
+print("strides :", a.strides)      # (32, 8) — bytes to skip to move one row / one column
+print("data    :", a.data)         # <memory at 0x...> — the raw contiguous buffer
+print("itemsize:", a.itemsize)     # 8 (bytes per int64)
+print("nbytes  :", a.nbytes)       # 96 = 12 elements × 8 bytes
+
+# Strides explained: to move one row DOWN (axis 0), skip 32 bytes (= 4 ints × 8 bytes each).
+# To move one column RIGHT (axis 1), skip 8 bytes (= 1 int × 8 bytes).
+# The buffer is one long slab — the shape/strides are just an interpretation of it.
+
+# Reshape is FREE — it just changes shape and strides, doesn't touch the buffer
+b = a.reshape(2, 6)                # same 12 numbers, viewed as 2×6
+print()
+print("reshaped:", b.shape, b.strides)
+print("same buffer? ", a.data == b.data)  # True — they share memory!
+
+# Change the dtype view — see the same bytes as a different type
+c = a.view(np.int32)               # 12 int64 elements = 24 int32 elements
+print()
+print("as int32 :", c.shape, c.dtype)  # doubles the count`;
+
+export const vectorizedCode = `import numpy as np, time
+
+# The classic story: same computation, two worlds
+N = 5_000_000
+
+# ------------------- pure Python -------------------
+xs = list(range(N))
+ys = list(range(N))
+t0 = time.perf_counter()
+zs_py = [x + y for x, y in zip(xs, ys)]
+py_ms = (time.perf_counter() - t0) * 1000
+print(f"python list comprehension : {py_ms:7.1f} ms")
+
+# ------------------- NumPy vectorized ------------------
+xa = np.arange(N)
+ya = np.arange(N)
+t0 = time.perf_counter()
+zs_np = xa + ya                          # ONE operator; ONE C loop; ZERO Python overhead per element
+np_ms = (time.perf_counter() - t0) * 1000
+print(f"numpy vectorized add      : {np_ms:7.1f} ms")
+
+print(f"\\nspeedup                   : {py_ms/np_ms:6.1f}× faster")
+print("first 5 results agree     :", zs_py[:5] == zs_np[:5].tolist())
+
+# The speedup varies (usually 20×–500× depending on Python vs C runtime),
+# but the shape of the story never changes: NumPy trades one C-level loop
+# for millions of Python-level interpreter steps.`;
+
+export const ufuncCode = `import numpy as np
+
+# A ufunc is any function that operates *element-wise* on an array
+# and returns an array of the same shape. NumPy ships hundreds of them.
+
+a = np.array([1.0, 2.0, 3.0, 4.0])
+
+# arithmetic ufuncs — these are what +, -, *, /, ** actually call under the hood
+print("a + 10  :", a + 10)                # [11 12 13 14]
+print("a * 2   :", a * 2)                 # [ 2  4  6  8]
+print("a ** 2  :", a ** 2)                # [ 1  4  9 16]
+
+# math ufuncs
+print("sqrt    :", np.sqrt(a))            # [1.    1.414 1.732 2.   ]
+print("exp     :", np.exp(a))
+print("log     :", np.log(a))
+print("sin     :", np.sin(a))
+
+# two-array ufuncs — apply element-by-element to matching positions
+b = np.array([10, 20, 30, 40])
+print("a + b   :", a + b)                 # [11 22 33 44]
+print("a > 2   :", a > 2)                 # [False False  True  True]
+
+# reductions — fold a whole array to one number (or one axis to a smaller array)
+m = np.array([[1, 2, 3],
+              [4, 5, 6]])
+print()
+print("sum all       :", m.sum())         # 21
+print("sum along rows:", m.sum(axis=1))   # [ 6 15] — one number per row
+print("sum along cols:", m.sum(axis=0))   # [5 7 9] — one number per col
+print("max, argmax   :", m.max(), m.argmax())     # 6, 5 (flat index)
+print("mean, std     :", m.mean(), m.std().round(3))`;
+
+export const dtypeCode = `import numpy as np
+
+# dtype = size + interpretation of each element. Get this wrong and everything downstream lies.
+
+x8   = np.array([1, 2, 3], dtype=np.int8)
+x64  = np.array([1, 2, 3], dtype=np.int64)
+f32  = np.array([1, 2, 3], dtype=np.float32)
+print("int8   nbytes:", x8.nbytes)        # 3
+print("int64  nbytes:", x64.nbytes)       # 24
+print("float32 nbytes:", f32.nbytes)      # 12
+
+# integer overflow — int8 wraps at 127
+o = np.array([120, 121, 122], dtype=np.int8)
+print("int8 + 10 =", o + np.int8(10))     # [-126 -125 -124]  — silent wrap-around!
+
+# dtype promotion — the two-argument rule
+a = np.array([1, 2, 3], dtype=np.int32)
+b = np.array([1.0, 2.0, 3.0], dtype=np.float64)
+print("int32 + float64 =", (a + b).dtype)  # float64 — the "larger" wins
+
+# NaN — the poison pill in floating-point arrays
+z = np.array([1.0, np.nan, 3.0])
+print("mean with NaN:", z.mean())          # nan — one NaN corrupts the reduction
+print("nan-safe mean:", np.nanmean(z))     # 2.0 — nan-aware sibling
+
+# type inspection habit
+print("is finite:", np.isfinite(z))        # [ True False  True]`;
+
+export const rngCode = `import numpy as np
+
+# Modern RNG (NumPy 1.17+): Generator API with an explicit state.
+# NEVER use the global np.random.rand / .randn in real code — the state is shared
+# process-wide and impossible to reproduce.
+
+rng = np.random.default_rng(seed=42)       # explicit seed
+
+# common distributions
+u  = rng.uniform(0, 1, size=5)             # 5 samples from Uniform[0, 1)
+n  = rng.normal(0, 1, size=(2, 3))         # 2×3 Standard Normal
+i  = rng.integers(0, 10, size=5)           # 5 integers in [0, 10)
+c  = rng.choice(["a", "b", "c"], size=4, p=[0.5, 0.3, 0.2])
+
+print("uniform :", u.round(3))
+print("normal  :\\n", n.round(3))
+print("integers:", i)
+print("choice  :", c)
+
+# reproducibility — a fresh Generator with the same seed gives the same numbers, always
+rng2 = np.random.default_rng(seed=42)
+print()
+print("reproduces? ", np.array_equal(rng2.uniform(0, 1, size=5), u))    # True
+
+# shuffling
+xs = np.arange(10)
+rng.shuffle(xs)                            # in-place
+print("shuffled:", xs)`;
+
+export const reductionsCode = `import numpy as np
+
+# 10 million temperatures from a synthetic sensor
+rng = np.random.default_rng(seed=7)
+temps = 15 + 8 * rng.standard_normal(size=10_000_000)   # mean 15°C, std 8°C
+
+# a single reduction over 10M numbers — one C loop, ~30-80 ms
+print("count :", temps.size)
+print("mean  :", temps.mean().round(3))              # ~15
+print("std   :", temps.std().round(3))               # ~8
+print("min   :", temps.min().round(3))
+print("max   :", temps.max().round(3))
+
+# quantiles — the whole distribution in one call
+qs = np.quantile(temps, [0.01, 0.25, 0.5, 0.75, 0.99])
+print("quantiles (1%,25%,50%,75%,99%):", qs.round(3))
+
+# per-column reduction — how many minutes are 'too cold' (< 5°C) per hour of the day
+# reshape 10M rows into 24 hours × ~416k readings each
+hourly = temps[:24 * 416_666].reshape(24, 416_666)    # 24 rows, 416k cols
+cold_pct_per_hour = (hourly < 5).mean(axis=1) * 100   # ONE reduction returns 24 numbers
+print()
+print("cold-minute % per hour:")
+for h, p in enumerate(cold_pct_per_hour):
+    bar = "▓" * int(p * 2)
+    print(f"h{h:02d}  {p:5.1f}%   {bar}")`;
+
+export const grayscaleCode = `import numpy as np
+
+# A tiny 4x4 RGB "image" — 4 rows, 4 cols, 3 channels
+rng = np.random.default_rng(0)
+img = rng.integers(0, 256, size=(4, 4, 3)).astype(np.float32)
+
+print("image shape :", img.shape)     # (4, 4, 3)
+print("image dtype :", img.dtype)     # float32
+
+# The standard RGB-to-grayscale weights (ITU-R BT.601)
+weights = np.array([0.299, 0.587, 0.114], dtype=np.float32)
+
+# ONE line: dot the last axis with the weights, get a 4×4 grayscale image
+gray = img @ weights                  # (4,4,3) @ (3,) -> (4,4)
+# equivalent: (img * weights).sum(axis=-1)
+
+print()
+print("gray shape :", gray.shape)     # (4, 4)
+print("gray dtype :", gray.dtype)     # float32
+print(gray.round(1))`;
+
+export const memoryCompareCode = `import sys, numpy as np
+
+# 1 million Python ints in a list vs 1 million int64 in a NumPy array
+N = 1_000_000
+
+py_list = list(range(N))
+np_arr  = np.arange(N, dtype=np.int64)
+
+# The list itself + the objects it points to
+list_bytes = sys.getsizeof(py_list)
+element_bytes = sys.getsizeof(0) + sys.getsizeof(1)      # each int is a real Python object
+list_total = list_bytes + N * (sys.getsizeof(0))         # ~28 bytes/int on 64-bit CPython
+
+print(f"python list total : {list_total / 1e6:6.1f} MB")
+print(f"numpy int64 array : {np_arr.nbytes / 1e6:6.1f} MB")
+print(f"ratio             : {list_total / np_arr.nbytes:5.1f}× more memory in the list")
+
+# The array is not just smaller — it's laid out CONTIGUOUSLY.
+# The list is scattered across the heap because each element is a full Python object.
+# That's why CPU caches love arrays and hate lists.`;
+
+<Prerequisites items={[
+  { href: "/learn/foundations/python-craft/environment-tooling", label: "Environment · uv, Ruff", blurb: "You'll need `uv add numpy` (or `pip install numpy` if you must) in a clean project." },
+  { href: "/learn/foundations/python-craft/control-flow-data-model", label: "Control flow & data model", blurb: "You should already recognize truthiness, iteration, and the difference between a list and a tuple." },
+]} />
+
+<StudyDepth
+  intro={<>NumPy is the single most load-bearing library in your GenAI toolkit — PyTorch, JAX, pandas, and scikit-learn all borrow its mental model. Drill the array anatomy and the vectorization reflex; skim the byte-level striding until a real perf bug pulls you in.</>}
+  drill={[
+    <>Create arrays with <code>np.array</code>, <code>np.arange</code>, <code>np.zeros</code>, <code>np.ones</code>, <code>np.linspace</code></>,
+    <>Read <code>.shape</code>, <code>.dtype</code>, and <code>.ndim</code> before you do anything with a mystery array</>,
+    <>Ufunc reflex: never write a Python <code>for</code> loop over array elements — reach for a NumPy operator</>,
+    <>Reductions with <code>axis</code>: <code>arr.sum(axis=0)</code>, <code>arr.mean(axis=1)</code>, <code>arr.argmax(axis=-1)</code></>,
+    <>Reproducible RNG: <code>rng = np.random.default_rng(seed)</code> — never touch <code>np.random.rand</code></>,
+  ]}
+  skim={[
+    <>Byte-level <code>strides</code> and view/reshape internals — the concept matters, the exact byte math you look up</>,
+    <>Full dtype-promotion tables (safe / same_kind / unsafe casting)</>,
+    <>The legacy <code>np.random.RandomState</code> API — it&apos;s still around but you should write new code with <code>Generator</code></>,
+    <>Advanced ufunc knobs (<code>out=</code>, <code>where=</code>, <code>reduce.at</code>) until you have a real bottleneck</>,
+    <>Structured / record dtypes — pandas eats this niche for you</>,
+  ]}
+/>
+
+<Motivation title="Why every notebook in the world starts with `import numpy as np`">
+
+Suppose a friend hands you ten million temperature readings and asks: *what's the mean, and how many are below freezing?* In pure Python:
+
+```python
+temps = [ ... 10 million floats ... ]
+mean = sum(temps) / len(temps)
+cold = sum(1 for t in temps if t < 0)
+```
+
+That's *maybe* two or three seconds. On the same laptop, the same task in NumPy is under a hundred milliseconds — sometimes *tens*. And the reason isn't Python being lazy; it's that Python is doing *the wrong thing*. Each element in that list is a fully-fledged Python `int` or `float` — a heap-allocated object with a type header, a reference count, a payload — scattered across memory. The `sum()` builtin walks the list one Python object at a time, unboxing each, adding to an accumulator, boxing the accumulator back. Ten million round trips through the interpreter.
+
+NumPy makes a different bet. Instead of a list of pointers-to-objects, it stores your ten million floats as a **single contiguous block of raw bytes** — 80 megabytes of `float64`s laid end-to-end. When you write `temps.mean()`, one C loop walks that block, adds each float into a register, and returns the answer. No unboxing, no dispatch, no allocation per element. That is the entire secret. Everything NumPy does is a variation on: *put the data in a slab, then run a C loop over it.*
+
+Why does this matter for a GenAI engineer? Because **every** numerical library you'll ever touch adopts the same mental model. PyTorch's `Tensor` is an ndarray with autograd and a GPU pointer. JAX's `DeviceArray` is an ndarray with a compiler. pandas' `Series` is an ndarray with an index. scikit-learn's `X` matrix is literally an ndarray. HuggingFace tokenizers return ndarrays. Even the OpenAI Python SDK, when you ask for embeddings, hands you a list of lists that you *immediately* wrap with `np.array(...)` before doing anything useful. Learn the ndarray once and every one of those libraries becomes legible.
+
+This chapter builds the mental model from the ground up: what an ndarray *is* (shape, dtype, strides, buffer), what a ufunc *does* (one C loop, many elements), why vectorization is 100× faster in practice, and how to write a random-number generator that gives you the same answer next Tuesday. Nail these and the next fifty chapters get radically easier.
+
+</Motivation>
+
+<Intuition title="An array is a shape, a dtype, and a slab of memory">
+
+Forget everything you know about Python lists for the next paragraph.
+
+An **ndarray** is *four* things, held together by NumPy:
+
+1. **A shape** — a tuple like `(1000,)` or `(28, 28)` or `(64, 3, 224, 224)`. It says how many elements exist along each dimension. A shape of `()` means a scalar (zero dimensions).
+2. **A dtype** — the size and interpretation of every element. `int8` is one byte per element interpreted as a signed integer. `float64` is eight bytes per element interpreted as an IEEE-754 double. Every element has *the same* dtype; that uniformity is what makes the layout dense and predictable.
+3. **A contiguous data buffer** — one slab of raw memory, `shape.product() × dtype.itemsize` bytes long. If shape is `(3, 4)` and dtype is `int64` (8 bytes), the buffer is exactly `3 × 4 × 8 = 96` bytes.
+4. **A strides tuple** — how many bytes to walk in the buffer to move one step along each axis. For a `(3, 4)` `int64` array, strides are usually `(32, 8)` — 32 bytes to move down a row (four ints), 8 bytes to move right a column (one int). Strides are what let NumPy "view" the same buffer as different shapes without copying.
+
+A Python `list` of numbers is **none** of these. It's a Python object (with a type header and refcount) containing an internal C array of *pointers* to individual Python number objects — each of which is *itself* a full Python object elsewhere on the heap. When you do `sum(xs)`, the interpreter walks the list, dereferences each pointer, looks up the number's type, calls `__add__`, allocates a new number object for the result... roughly 30–100 CPU cycles *per element*, plus cache misses because the objects are scattered. A NumPy `sum` walks the buffer with a tight C loop, hits the CPU's vector units (SIMD), and finishes in a fraction of a cycle per element.
+
+The whole rest of NumPy is built on this substrate. **Reshaping** is free — it just changes the shape and strides. **Slicing** is (almost always) free — it makes a new "view" sharing the same buffer. **Ufuncs** are free-of-Python-overhead — they're C loops over the buffer. Once you internalize *shape + dtype + buffer + strides = ndarray*, every NumPy behavior stops being mysterious.
+
+</Intuition>
+
+<Recall term="Contiguous memory">
+
+A block of memory is **contiguous** when its elements sit next to each other with no gaps and no indirection. A NumPy `int64` array of length 1000 is exactly 8000 bytes long, addressable as `base_address + i * 8` for element `i`. A Python list of 1000 ints is a list header plus 1000 pointers plus 1000 int objects scattered wherever `malloc` put them. Contiguous memory is what lets the CPU prefetch, cache, and vectorize; scattered memory is what makes Python code slow on numerical work.
+
+</Recall>
+
+<Recall term="CPython boxed object">
+
+In CPython (the reference Python implementation), every value — including a bare `3` — is a *boxed object*: a struct with a type header, a reference count, and a payload. That's why `sys.getsizeof(3)` is 28 bytes, not 8. Boxing is what lets Python be dynamically typed; unboxing is what makes NumPy fast when it can trust every element in a buffer has the same type.
+
+</Recall>
+
+<Recall term="dtype">
+
+A **dtype** in NumPy is a compact description of one element: its bit-width, whether it's signed, and how bytes are interpreted. `int32` = 4 bytes signed integer. `float64` = 8-byte IEEE double. `bool` = one byte (yes, one — not one bit — for addressability). `uint8` = one byte unsigned, ideal for image pixels. Pick a dtype and every element in the array follows it — that's the uniformity NumPy needs to run C loops.
+
+</Recall>
+
+<Angles intro={<>Five lenses on the ndarray. Each one exposes a different corner of the same object — the mental model, the physical layout, the runtime behavior, the performance story, and the design taste that keeps your code idiomatic.</>}>
+
+  <Angle type="mental-model" title="Shape, dtype, buffer, strides — the four fields that define an array">
+    <RunnableCode title="one array, four fields" code={introCode} />
+
+    Every ndarray is fully described by *four* pieces of data. Nothing else is essential. Nothing else is mysterious.
+
+    - **`shape`** is a tuple of positive integers. Its length is the array's *rank* (number of dimensions). A 1-D array like `(5,)` is a vector; `(3, 4)` is a matrix; `(64, 3, 224, 224)` is a batch of RGB images ready for a CNN. The product of the shape is the total number of elements.
+    - **`dtype`** is one of NumPy's ~30 element types. For daily use you need only five: `int32` / `int64` for integer indices and counts; `float32` / `float64` for numerical work (float32 for GPU/model weights, float64 for scientific accuracy); `bool` for masks. Everything else — complex numbers, structured records, unicode strings — is niche.
+    - **`data`** is the raw byte buffer. You almost never touch it directly, but knowing it exists explains why reshaping is free and why sharing across libraries (`torch.from_numpy(x)`, `pd.DataFrame(x)`) is a zero-copy operation.
+    - **`strides`** is a tuple the same length as `shape`. It says how many bytes to skip to move one step along each axis. Combined with the buffer, strides let you view the same underlying data as different shapes — the machinery behind `reshape`, `transpose`, and slicing.
+
+    Notice what you *don't* need to think about: the array's type does not depend on its contents. `np.array([1, 2, 3]) + 1` isn't going to run a Python `__add__` on each element — it's going to invoke NumPy's C-level int64 add ufunc over the whole buffer. The dtype guarantees the C code can trust every element. That's the whole trick.
+
+  </Angle>
+
+  <Angle type="anatomy" title="Reshape is free, view is free — everything is a lens on one buffer">
+    <RunnableCode title="peek at shape, dtype, strides — and how reshape shares memory" code={anatomyCode} />
+
+    Two arrays that share a buffer are called **views** of each other. Reshaping (`a.reshape(2, 6)`), transposing (`a.T`), and most slicing operations produce views, not copies. That's why they're instant even on huge arrays — no bytes are moved.
+
+    The mechanic is entirely in the strides. If `a.shape == (3, 4)` and `a.strides == (32, 8)`, moving one step along axis 0 means jumping 32 bytes in the buffer; moving one step along axis 1 means jumping 8 bytes. Reshape into `(2, 6)`? Same buffer, new shape `(2, 6)`, new strides `(48, 8)`. The C code that iterates over the array only ever consults shape and strides — it doesn't know or care whether it's "the original" or "a view."
+
+    Why this matters in practice: modifying a view modifies the original. Writing `b = a.reshape(6, 2); b[0, 0] = 99` will also change `a[0, 0]`. This is a real source of bugs, and it's exactly what the next chapter (broadcasting, slicing, view vs. copy) unpacks. For now, the rule is: **assume operations that don't allocate are views**, and if you need an independent array, call `.copy()`.
+
+    Reading `.strides` is the fastest way to develop intuition. A contiguous C-ordered `(3, 4)` int64 array has strides `(32, 8)`. Transpose it and the strides become `(8, 32)` — the *same buffer*, walked in a different order. That's how `.T` is O(1) for any dimensionality.
+
+  </Angle>
+
+  <Angle type="runtime" title="A ufunc is one C loop over N elements">
+    <RunnableCode title="element-wise ufuncs and axis-aware reductions" code={ufuncCode} />
+
+    A **ufunc** ("universal function") is a NumPy function that applies element-by-element to an array (or aligns two arrays element-by-element) and returns a new array of the same shape. Every arithmetic operator on ndarrays — `+`, `-`, `*`, `/`, `**`, `>`, `<`, `==` — is a ufunc under the hood. So are `np.sqrt`, `np.exp`, `np.log`, `np.sin`, `np.abs`, and dozens more.
+
+    Two things make ufuncs the workhorse of numerical Python:
+
+    1. **They run one C loop.** For a length-`N` array, a ufunc does a single tight loop in compiled C, with no Python bytecode dispatch per element. On modern CPUs, the loop is auto-vectorized to use SIMD (Single Instruction, Multiple Data) registers, so a single hardware instruction processes 4 or 8 or 16 float elements at once.
+
+    2. **They compose with reductions.** Every ufunc has a `.reduce`, `.accumulate`, and `.reduceat` method that folds the array along an axis. `np.add.reduce(a)` is `a.sum()`; `np.multiply.reduce(a)` is `a.prod()`. Most of the time you'll just call the shortcut methods (`.sum()`, `.mean()`, `.std()`, `.max()`, `.argmax()`) which are ufunc reductions in disguise.
+
+    The **`axis=` argument** is where reductions become powerful. On a 2-D array, `.sum(axis=0)` collapses the rows and returns one number per column; `.sum(axis=1)` collapses the columns and returns one number per row; `.sum()` (no axis) collapses everything to one scalar. The rule: `axis` names the *dimension to eliminate*. That naming trips up every beginner exactly once — expect it, then it sticks forever.
+
+    Under all of it: `np.dot`, `np.matmul` (the `@` operator), `np.linalg.solve`, `np.fft.fft` — anything that isn't pure element-wise — dispatches to **BLAS** and **LAPACK**, the same battle-tested Fortran libraries that Fortran, R, MATLAB, PyTorch, TensorFlow, and Julia all use. When you write `A @ B`, you are running Intel MKL or OpenBLAS. The Python function call is the thin wrapper; the multiplication itself is *the fastest matrix code ever written*.
+
+  </Angle>
+
+  <Angle type="performance" title="The 100× story — measured, not folkloric">
+    <RunnableCode title="add two big arrays two ways — measure the gap yourself" code={vectorizedCode} />
+
+    Run the cell. On a modern laptop, the numpy version is somewhere between 20× and 500× faster than the Python one — the exact number depends on your CPU, memory bandwidth, and the moon phase, but *the shape of the story is invariant*. Add a zero. Run 50 million. Same picture.
+
+    The gap comes from three compounding effects, in decreasing order of importance:
+
+    1. **No Python interpreter per element.** Every iteration of `for x, y in zip(xs, ys)` costs the interpreter roughly 30-100 nanoseconds — bytecode dispatch, name lookup, iterator protocol, integer boxing. On five million elements that's *seconds* of overhead. The NumPy loop pays this cost *once* (the Python call to `+`) and then hands off to C.
+
+    2. **Contiguous memory + CPU cache.** The CPU's L1 cache is small but very fast. When data sits contiguously in memory, the prefetcher can pull the *next* elements into cache while the current ones are being processed. A Python list scatters its elements across the heap, forcing cache misses that stall the CPU for hundreds of cycles.
+
+    3. **SIMD vectorization.** Modern CPUs have 256-bit or 512-bit SIMD registers that process multiple values in one instruction. NumPy's C loops are compiled with these instructions, so a single machine op can add 4 `float64`s or 16 `int16`s at once. Python can never touch this — it doesn't know your ints are all ints.
+
+    The rule that follows: **any inner loop over ndarray elements is a bug**. If you catch yourself writing `for i in range(len(arr)): arr[i] = ...`, stop. Ask which ufunc, which reduction, which broadcasting expression, or which `np.where` gets you there without the loop. Ninety-nine percent of the time there's a one-liner.
+
+    The one percent when you actually need a loop: when the computation is *inherently sequential* (each element depends on all previous), or when the elements *aren't* pure numbers (arbitrary Python objects). For those, look at `numba.njit`, `cython`, or just accept the slowness if it's called rarely. But those are the rare exceptions — vectorization is the reflex.
+
+  </Angle>
+
+  <Angle type="taste" title="dtype hygiene — the discipline that keeps arrays honest">
+    <RunnableCode title="int8 overflow, dtype promotion, and the poison of NaN" code={dtypeCode} />
+
+    Vectorization is not a free lunch. When NumPy runs a C loop, it *trusts* the dtype. Give it wrong dtype assumptions and the errors are silent, subtle, and downstream.
+
+    Three habits protect you:
+
+    1. **Know when integer types overflow.** `int8` maxes at 127. Add 10 to a `120` in an int8 array and you get `-126`, no warning. Real bug: someone loads image pixels as `uint8` (0-255), adds a constant offset, and gets negative pixel values that render as bright magenta. Rule: **for arithmetic beyond simple counting, use `int32` or `int64`.** Use narrow dtypes (`int8`, `uint8`) only for memory-constrained storage of small values (like image pixels or one-hot labels).
+
+    2. **Watch dtype promotion at boundaries.** `int32 + float64` promotes to `float64`. `float32 + float64` promotes to `float64`. This is usually what you want, but it silently doubles memory usage. On a GPU with a hard memory budget, an accidental promotion from `float32` to `float64` can OOM your training run. The fix: cast explicitly at boundaries — `x.astype(np.float32)` — so the promotion never happens.
+
+    3. **Guard against NaN.** IEEE-754 says `nan + anything = nan`. So a single NaN in a million-element array corrupts every reduction: `arr.mean()` returns NaN, `arr.max()` returns NaN, `arr < 0` returns a mask with an unexpected value. NumPy ships *nan-safe* siblings (`np.nanmean`, `np.nanmax`, `np.nansum`, `np.nanpercentile`) that skip NaNs, but you have to reach for them explicitly. First-line defense: `np.isfinite(arr).all()` at data-loading time.
+
+    A subtler taste rule: **`float32` beats `float64` in almost all ML.** ML training is dominated by tiny gradient nudges that don't need double-precision to be correct. `float32` halves memory, doubles throughput, and matches every GPU tensor library's default. `float64` is for scientific accuracy (physics simulations, financial calculations) not for training a neural network. If you find yourself in `float64` for no reason, cast down.
+
+  </Angle>
+
+  <Angle type="production" title="Seeded RNG — the difference between reproducible science and a fresh bug every Tuesday">
+    <RunnableCode title="the modern Generator API — explicit state, reproducible everywhere" code={rngCode} />
+
+    Every ML experiment is a stochastic process. Random weight initialization, random data shuffling, random dropout, random negative sampling, random train/test splits — all use a pseudorandom number generator. "Pseudorandom" means: given the same seed, the generator produces the *same sequence forever*. That property is the entire foundation of reproducibility.
+
+    NumPy's legacy API (`np.random.rand`, `np.random.randn`, `np.random.seed`) uses one **global** random state. If any library you import touches it, or if the order of your imports changes, your "reproducible" experiment silently isn't. Every ML paper that says "we used seed 42" and can't be reproduced usually has this bug.
+
+    The modern API (NumPy ≥ 1.17) is a **local `Generator` with explicit state**:
+
+    ```python
+    rng = np.random.default_rng(seed=42)      # your seed, your generator, isolated
+    x = rng.normal(0, 1, size=(1000, 32))
+    y = rng.integers(0, 10, size=1000)
+    ```
+
+    Two rules that get you 95% of the way:
+
+    - **One `rng` per experiment run**, passed explicitly to every function that needs randomness. Pure functions of `(inputs, rng)` are testable, reproducible, and free of hidden state.
+    - **Never call `np.random.seed(...)`.** It touches the global; a co-author's library import will still corrupt you. Local generators only.
+
+    A subtle third rule for large teams and distributed training: use `rng.spawn(n)` to split one seed into `n` independent child generators. This is how you give each worker in a distributed job its own reproducible stream without any two workers ever colliding.
+
+  </Angle>
+
+</Angles>
+
+<Convergence>
+
+Every lens above ends at the same three-sentence summary. **An ndarray is a shape, a dtype, and a contiguous buffer, plus strides for viewing that buffer at multiple shapes.** **Vectorized operations are C loops over that buffer that skip the Python interpreter entirely.** **Reproducibility is a seeded, local `Generator`, never the global.** If you internalize those three things, the rest of NumPy (broadcasting, indexing, linear algebra, FFT) is a small extension of the same mental model.
+
+The reason NumPy became the numerical Python is not that it's clever — it's that it makes the *machine's actual mental model* legible to Python. CPUs love contiguous typed memory. NumPy gives it to them.
+
+</Convergence>
+
+<Derivation title="Why one numpy add is 100× faster than one Python loop">
+
+Not a math derivation — a *speed* derivation. Step-by-step, what happens under the hood on both sides.
+
+<Step n={1} math={<code>zs_py = [x + y for x, y in zip(xs, ys)]</code>}>
+  Python creates a `zip` iterator, then loops. On each iteration: allocate a tuple, unpack it into `x` and `y`, look up `int.__add__`, call it, allocate a new `int` object for the result, append the pointer to the growing list. About 40–120 CPU cycles per element, plus one heap allocation. Ten million iterations: hundreds of megabytes of transient allocations, cache pressure, and GC work.
+</Step>
+
+<Step n={2} math={<code>zs_np = xa + ya</code>}>
+  The Python interpreter runs the `+` bytecode once. It dispatches to NumPy's `__add__`, which enters compiled C code. The C code checks that `xa` and `ya` have compatible shapes and dtypes, allocates *one* output buffer, and enters a tight `for` loop over the raw memory. No Python objects created per element; no interpreter overhead per element.
+</Step>
+
+<Step n={3} math={<span>{"1 SIMD op × ~10⁶ iterations = ~10⁶ operations at CPU speed"}</span>}>
+  Modern CPUs have 256-bit AVX2 or 512-bit AVX-512 SIMD registers. A single instruction can add 4 or 8 `float64`s in one clock cycle. NumPy's C compilers use them automatically. So the "ten million adds" is really <em>1.25 million SIMD adds</em> plus cache-line fetches — at CPU clock speed, that's under a hundredth of a second on modern hardware.
+</Step>
+
+<Step n={4} math={<span>{"cache-friendly buffer > scattered heap"}</span>}>
+  The list version scatters its integers across the heap because each `int` was `malloc`d individually. Every element access can miss the CPU cache and stall the pipeline for 100+ cycles fetching from RAM. The array version's data is contiguous — the CPU prefetcher can pull the next elements into L1 cache before they're needed. Cache hits are ~4 cycles; cache misses are ~200. Times ten million elements, this alone can be 10× of the total gap.
+</Step>
+
+<Step n={5} math={<span>{"gap = (interpreter overhead) + (cache misses) + (missed SIMD)"}</span>}>
+  The 100× isn't magic; it's the sum of three overheads Python pays and NumPy skips. Interpreter dispatch = ~30×. Cache friendliness = ~5–10×. SIMD = ~4–8×. Multiplicatively, that's how you get 100× to 1000×. The specific numbers vary by CPU and array size, but the decomposition is stable.
+</Step>
+
+</Derivation>
+
+<Example title="One reduction over 10 million temperatures">
+
+<RunnableCode title="mean, std, quantiles, and a per-hour breakdown" code={reductionsCode} />
+
+The point of the cell isn't the specific numbers — it's the *feel* of numerical Python at scale. Ten million samples reduced to a single number in tens of milliseconds; a per-hour breakdown across 24 hours produced by *one* line of code (`(hourly < 5).mean(axis=1) * 100`). Every operation is a fold over the array. Every fold is a C loop. Reasoning about "how long will this take" is: number of elements ÷ (a few hundred million ops per second per core).
+
+Notice one habit worth stealing: `.round(3)` on prints. NumPy prints float arrays with unhelpful precision by default — 15 digits when 3 tell the story. Rounding at print time (not in the data!) is a small kindness to your future self reading the notebook.
+
+</Example>
+
+<Nuance>
+
+Five traps that catch every beginner exactly once:
+
+- **`axis=` names the dimension you *destroy*, not preserve.** `arr.sum(axis=0)` on a `(3, 4)` array returns shape `(4,)` — the 3 got collapsed. Beginners intuit "axis 0 = rows, sum along rows, get one number per row" — wrong direction. Mnemonic: axis is the dimension you *sum out*.
+
+- **View vs. copy is the bug factory of the next chapter.** For now, know that `a.reshape(...)`, `a.T`, and `a[:, 2]` are usually views (mutating them mutates the original). If you need independence, `.copy()`.
+
+- **Integer types don't warn on overflow.** `np.int8(127) + np.int8(1) == -128`, silently. Standard reflex: use `int32` or `int64` for arithmetic; reserve `int8`/`uint8` for storage of small known-range values.
+
+- **`np.array([1, 2, 3])` on Python-int input picks `int64`; on macOS/Linux `int64` is 8 bytes.** If you pass a Python list of numbers that don't fit, NumPy silently downcasts — a `float` in the list turns the whole array into `float64`. Always check `.dtype` after construction if you care.
+
+- **The global RNG is a shared mutable resource.** Any import can touch it. Any test can seed it. Any co-worker can change the seed you thought you set. Use `np.random.default_rng(seed)` locally and pass it through. Treat the global like `os.environ` — a footgun, not an API.
+
+Two truly gnarly ones for later:
+
+- **`np.dot(A, B)` uses BLAS.** BLAS uses OpenMP threading by default. A NumPy call inside a threaded Python program can spawn threads-times-cores workers and thrash. Set `OMP_NUM_THREADS=1` when NumPy is inside a `ThreadPoolExecutor` on many workers.
+
+- **NumPy 2.0 (2024) tightened casting rules.** Some code that silently promoted `float32 + Python-float` in NumPy 1.x now raises or produces a `float32` (not `float64`). If a project is pinned to NumPy 1.26 there's usually a reason.
+
+</Nuance>
+
+<RealWorldML title="Grayscaling an image batch — 800 lines of loop become one line of NumPy">
+
+<RunnableCode title="RGB → grayscale in one @-operator" code={grayscaleCode} />
+
+Every image-classification pipeline (CIFAR-10 → ResNet → CLIP) starts with a *batch* of images shaped `(N, H, W, C)`: N images, H rows, W columns, C channels (usually 3 for RGB). Converting to grayscale is a *per-pixel* linear combination: `gray = 0.299·R + 0.587·G + 0.114·B` (the ITU-R BT.601 luminance weights, chosen to match human perception).
+
+Written as a Python loop, it's four nested `for` loops (batch, row, col, channel) and hundreds of lines of care. Written as NumPy, it's a single `@` — the matrix-multiply operator. Because `img.shape == (H, W, 3)` and `weights.shape == (3,)`, the `@` operator contracts the last axis of `img` against the only axis of `weights`, producing shape `(H, W)`. No loops, no allocations per pixel, no explanation needed once you see it. To batch it across N images, the shape becomes `(N, H, W, 3) @ (3,) → (N, H, W)` — same operator, same code, one dimension bigger.
+
+**Line-by-line walkthrough of the cell**:
+
+- `img = rng.integers(0, 256, size=(4, 4, 3)).astype(np.float32)` — build a fake 4×4 RGB image. `.astype(np.float32)` casts to float so the weighted sum is real-valued, not truncated integers. Float32 matches what a GPU pipeline would use.
+- `weights = np.array([0.299, 0.587, 0.114], dtype=np.float32)` — the three per-channel coefficients, kept in `float32` to match the image and avoid dtype promotion.
+- `gray = img @ weights` — the `@` operator (Python 3.5+, PEP 465) is NumPy's `matmul`. For a `(H, W, 3)` shape against `(3,)`, it contracts the *last* dimension: `(H, W, 3) · (3,) → (H, W)`. One instruction, all pixels.
+- `print(gray.shape, gray.dtype)` — `(4, 4)` and `float32`. The rank dropped from 3 to 2 (the channel axis was reduced away), and the dtype was preserved by the promotion rules.
+
+The *reason* this pattern powers all of computer vision is that neural-network layers are dominated by exactly this shape of operation: contract the last dimension of a batched tensor against a weight tensor. Convolutions, dense layers, attention — all variations on "linear combine along one axis." NumPy's `@` is the pedagogical scale of this move. PyTorch's `torch.matmul` is the industrial scale.
+
+</RealWorldML>
+
+<CodeItYourself title="Two vectorization drills">
+
+**Drill 1 — Z-score normalization.** Given a `(N, D)` matrix (N samples, D features), transform each *column* so it has mean 0 and standard deviation 1. Solution should be one line using `axis=` and broadcasting. (Hint: `(X - X.mean(axis=0)) / X.std(axis=0)` — but *feel* why that shape math works before you copy it.)
+
+**Drill 2 — Argmax with tie-break.** Given a 1-D array of scores, return the index of the maximum. If ties exist, return the *smallest* index. `np.argmax` already does this. Now do it *without* `argmax` — using only `np.arange`, `np.where`, and comparison. This forces you to see how vectorized index arithmetic works.
+
+Then time both against a Python loop on a 1-million-element input. The gap you observe is the whole game.
+
+</CodeItYourself>
+
+<LifeLesson title="Batch, don't sprint">
+
+Vectorization is a life principle, not just a NumPy trick. When you write a Python `for` loop over ten million elements, you are paying the interpreter's set-up cost ten million times — one round trip per item, no economies of scale. When you write a single NumPy operation, you pay the set-up cost *once*, then let the C code amortize it across the whole batch.
+
+The same shape shows up everywhere off-screen. A junior engineer emails their manager one question every time it arises; a senior batches ten questions into a Friday sync. A researcher trains their model on one prompt at a time; another runs a hundred prompts as one batch and gets ten times the tokens per second on the same GPU. A cook makes eggs one at a time as orders come in; a diner batches a rack of thirty eggs into one pan at 7 a.m.
+
+The reason batching wins isn't that the work per item is less. It's that the *per-item overhead* — context switch, attention, warm-up, interpreter dispatch — gets divided by the batch size. And there's almost always an overhead you didn't notice until you compared.
+
+Look at your own week the way NumPy looks at a for-loop: where are you paying setup cost per item when you could pay it per batch? Emails, meetings, code reviews, model evaluations, grocery runs — all vectorizable.
+
+</LifeLesson>
+
+<MLConnection>
+
+The ndarray mental model runs through *every* library you'll ever touch as a GenAI engineer:
+
+- **PyTorch `torch.Tensor`** is an ndarray with two extra pieces: a device pointer (CPU or GPU) and a computational-graph node for autograd. Every operation you learn on NumPy (reshape, indexing, matmul, reductions, broadcasting) transfers 1:1 to PyTorch tensors. `torch.from_numpy(x)` is a zero-copy conversion.
+- **JAX `DeviceArray`** is an ndarray with a JIT-compiler in front. `jnp.mean(x, axis=0)` is the same operation as `x.mean(axis=0)` in NumPy; JAX just compiles it to XLA and runs on TPUs.
+- **pandas `Series` and `DataFrame`** are ndarrays with labeled axes. Under `df["col"].to_numpy()` is a real NumPy view (dtype permitting). This is why the next two chapters (pandas fundamentals) will feel like a small extension of NumPy.
+- **scikit-learn** takes ndarrays as `X` (features) and `y` (targets) throughout. Every fitted model stores its parameters as ndarrays (`model.coef_`, `model.support_vectors_`).
+- **HuggingFace tokenizers** return ndarrays (or lists of ints you'll immediately `np.array`) shaped `(batch, seq_len)`.
+- **Any embedding API** (OpenAI, Cohere, Voyage, local Sentence-Transformers) returns a list of vectors that you'll immediately wrap as `np.array` shaped `(N, D)` for retrieval, clustering, or similarity search.
+
+Nailing NumPy is not "one library." It's the substrate — the assembly language of numerical Python. Every higher-level tool you'll use for the next three years is a sugar on top of it.
+
+</MLConnection>
+
+<Summary>
+
+- **An ndarray is `shape + dtype + contiguous buffer + strides`.** Everything else — reshape, view, slice — is a reinterpretation of these four fields.
+- **Ufuncs are C loops over the buffer.** They skip the Python interpreter per element, hit SIMD, and reuse CPU cache. That's the whole 100× story.
+- **`axis=` names the dimension to eliminate**, not preserve. `arr.sum(axis=0)` on `(3, 4)` returns `(4,)`.
+- **dtype hygiene**: `int8/uint8` for storage of small values; `int32/int64` for arithmetic; `float32` for ML; `float64` for scientific accuracy; guard NaN with `np.isfinite` and `np.nan*` reductions.
+- **Reproducibility**: `rng = np.random.default_rng(seed)`, passed explicitly. Never touch `np.random.seed`.
+- **The mental model transfers**: PyTorch tensors, JAX arrays, pandas Series, scikit-learn `X` are all sugar on this ndarray. Learn it once here.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>What are the four fields that fully describe an ndarray?</>,
+      hint: <>Two describe the interpretation of memory; one describes the memory itself; one describes how to walk it.</>,
+      answer: <><strong>Shape</strong> (tuple of dimensions), <strong>dtype</strong> (element type), <strong>data buffer</strong> (contiguous memory), and <strong>strides</strong> (byte-step per axis). Every ndarray behavior — reshape, view, slice, broadcast — is a manipulation of these four.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>An array has <code>shape=(3, 4)</code> and <code>dtype=int64</code>. What are its <code>strides</code> and <code>nbytes</code>?</>,
+      hint: <>An int64 takes 8 bytes. A row is 4 ints. Strides are in bytes.</>,
+      answer: <><code>nbytes = 3 × 4 × 8 = 96</code>. In C-order (default), the strides are <code>(32, 8)</code> — 32 bytes per row (a full row is 4 ints = 32 bytes), 8 bytes per column (one int).</>
+    },
+    {
+      difficulty: "easy",
+      q: <>Given <code>a = np.array([[1,2,3],[4,5,6]])</code>, what does <code>a.sum(axis=1)</code> return?</>,
+      hint: <>Axis is the dimension you eliminate.</>,
+      answer: <><code>array([6, 15])</code>. <code>axis=1</code> collapses the columns — for each row, sum across its columns. Two rows in → two numbers out.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Convert a Python list <code>[1.5, 2.5, 3.5, 4.5]</code> to an ndarray in <code>float32</code> without unnecessary precision conversions.</>,
+      hint: <>Set the dtype at construction, not with a post-hoc <code>.astype()</code>.</>,
+      answer: <><code>np.array([1.5, 2.5, 3.5, 4.5], dtype=np.float32)</code>. Passing <code>dtype=np.float32</code> at construction tells NumPy to allocate a float32 buffer directly; without it, NumPy would default to float64 and you&apos;d waste memory + suffer a conversion later.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Why does <code>np.array([120, 121, 122], dtype=np.int8) + 10</code> produce a wrong-looking result, and what&apos;s the fix?</>,
+      hint: <>int8 has a maximum value. Adding beyond it does something well-defined but surprising.</>,
+      answer: <><code>int8</code> maxes at 127. <code>120 + 10 = 130</code> wraps around to <code>-126</code> (two&apos;s-complement rollover). The fix: choose a wider dtype (<code>int16</code>, <code>int32</code>) if the arithmetic can exceed 127; use <code>int8</code> only when the value range is known to stay in <code>[-128, 127]</code>. NumPy will not warn — you have to type-hygiene yourself.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Write a one-line NumPy expression that returns <code>True</code> if every element of a 1-D array <code>x</code> is finite (no NaN, no inf).</>,
+      hint: <>A ufunc that returns a bool array, then a reduction that folds bool arrays to a single bool.</>,
+      answer: <><code>np.isfinite(x).all()</code>. <code>np.isfinite</code> is a ufunc producing a bool array; <code>.all()</code> is a reduction returning a single Python bool. This is the standard first-line sanity check before any expensive reduction on user-supplied data.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>You have <code>arr = np.arange(24).reshape(4, 6)</code>. Without allocating a copy, produce an array of the same 24 elements shaped <code>(6, 4)</code> where the element at position <code>(r, c)</code> equals <code>arr[c, r]</code>.</>,
+      hint: <>You want to swap the two axes without touching the buffer. NumPy has a one-liner for this.</>,
+      answer: <><code>arr.T</code>. Transpose is a view — no copy, no allocation. It swaps the strides tuple <code>(48, 8)</code> into <code>(8, 48)</code>, so walking along axis 0 now moves through the buffer in &quot;column-major&quot; order. If you actually need a contiguous transposed buffer, follow with <code>.copy()</code>.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Explain why <code>a = np.arange(6).reshape(2, 3); b = a.T; b[0, 0] = 99; print(a)</code> also changes <code>a[0, 0]</code>.</>,
+      hint: <>Transpose returns a view, not a copy. Views share the buffer.</>,
+      answer: <><code>a.T</code> is a view, not a copy — it shares the same underlying buffer with <code>a</code>. Writing to <code>b[0, 0]</code> writes to the same byte in memory that <code>a[0, 0]</code> reads. This is the fundamental view-vs-copy trap of NumPy. Fix if independence is required: <code>b = a.T.copy()</code>.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>You&apos;re benchmarking two implementations of a rolling mean over 10 million points. Your NumPy version times at 40 ms; a colleague&apos;s pure-Python-loop version times at 4 seconds. That&apos;s 100×. Break the gap down into three multiplicative components.</>,
+      hint: <>Interpreter overhead, memory-access patterns, and CPU instruction width.</>,
+      answer: <>Approximately: <strong>~30× from skipping Python interpreter overhead</strong> (bytecode dispatch, name lookup, <code>int</code> unboxing per element), <strong>~5× from cache-friendly contiguous memory access</strong> (NumPy&apos;s linear buffer hits L1 cache; Python objects are scattered across the heap and force cache misses), and <strong>~4–8× from SIMD auto-vectorization</strong> in the C loop (one AVX instruction adds 4–8 float64s). Multiplied naively that&apos;s ~750×, but real gaps are lower because not all of the SIMD gain is realizable on a memory-bound reduction. 20–500× is the realistic range.</>
+    },
+  ]}
+/>
+
+<Quiz items={[
+  {
+    q: <>Which of the following is <em>not</em> one of the four essential fields of an ndarray?</>,
+    choices: [
+      { text: <>shape</> },
+      { text: <>strides</> },
+      { text: <>refcount</>, correct: true },
+      { text: <>dtype</> },
+    ],
+    explanation: <>The four essential fields are shape, dtype, data buffer, and strides. Reference counting is a Python-object concern; the ndarray&apos;s wrapper has a refcount, but the array&apos;s identity is fully described by the four numerical fields.</>
+  },
+  {
+    q: <>True or false: <code>a.reshape(6, 4)</code> allocates a new buffer.</>,
+    choices: [
+      { text: <>True — reshape always allocates</> },
+      { text: <>False — reshape usually returns a view sharing the buffer</>, correct: true },
+      { text: <>Only true for arrays larger than 1 MB</> },
+      { text: <>Only true when the new shape has more dimensions</> },
+    ],
+    explanation: <>Reshape returns a view sharing the original buffer as long as the request is compatible with the existing strides. If it&apos;s not (e.g., after certain non-contiguous slicing), NumPy falls back to a copy — but the common case is a free view.</>
+  },
+  {
+    q: <>For <code>arr.shape == (10, 20, 30)</code>, what shape does <code>arr.mean(axis=1)</code> return?</>,
+    choices: [
+      { text: <><code>(20,)</code></> },
+      { text: <><code>(10, 30)</code></>, correct: true },
+      { text: <><code>(10, 20)</code></> },
+      { text: <><code>(30,)</code></> },
+    ],
+    explanation: <><code>axis=1</code> names the dimension to reduce — axis 1 (size 20) is collapsed to a single value, so the output has the remaining two dimensions.</>
+  },
+  {
+    q: <>Which is the correct way to get a reproducible sequence of random numbers in modern NumPy?</>,
+    choices: [
+      { text: <><code>np.random.seed(42); np.random.rand(5)</code></> },
+      { text: <><code>rng = np.random.default_rng(42); rng.uniform(0, 1, 5)</code></>, correct: true },
+      { text: <><code>random.seed(42); np.random.rand(5)</code></> },
+      { text: <><code>np.random.RandomState(42).rand(5)</code></> },
+    ],
+    explanation: <>The legacy <code>np.random.seed(42)</code> touches a global random state that any imported library can also touch. The modern <code>default_rng</code> creates a local, isolated Generator whose state is under your control.</>
+  },
+  {
+    q: <>Why is <code>float32</code> the default choice for training neural networks rather than <code>float64</code>?</>,
+    choices: [
+      { text: <>float32 is more numerically accurate than float64</> },
+      { text: <>float32 halves memory + doubles throughput while providing sufficient precision for gradient descent</>, correct: true },
+      { text: <>float64 is not supported on GPUs</> },
+      { text: <>float32 avoids all NaN issues</> },
+    ],
+    explanation: <>Neural network training is dominated by small gradient nudges that don&apos;t need double-precision to be numerically stable; the gradient noise from stochastic mini-batches dwarfs the extra precision float64 would provide. Meanwhile float32 halves VRAM usage and doubles throughput on GPUs. float64 is for scientific computing where numerical accuracy is the whole point.</>
+  }
+]} />
+
+<MarkDone slug="foundations/scientific-stack/numpy-arrays-vectorization" title="NumPy — arrays & vectorization" />

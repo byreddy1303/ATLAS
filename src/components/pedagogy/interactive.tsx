@@ -81,7 +81,10 @@ export function ProblemSet({
   problems: Problem[];
 }) {
   return (
-    <section className="not-prose my-14">
+    <section
+      className="not-prose my-14"
+      style={{ contain: "layout paint" }}
+    >
       <div className="mb-4 flex items-center gap-3">
         <span className="pill pill-lime">☰ Practice</span>
         <span className="hr-mono flex-1" />
@@ -168,7 +171,10 @@ export function Quiz({
   title?: string;
 }) {
   return (
-    <section className="not-prose my-14">
+    <section
+      className="not-prose my-14"
+      style={{ contain: "layout paint" }}
+    >
       <div className="mb-4 flex items-center gap-3">
         <span className="pill pill-lime">◎ Quiz</span>
         <span className="hr-mono flex-1" />
@@ -215,7 +221,7 @@ function QuizRow({ idx, item }: { idx: number; item: QuizItem }) {
             <button
               key={i}
               onClick={() => setPicked(i)}
-              className={`w-full rounded-xl border p-3 text-left text-[14.5px] transition ${cls}`}
+              className={`w-full rounded-xl border p-3 text-left text-[14.5px] transition-colors duration-150 ${cls}`}
             >
               <span className="mr-3 inline-block h-4 w-4 shrink-0 rounded-full border border-current align-middle" />
               {c.text}
