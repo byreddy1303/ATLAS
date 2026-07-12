@@ -1,26 +1,624 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@custom-variant light (&:where(.light, .light *));
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-manrope), "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-editorial: var(--font-instrument-serif), "Georgia", serif;
+  --font-mono: var(--font-jetbrains), "SFMono-Regular", monospace;
+
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-ink-4: var(--ink-4);
+  --color-bg: var(--bg);
+  --color-bg-2: var(--bg-2);
+  --color-bg-3: var(--bg-3);
+  --color-line: var(--line);
+  --color-line-2: var(--line-2);
+
+  --color-lime: var(--lime);
+  --color-lime-2: var(--lime-2);
+  --color-lime-soft: var(--lime-soft);
+  --color-lime-ink: var(--lime-ink);
+
+  --color-accent: var(--accent);
+  --color-accent-2: var(--accent-2);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-ghost: var(--accent-ghost);
+  --color-accent-ink: var(--accent-ink);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* ————————————————————————————————————————————————
+   CRED-STYLE FOUNDATION — dark first
+   Deep black canvas · neon-mint global signal
+   · per-tier saturated hues as secondary accents
+   ———————————————————————————————————————————————— */
+
+:root {
+  /* --- neutral canvas (OLED-black) --- */
+  --bg:   oklch(9%  0.004 260);
+  --bg-2: oklch(13% 0.006 260);
+  --bg-3: oklch(17% 0.008 260);
+  --ink:  oklch(98% 0.005 260);
+  --ink-2:oklch(74% 0.008 258);
+  --ink-3:oklch(55% 0.010 256);
+  --ink-4:oklch(38% 0.010 256);
+  --line: oklch(22% 0.010 258);
+  --line-2:oklch(30% 0.014 258);
+
+  /* --- CRED-signature neon lime (global primary) --- */
+  --lime:      oklch(94% 0.18 118);
+  --lime-2:    oklch(86% 0.20 122);
+  --lime-soft: oklch(94% 0.18 118 / 0.14);
+  --lime-ink:  oklch(20% 0.05 118);   /* dark text on lime CTAs */
+
+  /* --- per-tier hue defaults (overridden by .tier-hue-N) --- */
+  --tier-h: 118;
+  --tier-c: 0.18;
+  --tier-l: 82%;
+
+  --accent:       oklch(var(--tier-l) var(--tier-c) var(--tier-h));
+  --accent-2:     oklch(calc(var(--tier-l) - 12%) calc(var(--tier-c) * 1.05) var(--tier-h));
+  --accent-soft:  oklch(var(--tier-l) var(--tier-c) var(--tier-h) / 0.14);
+  --accent-ghost: oklch(var(--tier-l) var(--tier-c) var(--tier-h) / 0.06);
+  --accent-ink:   oklch(15% 0.03 var(--tier-h));
+}
+
+.light {
+  --bg:   oklch(97% 0.004 100);
+  --bg-2: oklch(94% 0.005 100);
+  --bg-3: oklch(90% 0.008 100);
+  --ink:  oklch(16% 0.010 65);
+  --ink-2:oklch(38% 0.012 68);
+  --ink-3:oklch(55% 0.010 72);
+  --ink-4:oklch(72% 0.010 72);
+  --line: oklch(88% 0.010 90);
+  --line-2:oklch(80% 0.014 88);
+
+  --lime:      oklch(72% 0.19 118);
+  --lime-2:    oklch(58% 0.20 122);
+  --lime-soft: oklch(72% 0.19 118 / 0.16);
+  --lime-ink:  oklch(15% 0.05 118);
+
+  --accent-ink:   oklch(98% 0.008 var(--tier-h));
+}
+
+/* per-tier chromatic accents (used on tier-scoped surfaces) */
+.tier-hue-0 { --tier-h: 82;  --tier-c: 0.19; --tier-l: 82%; } /* dawn amber */
+.tier-hue-1 { --tier-h: 258; --tier-c: 0.19; --tier-l: 74%; } /* ultramarine */
+.tier-hue-2 { --tier-h: 160; --tier-c: 0.17; --tier-l: 78%; } /* viridian */
+.tier-hue-3 { --tier-h: 30;  --tier-c: 0.20; --tier-l: 76%; } /* vermilion */
+.tier-hue-4 { --tier-h: 340; --tier-c: 0.21; --tier-l: 74%; } /* magenta */
+.tier-hue-5 { --tier-h: 205; --tier-c: 0.16; --tier-l: 78%; } /* teal */
+.tier-hue-6 { --tier-h: 300; --tier-c: 0.19; --tier-l: 74%; } /* research violet */
+
+/* ———————————————————————— base ———————————————————————— */
+
+* { box-sizing: border-box; }
+
+html {
+  /* Lenis manages smoothness; native smooth-scroll fights it and causes 'pull-back' feel. */
+  scroll-behavior: auto;
+  /* Anchor targets sit 6rem below the sticky nav strip. Applied only when
+     a hash change causes a jump; does not affect regular wheel scrolling. */
+  scroll-padding-top: 6rem;
+  /* Never let the browser 'anchor' scroll position to a re-flowing element. */
+  overflow-anchor: none;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-feature-settings: "ss01", "ss02", "cv11";
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+  overflow-x: hidden;
+  letter-spacing: -0.005em;
+  overflow-anchor: none;
+}
+* { overflow-anchor: none; }
+
+::selection { background: var(--lime); color: var(--lime-ink); }
+
+*:focus-visible {
+  outline: 2px solid var(--lime);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-2) transparent;
+}
+
+/* ——————————————————— typography utilities ——————————————————— */
+
+.font-editorial {
+  font-family: var(--font-editorial);
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: -0.015em;
+}
+
+.label-mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.tabular { font-variant-numeric: tabular-nums; }
+
+.hero-display {
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: -0.045em;
+  line-height: 0.86;
+  color: var(--ink);
+}
+.hero-display .em {
+  font-family: var(--font-editorial);
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  color: var(--lime);
+}
+
+/* ——————————————————— surfaces ——————————————————— */
+
+.card {
+  position: relative;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  transition: transform .35s cubic-bezier(.19,1,.22,1),
+              border-color .3s ease;
+  will-change: transform;
+  transform: translateZ(0);
+}
+.card:hover {
+  transform: translate3d(0, -3px, 0);
+  border-color: var(--line-2);
+}
+
+.card-glass {
+  background: linear-gradient(155deg,
+    oklch(from var(--bg-2) l c h / .96),
+    oklch(from var(--bg) l c h / .82));
+  border: 1px solid oklch(from var(--ink) l c h / 0.08);
+  box-shadow:
+    0 1px 0 oklch(100% 0 0 / .04) inset,
+    0 24px 48px -24px oklch(0% 0 0 / .55);
+}
+
+.card-inset {
+  background: linear-gradient(180deg, var(--bg-2), var(--bg));
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  box-shadow:
+    inset 0 1px 0 oklch(100% 0 0 / .03),
+    inset 0 -30px 60px -30px oklch(0% 0 0 / .4);
+}
+
+/* ——————————————————— pill / chip / cta ——————————————————— */
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: oklch(from var(--ink) l c h / 0.03);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.pill-lime {
+  border-color: oklch(from var(--lime) l c h / 0.35);
+  background: var(--lime-soft);
+  color: var(--lime);
+}
+.pill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--lime);
+  box-shadow: 0 0 10px var(--lime);
+}
+
+.cta-lime {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 28px 16px 24px;
+  border-radius: 999px;
+  background: var(--lime);
+  color: var(--lime-ink);
+  font-weight: 700;
+  font-size: 14.5px;
+  letter-spacing: -0.005em;
+  overflow: hidden;
+  transition: transform .35s cubic-bezier(.19,1,.22,1), box-shadow .3s;
+  box-shadow:
+    0 1px 0 oklch(100% 0 0 / .5) inset,
+    0 14px 32px -10px oklch(from var(--lime) l c h / 0.55);
+}
+.cta-lime:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 1px 0 oklch(100% 0 0 / .6) inset,
+    0 22px 44px -12px oklch(from var(--lime) l c h / 0.75);
+}
+.cta-lime::after {
+  content: "";
+  position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent, oklch(100% 0 0 / .35), transparent);
+  transform: translateX(-100%);
+  transition: transform .9s cubic-bezier(.19,1,.22,1);
+}
+.cta-lime:hover::after { transform: translateX(100%); }
+
+.cta-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 15px 22px;
+  border-radius: 999px;
+  border: 1px solid var(--line-2);
+  background: transparent;
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 14px;
+  transition: all .3s ease;
+}
+.cta-ghost:hover {
+  border-color: var(--ink-3);
+  background: oklch(from var(--ink) l c h / 0.03);
+}
+
+/* ——————————————————— nav ——————————————————— */
+
+.nav-bar {
+  position: sticky;
+  top: 0;
+  z-index: 60;
+  /* backdrop-filter thrashes the compositor on scroll. Use a solid tint instead. */
+  background: oklch(from var(--bg) l c h / 0.94);
+  border-bottom: 1px solid oklch(from var(--ink) l c h / 0.06);
+  contain: paint;
+}
+
+/* ——————————————————— background flourishes ——————————————————— */
+
+.mesh-bg {
+  position: absolute; inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+  /* isolate compositing so blobs animate on their own GPU layer */
+  contain: strict;
+  height: 100vh;                 /* clip below the fold so we don't paint down the whole doc */
+}
+.mesh-blob {
+  position: absolute;
+  width: 55vw;
+  height: 55vw;
+  border-radius: 50%;
+  /* keep the layer cheap: use radial gradient's own soft edge, skip filter:blur */
+  will-change: transform, opacity;
+  transform: translateZ(0);
+  animation: mesh-drift 32s ease-in-out infinite;
+}
+.mesh-a {
+  top: -25%; left: -12%;
+  background: radial-gradient(circle, oklch(from var(--lime) l c h / 0.35) 0%, transparent 62%);
+  opacity: .45;
+}
+.mesh-b {
+  top: -18%; right: -18%;
+  background: radial-gradient(circle, oklch(70% 0.19 288 / 0.35) 0%, transparent 62%);
+  opacity: .5;
+  animation-delay: -8s;
+  animation-duration: 38s;
+}
+.mesh-c {
+  bottom: -32%; left: 25%;
+  background: radial-gradient(circle, oklch(74% 0.19 340 / 0.3) 0%, transparent 62%);
+  opacity: .35;
+  animation-delay: -16s;
+  animation-duration: 42s;
+}
+
+.grid-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(oklch(from var(--ink) l c h / 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, oklch(from var(--ink) l c h / 0.045) 1px, transparent 1px);
+  background-size: 82px 82px;
+  mask-image: radial-gradient(ellipse at 50% 30%, black 30%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse at 50% 30%, black 30%, transparent 75%);
+}
+
+/* dots micro-noise */
+.dot-field {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: radial-gradient(oklch(from var(--ink) l c h / 0.09) 1px, transparent 0);
+  background-size: 22px 22px;
+  mask-image: radial-gradient(ellipse at 50% 20%, black 20%, transparent 65%);
+  -webkit-mask-image: radial-gradient(ellipse at 50% 20%, black 20%, transparent 65%);
+}
+
+/* Subtle static grain — cheap: single background-image, no blend modes, no fixed-cover repaints on scroll. */
+body {
+  background-image:
+    radial-gradient(oklch(from var(--ink) l c h / 0.028) 1px, transparent 0);
+  background-size: 3px 3px;
+  background-attachment: fixed;
+}
+
+/* ——————————————————— motion ——————————————————— */
+
+@keyframes fade-up {
+  /* filter:blur is very expensive to interpolate on every frame — cheaper opacity + translate */
+  from { opacity: 0; transform: translate3d(0, 24px, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes mesh-drift {
+  0%,100% { transform: translate(0,0) scale(1); }
+  33%     { transform: translate(-3%, 3%) scale(1.06); }
+  66%     { transform: translate(3%, -3%) scale(0.98); }
+}
+@keyframes shimmer {
+  from { background-position: -200% 0; }
+  to   { background-position: 200% 0; }
+}
+@keyframes pulse-dot {
+  0%,100% { transform: scale(1); opacity: 1; }
+  50%     { transform: scale(1.4); opacity: 0.7; }
+}
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+@keyframes ticker {
+  0%,100% { opacity: 1; }
+  50%     { opacity: 0.4; }
+}
+
+.reveal { animation: fade-up .9s cubic-bezier(.19,1,.22,1) both; }
+.reveal-1 { animation-delay: 0.08s; }
+.reveal-2 { animation-delay: 0.18s; }
+.reveal-3 { animation-delay: 0.3s; }
+.reveal-4 { animation-delay: 0.42s; }
+.reveal-5 { animation-delay: 0.54s; }
+.reveal-6 { animation-delay: 0.66s; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* cursor halo — visible in both dark and light mode */
+.cursor-halo {
+  background: radial-gradient(closest-side, var(--lime) 0%, transparent 70%);
+  filter: blur(30px);
+  opacity: 0.55;
+  mix-blend-mode: screen;
+}
+.light .cursor-halo {
+  /* on paper, screen blend erases the glow — switch to a soft overlay
+     with a deeper hue so the halo still tints the page. */
+  background: radial-gradient(closest-side, oklch(58% 0.22 118) 0%, transparent 70%);
+  mix-blend-mode: multiply;
+  opacity: 0.35;
+  filter: blur(38px);
+}
+
+/* star field — 44 dots, all animated on the compositor */
+.atlas-star {
+  position: absolute;
+  display: block;
+  border-radius: 999px;
+  will-change: opacity, transform;
+  transform: translate3d(0, 0, 0);
+  animation-name: atlas-twinkle;
+  animation-iteration-count: infinite;
+  animation-timing-function: ease-in-out;
+  animation-direction: alternate;
+  contain: layout paint size style;
+}
+@keyframes atlas-twinkle {
+  0%   { opacity: .18; transform: translate3d(0, 0, 0) scale(0.85); }
+  100% { opacity: .95; transform: translate3d(0, -1px, 0) scale(1.15); }
+}
+
+/* hero orbit — CSS-only rotation, GPU compositor */
+.atlas-orbit-a { animation: atlas-spin 46s linear infinite; }
+.atlas-orbit-b { animation: atlas-spin-r 34s linear infinite; }
+.atlas-orbit-c { animation: atlas-spin 18s linear infinite; }
+.atlas-orbit-a, .atlas-orbit-b, .atlas-orbit-c {
+  transform-origin: center;
+  transform-box: fill-box;
+  will-change: transform;
+}
+@keyframes atlas-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+@keyframes atlas-spin-r {
+  from { transform: rotate(360deg); }
+  to   { transform: rotate(0deg); }
+}
+
+/* hero orbit pulse */
+@keyframes hero-pulse {
+  0%, 100% { transform: scale(1); opacity: .35; }
+  50%      { transform: scale(1.35); opacity: .15; }
+}
+@keyframes hero-pulse-inner {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.1); }
+}
+.hero-orbit-pulse-outer {
+  transform-origin: center;
+  transform-box: fill-box;
+  animation: hero-pulse 3.2s ease-in-out infinite;
+}
+.hero-orbit-pulse-inner {
+  transform-origin: center;
+  transform-box: fill-box;
+  animation: hero-pulse-inner 2.4s ease-in-out infinite;
+}
+
+/* live indicator */
+.live-dot {
+  position: relative;
+  width: 8px; height: 8px;
+  border-radius: 999px;
+  background: var(--lime);
+}
+.live-dot::before {
+  content: "";
+  position: absolute; inset: -4px;
+  border-radius: 999px;
+  background: var(--lime);
+  opacity: 0.4;
+  animation: pulse-dot 1.6s ease-in-out infinite;
+}
+
+/* marquee track */
+.marquee {
+  display: flex;
+  gap: 4rem;
+  width: max-content;
+  animation: marquee 40s linear infinite;
+  will-change: transform;
+}
+.marquee:hover { animation-play-state: paused; }
+
+/* ——————————————————— editorial prose ——————————————————— */
+
+.prose-editorial {
+  font-size: 17px;
+  line-height: 1.7;
+  color: var(--ink-2);
+}
+.prose-editorial em {
+  font-family: var(--font-editorial);
+  font-style: italic;
+  color: var(--ink);
+}
+
+/* ——————————————————— volume plate (numeric) ——————————————————— */
+
+.plate {
+  position: relative;
+  overflow: hidden;
+  border-radius: 22px;
+  background:
+    radial-gradient(120% 80% at 100% 0%, oklch(from var(--accent) l c h / 0.35) 0%, transparent 55%),
+    linear-gradient(180deg, var(--bg-3), var(--bg-2));
+  border: 1px solid var(--line);
+}
+.plate-numeral {
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: -0.06em;
+  line-height: 0.82;
+  color: transparent;
+  background: linear-gradient(180deg,
+    oklch(from var(--accent) l c h / 1) 0%,
+    oklch(from var(--accent) l c h / 0.55) 60%,
+    oklch(from var(--accent) l c h / 0.18) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+/* ——————————————————— method bullets ——————————————————— */
+
+.method-num {
+  font-family: var(--font-editorial);
+  font-style: italic;
+  font-size: 46px;
+  line-height: 1;
+  color: var(--lime);
+  letter-spacing: -0.03em;
+}
+
+/* ——————————————————— rounded chip stat ——————————————————— */
+
+.stat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 20px;
+  border-radius: 22px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+}
+.stat-chip .n {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  font-size: 30px;
+  color: var(--ink);
+  line-height: 1;
+}
+.stat-chip .l {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  line-height: 1.3;
+}
+
+/* ——————————————————— ornamental strokes ——————————————————— */
+
+.hr-mono {
+  display: block;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--line-2), transparent);
+}
+
+/* ——————————————————— page markers ——————————————————— */
+
+.chapter-mark {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  color: var(--ink-3);
+}
+.chapter-mark .no {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  color: var(--lime);
+  text-transform: uppercase;
+}
+.chapter-mark .rule {
+  display: inline-block;
+  height: 1px;
+  width: 40px;
+  background: var(--lime);
+  opacity: .6;
 }

@@ -1,0 +1,254 @@
+---
+title: Errors, testing & logging
+tier: 0
+phase: "0.1"
+---
+
+export const exceptionsCode = `# Custom exceptions — cheap and communicative.
+
+class ConfigError(Exception):
+    "Raised when configuration is missing or invalid."
+
+class MissingKeyError(ConfigError):
+    "The specific config key was not found."
+
+def get_temperature(cfg: dict) -> float:
+    if "temperature" not in cfg:
+        raise MissingKeyError("temperature not in config")
+    t = cfg["temperature"]
+    if not (0 < t <= 2):
+        raise ConfigError(f"temperature {t} out of range (0, 2]")
+    return t
+
+for cfg in [{"temperature": 0.7}, {"temperature": 3.0}, {}]:
+    try:
+        print("ok:", get_temperature(cfg))
+    except MissingKeyError as e:
+        print("MISSING:", e)
+    except ConfigError as e:
+        print("BAD CONFIG:", e)`;
+
+export const pytestCode = `# tests/test_stats.py
+import pytest
+
+def mean(xs):
+    if not xs:
+        raise ValueError("mean of empty list")
+    return sum(xs) / len(xs)
+
+def test_mean_basic():
+    assert mean([1, 2, 3]) == 2
+
+def test_mean_empty_raises():
+    with pytest.raises(ValueError, match="empty"):
+        mean([])
+
+@pytest.mark.parametrize("xs,expected", [
+    ([0], 0),
+    ([1, 1, 1, 1], 1),
+    ([-2, 2], 0),
+])
+def test_mean_parametrized(xs, expected):
+    assert mean(xs) == expected
+
+# Fixtures for shared setup
+@pytest.fixture
+def sample_data():
+    return [10, 20, 30, 40]
+
+def test_mean_with_fixture(sample_data):
+    assert mean(sample_data) == 25`;
+
+export const loggingCode = `import logging, sys, json, time
+
+# Structured JSON logs — production-friendly, grep-friendly
+class JsonFormatter(logging.Formatter):
+    def format(self, record):
+        base = {
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(record.created)),
+            "level": record.levelname,
+            "logger": record.name,
+            "msg": record.getMessage(),
+        }
+        if record.exc_info:
+            base["exc"] = self.formatException(record.exc_info)
+        # merge any extra={...} kwargs
+        for k, v in record.__dict__.items():
+            if k not in ("name","msg","args","levelname","levelno","pathname","filename",
+                         "module","exc_info","exc_text","stack_info","lineno","funcName",
+                         "created","msecs","relativeCreated","thread","threadName",
+                         "processName","process","message","asctime"):
+                base[k] = v
+        return json.dumps(base)
+
+log = logging.getLogger("atlas")
+log.setLevel(logging.INFO)
+handler = logging.StreamHandler(sys.stdout)
+handler.setFormatter(JsonFormatter())
+log.handlers = [handler]
+
+log.info("training started", extra={"model":"tiny-gpt","epochs":3})
+log.warning("gradient norm high", extra={"step":42,"grad_norm":18.7})
+try:
+    1/0
+except ZeroDivisionError:
+    log.exception("something exploded")`;
+
+<Prerequisites items={[
+  { href: "/learn/foundations/python-craft/functions-scope-closures", label: "Functions, scope & closures", blurb: "Decorators show up in pytest fixtures and parametrize." },
+  { href: "/learn/foundations/python-craft/classes-protocols-dataclasses", label: "Classes, protocols & dataclasses", blurb: "Custom exceptions are just classes." },
+]} />
+
+<Motivation title="Debugging is what you'll actually do most days">
+
+Writing code is fun. Writing correct code that stays correct as it changes — and diagnosing it when it breaks at 2am on a Tuesday — is the job. Three tools carry the load: **exceptions** (the language's way of saying "this didn't work"), **tests** (the code that proves the code works), and **logs** (the trail of breadcrumbs your future self follows to find the bug). Every senior engineer's first move on a new codebase is: are there logs, are there tests, and how do errors surface? If any answer is "no", they build one.
+
+</Motivation>
+
+<Intuition title="Three mental models">
+
+- **Exceptions are values that carry a message and a stack trace.** They're not just error-signaling; they're a way to *communicate* what happened, structured enough that upstream code can decide what to do.
+- **Tests are documentation you can execute.** A well-named test says "here's what this function is supposed to do". If it passes, that's still true.
+- **Logs are your model's story.** Every meaningful state transition should leave a trace. When something goes wrong, logs are what you have when the debugger isn't attached.
+
+</Intuition>
+
+<Recall term="Traceback">
+
+When an exception isn't caught, Python prints a **traceback** — the chain of function calls that led to the failure, most-recent-call-last. The traceback is the map back to the bug. Read from the bottom.
+
+</Recall>
+
+<Angles>
+  <Angle type="code" title="Custom exceptions communicate intent">
+    <RunnableCode title="ConfigError hierarchy" code={exceptionsCode} />
+
+    Two rules: **inherit from Exception** (never from `BaseException` directly — that catches KeyboardInterrupt too, which you don't want). **Make the class name informative** — `ConfigError` beats `Exception("bad config")` because callers can `except ConfigError` specifically, letting good messages through and blocking anything else.
+  </Angle>
+
+  <Angle type="code" title="pytest — the assertion is the test">
+    <RunnableCode title="test file" code={pytestCode} />
+
+    Pytest turns any function starting with `test_` into an assertion the runner will check. `pytest.raises` verifies that code *does* fail as expected. `parametrize` collapses a whole table of test cases into one function. `@pytest.fixture` provides shared setup — think "value that's cached per test".
+
+    Run with `uv run pytest -v`. A failed assertion prints both sides and the diff — no `assertEqual` gymnastics.
+  </Angle>
+
+  <Angle type="computational" title="EAFP vs LBYL">
+    Two styles of "handling absence":
+
+    - **LBYL** (Look Before You Leap): `if 'k' in d: d['k']`
+    - **EAFP** (Easier to Ask Forgiveness than Permission): `try: d['k'] except KeyError: ...`
+
+    Python prefers EAFP because (a) it's atomic (no race between check and use in threaded code) and (b) the happy path is faster. LBYL wins when the *check* is cheap and the *action* is expensive.
+  </Angle>
+
+  <Angle type="code" title="Structured logging beats print()">
+    <RunnableCode title="JSON logs with extra={}" code={loggingCode} />
+
+    In production, logs go to a search index (Datadog, Grafana Loki, CloudWatch). **Structured logs** — key/value fields you can filter on — beat freeform strings every time. Even for local dev, `logging` beats `print` because you get levels (INFO/WARNING/ERROR), a logger name to filter by, and one flag to silence everything below a threshold.
+  </Angle>
+</Angles>
+
+<Convergence>
+
+Exceptions are the *language's* error channel. Tests are the *codebase's* correctness proof. Logs are the *runtime's* narrative. Get comfortable with all three and debugging shifts from a stressful hunt to a routine trace-follow. The bugs still happen; you find them faster.
+
+</Convergence>
+
+<Nuance>
+
+**Don't catch bare `except:`.** It swallows `KeyboardInterrupt` and `SystemExit` and turns Ctrl-C into "please stop… eventually." Catch specific exception types.
+
+**Re-raise with context.** `raise ConfigError("bad config") from e` chains the underlying cause into the traceback — you see both what wrapped and what caused it.
+
+**Assertions are not error handling.** `assert x > 0` is stripped when Python runs with `-O`. Use assertions to state invariants during development; use raises for real error paths.
+
+**Logging is expensive if you format eagerly.** `log.debug(f"tensor: {tensor}")` formats the string every time even if DEBUG is off. Prefer `log.debug("tensor: %s", tensor)` — Python only formats if the level is active.
+
+**pytest fixtures are memoized per scope.** Default scope is `function` (fresh each test); `session` scope reuses across the whole run. Use `session` for expensive setup like DB connections.
+
+</Nuance>
+
+<CodeItYourself
+  title="Retry decorator with logging"
+  spec={<>Write a decorator <code>@retry(n=3, on=Exception, log=None)</code> that re-runs the wrapped function up to <code>n</code> times, catching exceptions of type <code>on</code>, and logging each failed attempt using the provided logger. If all attempts fail, re-raise the last exception. Test it on a function that fails the first two calls then succeeds.</>}
+  hints={[
+    "Use functools.wraps to preserve the wrapped function's name and docstring.",
+    "Track the last exception in a local variable so you can re-raise it at the end.",
+    "Use logger.warning(...) with `extra={'attempt': i}` to keep logs structured."
+  ]}
+  solution={<CodeBlock language="python" title="@retry" code={`from functools import wraps
+import logging
+
+def retry(n=3, on=Exception, log=None):
+    log = log or logging.getLogger("retry")
+    def deco(fn):
+        @wraps(fn)
+        def inner(*args, **kwargs):
+            last = None
+            for attempt in range(1, n + 1):
+                try:
+                    return fn(*args, **kwargs)
+                except on as e:
+                    last = e
+                    log.warning(
+                        "attempt failed",
+                        extra={"attempt": attempt, "of": n, "err": str(e)},
+                    )
+            raise last
+        return inner
+    return deco
+
+state = {"calls": 0}
+
+@retry(n=5)
+def flaky():
+    state["calls"] += 1
+    if state["calls"] < 3:
+        raise RuntimeError("network blip")
+    return "done"
+
+print(flaky())          # "done" after 3 attempts`} />}
+/>
+
+<Summary bullets={[
+  "Custom exceptions communicate intent — inherit from Exception, name informatively.",
+  "pytest: functions starting with test_ are assertions; parametrize + fixtures compress boilerplate.",
+  "EAFP > LBYL in Python — try/except is idiomatic error handling.",
+  "Use `logging` with levels; prefer structured logs (extra={...}) so you can filter in production.",
+  "Never `except:` bare; never use assert for real error handling."
+]} />
+
+<Quiz items={[
+  {
+    q: "Which of these is idiomatic Python for handling a missing dict key?",
+    choices: [
+      { text: "Check `if k in d:` before accessing d[k]" },
+      { text: "try/except KeyError", correct: true },
+      { text: "Use hasattr(d, k)" },
+      { text: "None of the above — use d[k] and hope for the best" },
+    ],
+    explanation: <>EAFP: try d[k], catch KeyError. Atomic under concurrency and faster in the happy path.</>
+  },
+  {
+    q: "What does `raise NewError('...') from original` do?",
+    choices: [
+      { text: "Silences the original exception" },
+      { text: "Chains the original into the traceback as the cause", correct: true },
+      { text: "Converts the new error to a warning" },
+      { text: "Skips the current stack frame" },
+    ],
+    explanation: <>`raise X from Y` sets `X.__cause__ = Y`, and Python prints both — 'The above exception was the direct cause of the following exception:'. It's the cleanest way to wrap while preserving the original.</>
+  },
+  {
+    q: "Your pytest test asserts `assert result == 42` and it fails. What does pytest print by default?",
+    choices: [
+      { text: "Only 'AssertionError'" },
+      { text: "The values of result and 42 side by side, plus a diff", correct: true },
+      { text: "The full source of the test file" },
+      { text: "Nothing — you need `-v`" },
+    ],
+    explanation: <>pytest's assertion rewriting shows both operands and a helpful diff, which is why you almost never need to write custom error messages on your assertions.</>
+  }
+]} />

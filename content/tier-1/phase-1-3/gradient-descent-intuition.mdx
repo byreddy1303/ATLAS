@@ -1,0 +1,281 @@
+---
+title: Gradient Descent — The Intuition
+tier: 1
+phase: "1.3"
+---
+
+export const gdScratch = `import numpy as np
+
+# f(x) = x^2 - 2x + 3   ->   min at x=1, f(1)=2
+f     = lambda x: x**2 - 2*x + 3
+grad  = lambda x: 2*x - 2
+
+x   = 4.0             # starting guess
+lr  = 0.20            # learning rate
+for step in range(12):
+    print(f"step {step:2d}: x={x:7.4f}  f(x)={f(x):7.4f}  grad={grad(x):7.4f}")
+    x = x - lr * grad(x)
+
+print(f"final   : x={x:.4f}  f(x)={f(x):.4f}   (true min: x=1.0000, f=2.0000)")`;
+
+export const gdLineFit = `import numpy as np
+import matplotlib.pyplot as plt
+
+# synthesize a noisy line y = 2.5*x + 1 + noise
+rng = np.random.default_rng(0)
+xs = np.linspace(-2, 2, 40)
+ys = 2.5 * xs + 1.0 + rng.normal(0, 0.6, xs.shape)
+
+# start with random slope + intercept, descend on MSE
+w, b = 0.0, 0.0
+lr = 0.05
+history = []
+for step in range(80):
+    yhat = w * xs + b
+    err  = yhat - ys
+    loss = (err ** 2).mean()
+    dw = (2 * err * xs).mean()
+    db = (2 * err).mean()
+    w -= lr * dw
+    b -= lr * db
+    history.append((w, b, loss))
+
+print(f"learned: y = {w:.3f} x + {b:.3f}    final MSE = {history[-1][2]:.3f}")
+
+# plot: data, learned line, and a few intermediate fits
+plt.figure(figsize=(6.2, 4.0))
+plt.scatter(xs, ys, s=18, alpha=0.7, label="data")
+for k in [0, 5, 15, 40, 79]:
+    ww, bb, _ = history[k]
+    plt.plot(xs, ww*xs + bb, alpha=0.35 + 0.15*(k/79), label=f"step {k}")
+plt.legend(fontsize=8, frameon=False)
+plt.title("gradient descent fitting y = wx + b")
+plt.xlabel("x"); plt.ylabel("y"); plt.grid(alpha=0.2)`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/calculus/derivatives-single-var", label: "Derivatives, single variable", blurb: "Slope of a curve at a point — the local direction of climb." },
+  { href: "/learn/mathematics/calculus/multivariable-partials", label: "Partial derivatives & the gradient", blurb: "The vector version of the derivative; points uphill." },
+  { href: "/learn/mathematics/vectors-space/norms-distances", label: "Norms & distances", blurb: "How we measure how far the parameters moved." },
+]} />
+
+<Motivation title="Walking downhill without seeing the map">
+
+You want to find the *lowest point* of a landscape you can't see — a valley in a fog so thick you can only feel the slope under your boots. What do you do? You take a small step downhill. Then another. And another. Eventually — if the fog behaves — you land at the bottom.
+
+That is gradient descent. The "landscape" is a loss function; the "position" is a set of model parameters; the "downhill direction" is the negative gradient. Every learning algorithm you'll ever meet — linear regression, neural networks, LLM pre-training, RLHF — is some variation of this quiet ritual.
+
+</Motivation>
+
+<Intuition title="Just the update, in plain words">
+
+At every step: (1) evaluate the loss, (2) compute the gradient — the vector that points *steepest uphill*, (3) take a small step in the *opposite* direction. Repeat until moving stops making the loss smaller. In symbols:
+
+```
+x  ←  x  −  η · ∇f(x)
+```
+
+`η` (eta) is the **learning rate**. Big η → big steps → fast but risky. Small η → tiny steps → safe but slow. This one dial governs the whole ritual.
+
+</Intuition>
+
+<Recall term="Gradient">
+
+For a scalar function `f(x₁, ..., xₙ)`, the gradient `∇f` is the vector `(∂f/∂x₁, ..., ∂f/∂xₙ)` — one partial derivative per input. It always points in the direction of **steepest ascent**; `−∇f` therefore points steepest downhill. That is why descent uses a minus sign.
+
+</Recall>
+
+<Angles>
+  <Angle type="geometric" title="The mountain and the rope">
+    Imagine a mountain range in fog. You're on a slope, holding one end of a rope. Feel the tilt under your feet, tie the rope to a small ball, and let the ball roll a short distance downhill. Move to where the ball settled. Repeat. If the mountain is one big valley (convex), you'll reach the bottom. If it has many valleys (non-convex), you'll reach *a* bottom — not necessarily the deepest. This one picture explains everything from linear regression to neural network training.
+  </Angle>
+
+  <Angle type="algebraic" title="Just an update rule">
+    The equation `x ← x − η ∇f(x)` is unhelpfully compact. Read it as: *make a copy of x, subtract a small (η times the gradient) piece from it, and use that as your new x*. In code that's three lines: compute the gradient, compute the update, apply it.
+  </Angle>
+
+  <Angle type="computational" title="Why it works at all">
+    Any smooth function looks *linear* if you zoom in far enough. Locally, `f(x + Δx) ≈ f(x) + ∇f(x) · Δx`. To make `f` go down, we should pick `Δx` in the direction that makes the dot product *most negative* — which is `Δx = −η ∇f(x)`. Every gradient method is this trick, over and over.
+  </Angle>
+
+  <Angle type="probabilistic" title="Noise is a feature">
+    In real training you don't compute the gradient over the whole dataset — you compute it on a small random batch. The result is *noisy*, but that noise helps you jitter out of shallow local minima. This is Stochastic Gradient Descent, and half the reason deep learning generalizes at all.
+  </Angle>
+</Angles>
+
+<Convergence>
+
+The mountain picture (geometric), the update rule (algebraic), the linear-zoom argument (computational), and the mini-batch noise (probabilistic) all point at the same procedure: **evaluate, follow the negative gradient, step, repeat**. Once you feel this in your body, you'll recognize it in every learning algorithm — and every training bug you'll ever debug (learning rate too high? too low? loss NaN?) will be legible in these terms.
+
+</Convergence>
+
+<Derivation title="Deriving the update rule from a first-order Taylor expansion">
+
+Why exactly is `x ← x − η ∇f(x)` the "right" step? Because it minimizes the *first-order* Taylor approximation of `f` around the current point, subject to a bounded step size.
+
+<Step n={1} math={<span>Around a point <code>x</code>, expand:<br/><code>f(x + Δx) ≈ f(x) + ∇f(x) · Δx</code></span>}>
+    This is the linear (first-order) approximation. It's exact only in the limit of infinitesimal steps, but for small enough Δx it's a good estimate. Every optimizer either uses this expansion (first-order methods like SGD, Adam) or extends it to include curvature (second-order methods like Newton).
+</Step>
+
+<Step n={2} math={<span>Constrain: <code>‖Δx‖ ≤ η</code></span>}>
+    We're only allowed to move a small amount — because our linear picture only holds locally. Think of it as: "given a budget of η steps, what direction shrinks f the most?"
+</Step>
+
+<Step n={3} math={<span>Choose Δx to minimize <code>∇f(x) · Δx</code></span>}>
+    Since <code>f(x)</code> is fixed at the current point, minimizing <code>f(x + Δx)</code> is the same as minimizing the dot product <code>∇f(x) · Δx</code>. Recall that a dot product is minimized when the two vectors point in *opposite* directions.
+</Step>
+
+<Step n={4} math={<span>Answer: <code>Δx = −η · ∇f(x) / ‖∇f(x)‖</code></span>}>
+    Point opposite the gradient with length η. In practice we drop the normalization and absorb it into η, giving the vanilla update <code>Δx = −η ∇f(x)</code>. That is why every gradient descent step is <em>parallel to −∇f</em> and <em>scaled by η</em>.
+</Step>
+
+<Step n={5} math={<span>Iterate: <code>x_{"{k+1}"} = x_k − η ∇f(x_k)</code></span>}>
+    Do it again. And again. The sequence x₀, x₁, x₂ … will converge to a stationary point provided η is small enough and f is smooth. This entire chapter is that one line, iterated.
+</Step>
+
+</Derivation>
+
+<Example title="Play with a real quadratic">
+
+The lab below runs the update rule live on `f(x) = x² − 2x + 3` (minimum at `x = 1`). Drag the starting point. Move the learning rate slider from 0.05 to 1.1. Notice: with η ≈ 0.5 you converge in a few steps; with η > 1 you *diverge* — the steps get bigger and the ball rolls up the far wall.
+
+<GradientDescentLab />
+
+</Example>
+
+<Nuance>
+
+**Learning rate is the whole ballgame.** Too small — you'll wait forever. Too large — the update overshoots, `f` goes *up*, and next step overshoots even more. In practice you either tune it by trial (log scale from 1e-5 to 1) or use an adaptive optimizer (Adam) that maintains a per-parameter learning rate. Cosine schedules and warmup exist because a *constant* η is almost never optimal across training.
+
+**Local vs global minima.** For convex `f` (bowl-shaped), any local minimum is *the* minimum and gradient descent finds it. Neural network losses are wildly non-convex — many local minima, saddle points, and plateaus. Empirically, in high dimensions most local minima have similar loss values, so we don't panic.
+
+**Zero gradient ≠ minimum.** It could be a saddle point (up in one direction, down in another) or a plateau. Second-order methods and momentum help escape these.
+
+**Vanishing / exploding gradients.** In deep nets, backprop multiplies many small (or many large) numbers. Product goes to 0 or ∞ and training halts. Fix with normalization, residual connections, sensible weight init, and gradient clipping.
+
+</Nuance>
+
+<RealWorldML title="Fit a line to noisy data — 12 lines of NumPy, live">
+
+Below is the simplest learning algorithm you can write: gradient descent on the mean-squared error of a line `y = wx + b`. Watch the printed loss shrink, then a matplotlib figure of a few intermediate fits. If you change `lr` to `0.5` you'll see the fit oscillate; change to `0.001` and it barely moves — this is the learning-rate trade-off in action, on data you can see.
+
+<RunnableCode
+  title="line fit with gradient descent · matplotlib plot"
+  code={gdLineFit}
+  packages={["numpy", "matplotlib"]}
+  captureFig={true}
+/>
+
+Every "training loop" you'll ever write — from your first sklearn regressor to a transformer's optimizer step — has the same skeleton: predict, measure error, compute gradient, step. This tiny cell is the whole ritual, stripped to twelve lines.
+
+</RealWorldML>
+
+<CodeItYourself
+  title="Vanilla GD on a 1-D quadratic"
+  spec={<>Implement gradient descent from scratch on <code>f(x) = x² − 2x + 3</code>. Print x and f(x) at every step. Then experiment: what learning rate makes it converge in ≤ 5 steps? What learning rate makes it diverge?</>}
+  hints={[
+    "The gradient of x² − 2x + 3 is 2x − 2.",
+    "Try lr in {0.1, 0.3, 0.5, 0.9, 1.05}. Note the qualitative change around lr ≈ 1.",
+    "For a quadratic ax² + bx + c the fastest convergence is at lr = 1/a; here a = 1, so lr = 1 is a borderline choice that either converges or oscillates depending on rounding."
+  ]}
+  solution={<CodeBlock language="python" title="vanilla_gd.py" code={gdScratch} />}
+/>
+
+<LifeLesson title="Small steps, honest gradients, tolerable pace">
+
+Gradient descent is a philosophy as much as an algorithm. It says: *you rarely need to solve the whole problem. You just need to know which way is down, and take a step that size.* The valley finds you.
+
+The learning-rate lesson is the deep one. **Too big** — you overshoot, the loss goes up, you feel worse than before you tried. Ambitious life pivots often work this way: you overhaul everything at once, the gradient information from your old routine gets destroyed, and you diverge. **Too small** — the update is invisible, you can't tell if it's working, and you quit. Micro-habits sometimes fail here. The right η is what makes tomorrow's version of you *measurably* different from today's, without breaking the model that got you here.
+
+The other lesson is *stochasticity*. In real life you never get the exact gradient of your loss — every day is a noisy estimate. That noise is often what keeps you from settling into a shallow rut. Trust the average direction; don't over-fit to any single bad day.
+
+Descend. Small step. Repeat.
+
+</LifeLesson>
+
+<MLConnection>
+
+Gradient descent is the algorithm that trained every model you've ever heard of.
+
+- **Linear & logistic regression** — the closed-form solution exists but SGD is used at scale.
+- **Neural networks** — backprop computes the gradient; SGD/Adam takes the step.
+- **Transformer pre-training** — trillions of update steps on a 100B-parameter model, all of them `x ← x − η ∇f(x)` variations.
+- **RLHF / DPO** — the fine-tuning objective changes; the descent doesn't.
+- **Diffusion models** — the score-matching loss is optimized by (guess what) gradient descent.
+
+Every optimizer name you'll see (SGD, Momentum, RMSProp, Adam, AdamW, Lion, Muon) is a small modification of this exact update, usually adding a running estimate of past gradients or a per-parameter scale.
+
+</MLConnection>
+
+<Summary bullets={[
+  "Gradient descent: x ← x − η · ∇f(x). Follow the negative gradient in tiny steps.",
+  "η (learning rate) is the whole show — too small crawls, too large diverges.",
+  "Derives from minimizing the first-order Taylor expansion inside a small step budget.",
+  "Convex losses have one minimum; deep-learning losses are non-convex but empirically well-behaved.",
+  "Every model you know is trained by a variant of this rule (SGD, Adam, AdamW, ...)."
+]} />
+
+<ProblemSet problems={[
+  {
+    difficulty: "easy",
+    q: <>For <code>f(x) = 3x² + 4x</code>, what is the update <code>Δx = −η ∇f(x)</code> at <code>x = 2</code> with <code>η = 0.1</code>?</>,
+    hint: <>Compute ∇f first: 6x + 4.</>,
+    answer: <>∇f(2) = 6·2 + 4 = 16. Δx = −0.1 · 16 = <b>−1.6</b>. New x = 2 − 1.6 = 0.4.</>
+  },
+  {
+    difficulty: "easy",
+    q: <>What is the minimum of <code>f(x) = x² − 6x + 10</code>, and what does the gradient equal there?</>,
+    hint: <>Take the derivative and set it to zero.</>,
+    answer: <>f'(x) = 2x − 6. Setting to 0 gives x = 3; f(3) = 9 − 18 + 10 = 1. At any minimum of a smooth function, the gradient is <b>zero</b>.</>
+  },
+  {
+    difficulty: "medium",
+    q: <>You're minimizing <code>f(x) = ax²</code> with a &gt; 0 using GD. Show that convergence requires <code>0 &lt; η &lt; 2/a</code>.</>,
+    hint: <>Look at what happens to <code>|x|</code> after one step.</>,
+    answer: <>∇f = 2ax so the update is x' = x − 2ηax = (1 − 2ηa) x. Iterating gives x_k = (1 − 2ηa)^k · x₀. |x_k| → 0 iff |1 − 2ηa| &lt; 1, which requires <b>0 &lt; η &lt; 1/a</b>. (Beyond 1/(2a) you overshoot but still converge; beyond 1/a you oscillate; beyond 2/a you diverge — the general bound.)</>
+  },
+  {
+    difficulty: "medium",
+    q: <>Why does mini-batch SGD sometimes generalize better than full-batch gradient descent?</>,
+    hint: <>Think about the geometry of the loss landscape and where noise helps.</>,
+    answer: <>Mini-batch gradients are noisy estimates. That noise (a) jitters the trajectory out of sharp minima that generalize poorly and (b) implicitly regularizes by preferring wide, flat minima. Empirically, models trained with SGD generalize better than the same optimum found by exact gradient descent on the whole dataset. This is one of the famous "unreasonable effectiveness" observations in deep learning.</>
+  },
+  {
+    difficulty: "hard",
+    q: <>Prove that for a convex differentiable function with L-Lipschitz gradient, GD with η = 1/L converges to the minimum at rate O(1/k) where k is the number of iterations.</>,
+    hint: <>Use the descent lemma f(y) ≤ f(x) + ∇f(x)·(y−x) + (L/2)‖y−x‖².</>,
+    answer: <>The descent lemma gives, for y = x − (1/L)∇f(x): <code>f(y) − f(x) ≤ −(1/(2L))‖∇f(x)‖²</code>. Summing over k iterations telescopes to give <code>f(x_k) − f* ≤ L‖x₀ − x*‖² / (2k)</code>, which is the O(1/k) rate. Full rigor requires convexity to bound the accumulation of gradient norms — see any convex optimization textbook (Boyd & Vandenberghe Ch. 9).</>
+  },
+]} />
+
+<Quiz items={[
+  {
+    q: "You are running GD with learning rate η. The loss increases every step. What is the most likely fix?",
+    choices: [
+      { text: "Increase η" },
+      { text: "Decrease η", correct: true },
+      { text: "Reverse the sign of the gradient" },
+      { text: "Change the loss function" },
+    ],
+    explanation: <>An increasing loss under GD almost always means the step size is too big — the linear approximation is invalid at that scale. Halve η and try again.</>
+  },
+  {
+    q: "Which of these is NOT a variant of gradient descent?",
+    choices: [
+      { text: "Adam" },
+      { text: "AdamW" },
+      { text: "K-Nearest Neighbors", correct: true },
+      { text: "RMSProp" },
+    ],
+    explanation: <>KNN is not trained — it just memorizes the data. Adam, AdamW, RMSProp all modify the plain GD update with running gradient statistics.</>
+  },
+  {
+    q: "In stochastic gradient descent, we compute the gradient on a small random batch instead of the full dataset because:",
+    choices: [
+      { text: "It's less accurate, and less accuracy generalizes better in some regimes", correct: true },
+      { text: "The full-batch gradient does not exist" },
+      { text: "It always converges faster in wall-clock time" },
+      { text: "The mathematics only works for batch sizes below 32" },
+    ],
+    explanation: <>Full-batch gradients are usually too expensive AND can converge to sharp minima that generalize poorly. Noisy mini-batch estimates are cheaper and empirically find flatter, better-generalizing minima.</>
+  }
+]} />

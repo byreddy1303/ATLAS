@@ -1,0 +1,195 @@
+---
+title: Comprehensions, Generators & Decorators
+tier: 0
+phase: "0.1"
+---
+
+export const compsCode = `# The three moves, side by side
+
+# 1. list comprehension: build all values up-front
+squares_list = [x*x for x in range(6)]
+print("list :", squares_list)
+
+# 2. generator expression: build values lazily, one at a time
+squares_gen = (x*x for x in range(6))
+print("gen  :", squares_gen)         # <generator object ...>
+print("gen1 :", next(squares_gen))   # 0
+print("gen2 :", next(squares_gen))   # 1
+
+# 3. same idea as a full generator function
+def squares_upto(n):
+    for x in range(n):
+        yield x*x
+
+print("fn   :", list(squares_upto(6)))`;
+
+export const memoryCode = `import sys, itertools
+
+# a HUGE virtual sequence: numbers 0..99_999_999
+# list comprehension would allocate 100M ints in memory
+# generator holds one int at a time
+
+biglist = [x*x for x in range(10_000)]    # small enough to try
+biggen  = (x*x for x in range(10_000_000))
+
+print("list bytes :", sys.getsizeof(biglist))
+print("gen bytes  :", sys.getsizeof(biggen))
+
+# operate lazily
+first_5 = list(itertools.islice(biggen, 5))
+print("first 5 squares of 10M-long virtual sequence:", first_5)`;
+
+export const decoratorCode = `import time
+from functools import wraps
+
+def timed(fn):
+    "Wrap fn so that every call prints how long it took."
+    @wraps(fn)
+    def inner(*args, **kwargs):
+        t0 = time.perf_counter()
+        out = fn(*args, **kwargs)
+        dt = time.perf_counter() - t0
+        print(f"{fn.__name__} took {dt*1e3:.2f}ms")
+        return out
+    return inner
+
+@timed
+def slow_sum(n):
+    return sum(i*i for i in range(n))
+
+slow_sum(100_000)
+slow_sum(500_000)`;
+
+<Prerequisites items={[
+  { href: "/learn/foundations/python-craft/functions-scope-closures", label: "Functions, scope & closures", blurb: "Decorators are built on closures — a function that captures its enclosing variables." },
+  { href: "/learn/foundations/python-craft/control-flow-data-model", label: "Control flow & the data model", blurb: "Iterables are the substrate — comprehensions and generators both consume them." },
+]} />
+
+<Motivation title="Why Python isn't just 'C with indentation'">
+
+Three moves separate scripting Python from *Pythonic* Python: **comprehensions** turn loops into single expressions, **generators** turn loops into streams that never fill memory, and **decorators** turn common wrappers (timing, caching, logging) into one-line annotations. Learn these and you stop writing four-line boilerplate; you also start reading the standard library instead of squinting at it.
+
+In machine-learning code these show up constantly: data-loading pipelines are generators, cached model-loaders are decorated, and every list of tensor shapes on the internet is a comprehension.
+
+</Motivation>
+
+<Intuition title="What each move actually does">
+
+- A **list comprehension** `[x*x for x in xs]` is a `for`-loop that builds a list, written as an expression. Same result, less noise.
+- A **generator** is that loop but *paused* — it produces one item on demand and holds nothing extra. Great for infinite streams or 100-million-item pipelines.
+- A **decorator** `@timed` wraps a function without touching its source: it's a higher-order function that takes the function in, returns a modified one out. Perfect for cross-cutting concerns.
+
+</Intuition>
+
+<Recall term="Iterable, iterator, generator">
+
+An **iterable** is anything you can loop over (list, tuple, dict, str). An **iterator** is a stateful thing that produces the next item when you call `next()`. A **generator** is a very ergonomic way to *write* an iterator — using `yield` inside a function.
+
+</Recall>
+
+<Angles>
+  <Angle type="code" title="The comprehension trio">
+    <RunnableCode title="comprehensions & generators, side by side" code={compsCode} />
+  </Angle>
+
+  <Angle type="computational" title="Where generators pay off">
+    <RunnableCode title="lazy memory usage" code={memoryCode} />
+  </Angle>
+
+  <Angle type="code" title="A timing decorator, from scratch">
+    <RunnableCode title="@timed" code={decoratorCode} />
+  </Angle>
+</Angles>
+
+<Convergence>
+
+Comprehensions compress; generators stream; decorators wrap. All three are ways to describe *behavior* declaratively — you say what you want, not the four lines of scaffolding around it. Real Python code is 30% comprehensions, 20% generators, and a healthy sprinkle of decorators. Reading Pandas, PyTorch, or FastAPI's source will make no sense until this is second nature.
+
+</Convergence>
+
+<Nuance>
+
+**Generators are one-shot.** Once you've iterated over a generator, it's exhausted — a second loop yields nothing. This bites everyone once.
+
+**Comprehensions build lists eagerly.** For 10M rows, a list comprehension will happily allocate a gigabyte. Reach for a generator expression when the whole result won't need to live in memory at once.
+
+**Decorators run at *definition* time.** `@timed` is applied when Python first evaluates the `def`. If you decorate with side-effects (register callbacks, add routes), those side-effects happen immediately, not on first call.
+
+**Use `functools.wraps`** inside a decorator to preserve the original function's `__name__`, `__doc__`, and signature. Without it, `help(fn)` shows the wrapper, not your function — surprisingly annoying to debug.
+
+</Nuance>
+
+<MLConnection>
+
+- **DataLoader pipelines** in PyTorch are generators under the hood — that's how they stream batches from a dataset larger than RAM.
+- **`@torch.no_grad()`**, **`@functools.lru_cache`**, **`@dataclass`** — all decorators. Reading modern ML code without decorator literacy is like reading English without commas.
+- **`train_x, train_y = zip(*[(x, y) for x, y in data if valid(x)])`** — one line of ML preprocessing, three comprehensions layered.
+
+</MLConnection>
+
+<Summary bullets={[
+  "Comprehension = for-loop expressed as an expression, building a container in one line.",
+  "Generator = a lazy iterator; produces one item at a time via yield or (…) expression.",
+  "Decorator = a higher-order wrapper applied with @; used for timing, caching, registration, guards.",
+  "Reach for a generator when the output is too big to fit in memory OR when the consumer only needs the first few items.",
+  "Always use functools.wraps inside a decorator so introspection isn't broken."
+]} />
+
+<CodeItYourself
+  title="Write @memoize from scratch"
+  spec={<>Write a decorator <code>@memoize</code> that caches a function's return value keyed by its positional arguments. Use it on a naive Fibonacci function and confirm that <code>fib(35)</code> becomes instant. Then explain in one sentence why it fails for <code>list</code> arguments.</>}
+  hints={[
+    "Store a dict keyed by args inside a closure. Don't forget functools.wraps.",
+    "Test with the recursive fib(n) definition. Compare timings with and without your decorator.",
+    "dict keys must be hashable. Lists aren't — that's why functools.lru_cache also rejects list args."
+  ]}
+  solution={<CodeBlock language="python" title="@memoize" code={`from functools import wraps
+
+def memoize(fn):
+    cache = {}
+    @wraps(fn)
+    def inner(*args):
+        if args not in cache:
+            cache[args] = fn(*args)
+        return cache[args]
+    return inner
+
+@memoize
+def fib(n):
+    return n if n < 2 else fib(n-1) + fib(n-2)
+
+print(fib(35))   # near-instant`} />}
+/>
+
+<Quiz items={[
+  {
+    q: "You call next() on a generator that has already yielded all its values. What happens?",
+    choices: [
+      { text: "It restarts from the beginning" },
+      { text: "It raises StopIteration", correct: true },
+      { text: "It returns None" },
+      { text: "It raises TypeError" },
+    ],
+    explanation: <>Generators are one-shot iterators. The <code>for</code>-loop machinery catches <code>StopIteration</code> automatically; when you call <code>next()</code> yourself, you get the exception.</>
+  },
+  {
+    q: "Which is the correct order in which a decorator is applied?",
+    choices: [
+      { text: "The decorated function is called first, then the decorator wraps its result" },
+      { text: "The decorator wraps the function at definition time; the wrapper runs each call", correct: true },
+      { text: "The decorator only runs on the first call" },
+      { text: "The decorator runs at import time only" },
+    ],
+    explanation: <>The <code>@decorator</code> line is evaluated when the <code>def</code> executes. The result of <code>decorator(fn)</code> replaces the name. Later, every call to that name goes through the wrapper.</>
+  },
+  {
+    q: "You want to iterate through a 10-million-row CSV without loading it all into memory. Which reaches for the right tool?",
+    choices: [
+      { text: "A list comprehension over csv.reader" },
+      { text: "A generator expression or for-line-in-file loop", correct: true },
+      { text: "A dict comprehension" },
+      { text: "pandas.read_csv without chunksize" },
+    ],
+    explanation: <>List comprehensions build the whole list in memory. Generators (or file iteration, or <code>pd.read_csv(..., chunksize=N)</code>) stream row by row.</>
+  }
+]} />

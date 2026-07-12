@@ -1,0 +1,212 @@
+---
+title: Classes, protocols & dataclasses
+tier: 0
+phase: "0.1"
+---
+
+export const dataclassCode = `from dataclasses import dataclass, field
+
+@dataclass(frozen=True, slots=True)
+class Point:
+    x: float
+    y: float
+    label: str = "?"
+
+    # any method still works
+    def dist_to(self, other: "Point") -> float:
+        return ((self.x - other.x) ** 2 + (self.y - other.y) ** 2) ** 0.5
+
+a = Point(1, 2, "origin-ish")
+b = Point(4, 6)
+
+print(a)                # Point(x=1, y=2, label='origin-ish')
+print(a.dist_to(b))     # 5.0
+print(a == Point(1, 2, "origin-ish"))   # True — __eq__ auto-generated
+
+# frozen makes Point hashable, so it can go in a set/dict
+locations = {a, b}
+print(len(locations))   # 2`;
+
+export const protocolCode = `from typing import Protocol, runtime_checkable
+
+@runtime_checkable
+class HasLen(Protocol):
+    def __len__(self) -> int: ...
+
+def print_length(x: HasLen):
+    print("length =", len(x))
+
+# no inheritance from HasLen — just implement __len__
+class Team:
+    def __init__(self, members): self.members = members
+    def __len__(self): return len(self.members)
+
+print_length([1, 2, 3])            # length = 3
+print_length("hello")              # length = 5
+print_length(Team(["a", "b"]))     # length = 2
+
+# runtime_checkable enables isinstance-style dispatch
+print(isinstance(Team([]), HasLen))     # True
+print(isinstance(42, HasLen))           # False`;
+
+export const dunderCode = `class Vector:
+    def __init__(self, *xs):
+        self.xs = tuple(xs)
+    def __repr__(self):
+        return f"Vector{self.xs}"
+    def __add__(self, other):
+        return Vector(*(a + b for a, b in zip(self.xs, other.xs)))
+    def __mul__(self, k):
+        return Vector(*(a * k for a in self.xs))
+    def __iter__(self):
+        return iter(self.xs)
+    def __len__(self):
+        return len(self.xs)
+
+a = Vector(1, 2, 3)
+b = Vector(4, 5, 6)
+print(a + b)          # Vector(5, 7, 9)
+print(a * 3)          # Vector(3, 6, 9)
+print(len(a), list(a))# 3 [1, 2, 3]`;
+
+<Prerequisites items={[
+  { href: "/learn/foundations/python-craft/functions-scope-closures", label: "Functions, scope & closures", blurb: "Methods are functions with a first `self` argument." },
+  { href: "/learn/foundations/python-craft/control-flow-data-model", label: "Control flow & the data model", blurb: "Dunder protocols (__eq__, __len__, __iter__)." },
+]} />
+
+<Motivation title="Modern Python OOP is 3 things, not 30">
+
+Old OOP tutorials show you deep inheritance trees, class hierarchies with `Animal → Mammal → Dog`, and abstract base classes. Modern Python OOP (2020+) is a much smaller kit:
+
+1. **`@dataclass`** for value objects — you declare fields, Python writes `__init__`, `__repr__`, `__eq__`.
+2. **`Protocol`** for structural typing — say what an object should be *shaped like*, not what class it should inherit from.
+3. **Dunder methods** for operator overloading — `__add__`, `__iter__`, `__len__` make your object cooperate with built-ins.
+
+That's 90% of it. Deep inheritance is rare in production Python. Composition and protocols eat inheritance's lunch.
+
+</Motivation>
+
+<Intuition title="Value objects vs behavior objects">
+
+Two kinds of classes cover most needs. **Value objects** hold data: a `Point`, a `Config`, an `HTTPResponse`. They should be immutable, comparable, printable — `@dataclass(frozen=True)` gives you all three for free. **Behavior objects** *do* things: a `DataLoader`, an `Optimizer`, a `Retriever`. They have methods and internal state. Both are just Python classes; the framing changes what dunder methods to lean on.
+
+</Intuition>
+
+<Recall term="Dunder method">
+
+"Dunder" = *d*ouble-*under*score. Names like `__init__`, `__eq__`, `__iter__`, `__add__` are hooks Python's built-ins call through. Implementing them makes your class play nice with the rest of the language.
+
+</Recall>
+
+<Angles>
+  <Angle type="code" title="@dataclass — zero boilerplate value objects">
+    <RunnableCode title="dataclass with slots + frozen" code={dataclassCode} />
+
+    `frozen=True` makes instances immutable and hashable. `slots=True` saves memory (no per-instance `__dict__`) and forbids typos on attribute assignment. Every "config" object in modern Python should be a `@dataclass`.
+  </Angle>
+
+  <Angle type="algebraic" title="Protocol — structural, not nominal typing">
+    <RunnableCode title="Protocol duck-typing" code={protocolCode} />
+
+    Java-style typing asks "is `Team` a subclass of `HasLen`?" Python's `Protocol` asks "does `Team` *walk like* `HasLen`?" — that is, does it implement the methods `HasLen` describes? This is called **structural typing** and it's exactly how duck typing has always worked; `Protocol` just lets your type checker verify it.
+  </Angle>
+
+  <Angle type="code" title="Dunder methods — make your class feel native">
+    <RunnableCode title="Vector with __add__, __mul__, __iter__" code={dunderCode} />
+
+    Implementing `__add__` gives you the `+` operator. `__iter__` gives you `for x in v`. `__len__` gives you `len(v)`. Your custom class starts feeling like a built-in — because the built-ins were built by the same protocol.
+  </Angle>
+
+  <Angle type="computational" title="Composition over inheritance">
+    Instead of `class GPU_Sampler(Sampler, GPUMixin, LoggingMixin):`, prefer `class GPU_Sampler:` that *holds* a `logger` and *takes* a `device`. Composition (has-a) reads more clearly than inheritance (is-a) and avoids the diamond problem. Python's ML libraries (PyTorch, Hugging Face) mostly use composition; huge inheritance trees are a red flag.
+  </Angle>
+</Angles>
+
+<Convergence>
+
+Three tools, one goal: **make objects that other Python code understands without having to be taught**. Dataclasses handle value shapes. Protocols describe behavior shapes. Dunders wire your class into the language's operators and built-ins. Together they let you build APIs that read as if they belonged to the standard library.
+
+</Convergence>
+
+<Nuance>
+
+**Don't use `@dataclass` for behavior-heavy classes.** If your class is 90% methods and 10% state, a plain class is clearer. Reserve `@dataclass` for "record-like" objects.
+
+**`Protocol` vs abstract base class (`ABC`).** ABCs enforce inheritance; Protocols check shape. Use ABCs when you want a formal "you MUST implement this" contract for closed hierarchies. Use Protocols for open contracts that anyone can satisfy.
+
+**`__slots__` breaks some patterns.** No `__dict__` means you can't dynamically add attributes at runtime, and multi-inheritance with mixed slots/non-slots is tricky. Great default for value classes; use with care on behavior classes.
+
+**Class variables vs instance variables.** `class Cfg: items = []` — `items` is *shared across all instances*. Mutating it on one instance mutates it on all. Assign in `__init__` for per-instance state, or use `field(default_factory=list)` on a dataclass.
+
+</Nuance>
+
+<CodeItYourself
+  title="Design a Money class"
+  spec={<>Build a <code>@dataclass(frozen=True)</code> called <code>Money(amount, currency)</code>. Implement <code>__add__</code> so <code>Money(10, "USD") + Money(5, "USD") == Money(15, "USD")</code>, but raises <code>ValueError</code> if currencies differ. Make it hashable so it can be a dict key.</>}
+  hints={[
+    "frozen=True gives you __hash__ automatically.",
+    "In __add__, check `self.currency == other.currency` first.",
+    "Return `type(self)(...)` so subclasses can override construction."
+  ]}
+  solution={<CodeBlock language="python" title="Money" code={`from dataclasses import dataclass
+
+@dataclass(frozen=True, slots=True)
+class Money:
+    amount: float
+    currency: str
+
+    def __add__(self, other):
+        if not isinstance(other, Money):
+            return NotImplemented
+        if self.currency != other.currency:
+            raise ValueError(f"currency mismatch: {self.currency} vs {other.currency}")
+        return type(self)(self.amount + other.amount, self.currency)
+
+a = Money(10, "USD")
+b = Money(5, "USD")
+print(a + b)                  # Money(amount=15, currency='USD')
+
+wallet = {Money(1, "USD"): "a", Money(1, "EUR"): "b"}
+print(wallet)                 # both keys, distinct because currency differs`} />}
+/>
+
+<Summary bullets={[
+  "@dataclass(frozen=True, slots=True) is the default for value objects — free __init__, __repr__, __eq__, __hash__.",
+  "Protocol = structural typing. Describe what an object should do, not what it should inherit from.",
+  "Dunder methods (__add__, __iter__, __len__, __eq__) make your class cooperate with Python operators and built-ins.",
+  "Composition over inheritance — 'has-a' beats 'is-a' for readability and testability.",
+  "Watch out for class-level mutable defaults; use `field(default_factory=list)` inside dataclasses."
+]} />
+
+<Quiz items={[
+  {
+    q: "You want a Config class whose instances compare equal by fields, print nicely, and can go in a set. Simplest tool?",
+    choices: [
+      { text: "Manually implement __init__, __eq__, __hash__, __repr__" },
+      { text: "@dataclass(frozen=True)", correct: true },
+      { text: "Inherit from typing.NamedTuple" },
+      { text: "Use a plain dict" },
+    ],
+    explanation: <>All four are technically possible. <code>@dataclass(frozen=True)</code> gives you everything with zero boilerplate. NamedTuple works too but is less flexible for future methods.</>
+  },
+  {
+    q: "Which is the modern Python way to say 'this argument just needs to have a .predict() method'?",
+    choices: [
+      { text: "Inherit from an abstract Predictor base class" },
+      { text: "Use a Protocol with a .predict() method signature", correct: true },
+      { text: "Check isinstance(x, sklearn.base.BaseEstimator)" },
+      { text: "Duck type and don't declare anything" },
+    ],
+    explanation: <>Protocols express structural constraints without forcing inheritance. Any class with a matching <code>.predict()</code> satisfies the type — including third-party ones you can't modify.</>
+  },
+  {
+    q: "Why does the code `class C: items = []` cause bugs when instances mutate `items`?",
+    choices: [
+      { text: "It doesn't — Python handles it correctly" },
+      { text: "`items` is class-level and shared across all instances", correct: true },
+      { text: "Python throws a TypeError on mutation" },
+      { text: "It only works with tuples" },
+    ],
+    explanation: <>Class-body assignments produce class-level attributes shared across instances. Assign in <code>__init__</code> or use <code>field(default_factory=list)</code> on a dataclass.</>
+  }
+]} />

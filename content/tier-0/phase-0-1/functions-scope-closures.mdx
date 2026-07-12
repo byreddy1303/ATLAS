@@ -1,0 +1,192 @@
+---
+title: Functions, scope & closures
+tier: 0
+phase: "0.1"
+---
+
+export const argsCode = `# Positional, keyword, *args, **kwargs — one function, four styles
+
+def greet(name, greeting="Hello", *extras, formal=False, **kwargs):
+    parts = [greeting.upper() if formal else greeting, name]
+    parts.extend(extras)
+    if kwargs:
+        parts.append("(" + ", ".join(f"{k}={v}" for k, v in kwargs.items()) + ")")
+    print(" ".join(parts))
+
+greet("Sarath")                                    # Hello Sarath
+greet("Sarath", "Hi")                              # Hi Sarath
+greet("Sarath", "Namaste", "friend", "🙏")         # Namaste Sarath friend 🙏
+greet("Sarath", formal=True)                       # HELLO Sarath
+greet("Sarath", from_="Atlas", when="today")       # Hello Sarath (from_=Atlas, when=today)`;
+
+export const closureCode = `# A closure captures its enclosing variables — and stays alive with them.
+
+def make_counter(start=0):
+    count = start
+    def tick():
+        nonlocal count      # without this, we'd rebind a local shadow
+        count += 1
+        return count
+    return tick
+
+a = make_counter()
+b = make_counter(100)
+
+print(a(), a(), a())    # 1 2 3
+print(b(), b())         # 101 102
+print(a())              # 4  — a and b keep separate captured state`;
+
+export const closurePitfall = `# Classic trap: late binding in a loop
+handlers = []
+for i in range(3):
+    handlers.append(lambda: i)      # all three lambdas close over the SAME i
+print([h() for h in handlers])      # [2, 2, 2] — surprising
+
+# Fix: capture at definition time via a default argument
+handlers2 = []
+for i in range(3):
+    handlers2.append(lambda i=i: i) # i=i binds the CURRENT value now
+print([h() for h in handlers2])     # [0, 1, 2] — as expected`;
+
+<Prerequisites items={[
+  { href: "/learn/foundations/python-craft/control-flow-data-model", label: "Control flow & the data model", blurb: "Truthiness, iterables, dunder protocols." },
+]} />
+
+<Motivation title="Why one chapter unlocks decorators, callbacks & training loops">
+
+Decorators — the `@` you'll see on every FastAPI route, every PyTorch checkpoint hook, every dataclass — are just closures dressed up. Callbacks — the functions you pass to `pool.map`, `Adam(optimizer_step)`, or `on_epoch_end` — are objects being passed around. Once you *feel* that a function is a first-class citizen (can be assigned, returned, closed over), 80% of "advanced" Python stops being advanced.
+
+</Motivation>
+
+<Intuition title="Three ideas that make Python callable magic">
+
+1. **Functions are objects.** You can put them in a list, a dict, pass them as arguments, return them from other functions. `def` is essentially `name = <function object>`.
+2. **Scope resolution follows LEGB:** Local → Enclosing → Global → Built-in. When Python reads a name, it walks these scopes outward until it finds it.
+3. **A closure is a function that remembers.** When an inner function references a variable from its enclosing scope, Python keeps that variable alive (in a *cell*) even after the outer function returns. That's how `make_counter` above works.
+
+</Intuition>
+
+<Recall term="First-class function">
+
+A language has *first-class functions* if functions can be assigned to variables, passed as arguments, returned from other functions, and stored in data structures like any other value. Python, JavaScript, Haskell, and Lisp do. C famously doesn't (function pointers exist but aren't objects).
+
+</Recall>
+
+<Angles>
+  <Angle type="code" title="The five kinds of function arguments">
+    <RunnableCode title="args styles" code={argsCode} />
+
+    Read the signature as a menu: **positional** (`name`) required in order, **default** (`greeting="Hello"`) optional positional, **`*extras`** captures the rest as a tuple, **keyword-only** (`formal=False` — anything after `*args` becomes keyword-only), **`**kwargs`** catches leftover keyword arguments. Modern APIs (FastAPI, Pydantic, PyTorch) exploit all five to give you clean call sites.
+  </Angle>
+
+  <Angle type="algebraic" title="Closures — functions with private state">
+    <RunnableCode title="counter closure" code={closureCode} />
+
+    Every call to `make_counter` creates a fresh `count` variable and a fresh `tick` function. The two are bound: `a`'s `count` is a different cell from `b`'s. This is functional programming's way of doing what OOP does with instance variables — and it's what `functools.lru_cache` uses under the hood.
+  </Angle>
+
+  <Angle type="computational" title="Late-binding: the trap every Python dev hits once">
+    <RunnableCode title="the [2, 2, 2] surprise" code={closurePitfall} />
+
+    Closures capture *variables*, not values. When the three lambdas fire, they all look up the name `i` in the enclosing scope — which is now `2` (the last value of the loop). Two idiomatic fixes: (a) `lambda i=i:` binds at definition time, (b) use `functools.partial(fn, i)` for the same effect. This trap appears in Flask/Streamlit callback registration and every dashboard tutorial.
+  </Angle>
+
+  <Angle type="computational" title="Type hints make the signature executable documentation">
+    <CodeBlock language="python" title="typed function" code={`from typing import Callable
+
+def apply_twice(fn: Callable[[float], float], x: float) -> float:
+    """Return fn(fn(x))."""
+    return fn(fn(x))
+
+# mypy or pyright will refuse: apply_twice(str, 3)
+print(apply_twice(lambda x: x * 2, 5))   # 20`} />
+
+    Since PEP 484, type hints are optional but read by every modern editor. VSCode/PyCharm auto-complete based on them; `mypy` / `pyright` static-check them; `pydantic` uses them at runtime. Adopt them from day one — they'll save you more than they cost.
+  </Angle>
+</Angles>
+
+<Convergence>
+
+Functions are values. Scope is a stack of dicts walked outward on every name lookup. Closures are what happens when an inner function outlives its parent — Python preserves the captured variables. Type hints turn the signature into documentation the tools can read. These four ideas together are enough to read most modern Python.
+
+</Convergence>
+
+<Nuance>
+
+**`global` and `nonlocal`.** By default, an assignment inside a function creates a *new local* variable, even if a name of the same identifier exists outside. `nonlocal` says "modify the enclosing scope's binding"; `global` says "modify the module-level binding". Reach for these rarely; usually returning a value and re-assigning outside is cleaner.
+
+**Lambdas are just short function literals.** `lambda x: x*2` is exactly `def <anon>(x): return x*2`. Use them for tiny one-liners passed to `sorted(..., key=)`, `map`, or `filter`. Anything more than one expression: use a named `def`.
+
+**Type hints don't enforce.** They're inspected by tools, not the interpreter. `add(x: int, y: int) -> int` will happily accept strings at runtime and concatenate them. Use `pydantic.BaseModel` if you need actual runtime enforcement.
+
+**Positional-only and keyword-only markers.** `def f(a, b, /, c, *, d):` — `a, b` positional-only, `d` keyword-only. Modern stdlib uses these deliberately to keep API surfaces stable.
+
+</Nuance>
+
+<CodeItYourself
+  title="Write your own @counter decorator"
+  spec={<>Write a decorator <code>@counter</code> that attaches a <code>.calls</code> attribute to the wrapped function, incrementing by one every time it's called. Test that <code>fn.calls</code> reflects the number of calls made. (This is a mini version of what many observability tools do.)</>}
+  hints={[
+    "Functions can carry attributes: fn.calls = 0 is legal.",
+    "Return the wrapper; set the counter attribute on the wrapper.",
+    "Use functools.wraps to preserve fn.__name__."
+  ]}
+  solution={<CodeBlock language="python" title="@counter" code={`from functools import wraps
+
+def counter(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        wrapper.calls += 1
+        return fn(*args, **kwargs)
+    wrapper.calls = 0
+    return wrapper
+
+@counter
+def add(a, b):
+    return a + b
+
+add(1, 2); add(3, 4); add(5, 6)
+print(add.calls)      # 3
+print(add.__name__)   # 'add' (thanks to wraps)`} />}
+/>
+
+<Summary bullets={[
+  "Functions are objects — assign, pass, store, return them.",
+  "LEGB name resolution: Local → Enclosing → Global → Built-in.",
+  "Closures capture the enclosing variable's *cell*, not its value at capture time.",
+  "Late-binding trap: `[lambda: i for i in range(3)]` all return the last i. Fix with `lambda i=i:`.",
+  "Type hints are documentation the tools read — adopt them, but don't rely on them for runtime enforcement."
+]} />
+
+<Quiz items={[
+  {
+    q: "What does `nonlocal x` inside a nested function do?",
+    choices: [
+      { text: "Declares x as a module-level global" },
+      { text: "Declares x as read-only inside this function" },
+      { text: "Says 'assignments to x here modify the enclosing function's x'", correct: true },
+      { text: "Deletes the variable x" },
+    ],
+    explanation: <>Without <code>nonlocal</code>, an assignment inside a nested function would create a fresh local shadowing the enclosing one. <code>nonlocal</code> tells Python to write to the enclosing scope's binding instead.</>
+  },
+  {
+    q: "This code prints what?",
+    choices: [
+      { text: "[0, 1, 2]" },
+      { text: "[2, 2, 2]", correct: true },
+      { text: "[3, 3, 3]" },
+      { text: "TypeError" },
+    ],
+    explanation: <>Late binding: all three lambdas capture the same <code>i</code>. By the time they run, the loop has ended and <code>i</code> is <code>2</code>. Fix with <code>lambda i=i:</code>.</>
+  },
+  {
+    q: "You want to write a decorator that preserves the wrapped function's __name__ and __doc__. What do you use?",
+    choices: [
+      { text: "typing.override" },
+      { text: "functools.wraps", correct: true },
+      { text: "inspect.copy_signature" },
+      { text: "Nothing — Python does it automatically" },
+    ],
+    explanation: <>Without <code>@functools.wraps(fn)</code>, the wrapper's <code>__name__</code> would be <code>'wrapper'</code> and its docstring empty. Every decorator you write should use it.</>
+  }
+]} />

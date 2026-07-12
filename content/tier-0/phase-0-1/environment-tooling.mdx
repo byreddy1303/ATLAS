@@ -1,0 +1,178 @@
+---
+title: Environment · uv, Ruff, and the modern Python setup
+tier: 0
+phase: "0.1"
+---
+
+export const pyprojectExample = `# pyproject.toml — the one file that owns your project
+[project]
+name = "my-atlas-lab"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.2",
+    "matplotlib>=3.8",
+    "scikit-learn>=1.4",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.4"]
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "I", "UP", "B"]
+`;
+
+export const pytestExample = `# tests/test_math.py
+import pytest
+from mypkg.math import add
+
+def test_add_positive():
+    assert add(2, 3) == 5
+
+def test_add_zero():
+    assert add(0, 0) == 0
+
+@pytest.mark.parametrize("a,b,expected", [
+    (-1, 1, 0),
+    (10, -5, 5),
+    (100, 100, 200),
+])
+def test_add_parametrized(a, b, expected):
+    assert add(a, b) == expected`;
+
+<Prerequisites>
+None. This is chapter zero — your workstation. Everything else in the Atlas assumes what you build here.
+</Prerequisites>
+
+<Motivation title="Why your first hour of Python is boring — and shouldn't be">
+
+Every guide to Python starts the same way: "Install Python, open a REPL, print hello world." Fifteen minutes later you're deep in a course, ignoring the environment. Six months later you have four Python installs, a `site-packages` full of package archaeology, an unpinned dependency that just silently broke, and a `sys.path` bug you can't reproduce on a Tuesday.
+
+This chapter is the boring hour that saves you the six months. We set up **one** modern workstation — Python 3.12, `uv` (the modern env + dependency manager), `Ruff` (formatter + linter), `pytest`, and `git` — with conventions that keep every future notebook, script, and project isolated, reproducible, and pleasant to read.
+
+</Motivation>
+
+<Intuition title="What a Python 'environment' actually is">
+
+A **virtual environment** (venv) is nothing exotic: it's a folder with its own copy of Python and its own installed packages. When you "activate" it, your shell temporarily points at that Python instead of the system one. Every project you build should have its own venv — that way `numpy 1.26` for one project can happily coexist with `numpy 2.1` for another. The venv is the sandbox; `uv` is the tool that builds and manages it for you.
+
+</Intuition>
+
+<Recall term="Package vs module">
+
+A **module** is a single `.py` file. A **package** is a folder that contains modules (and a marker `__init__.py` or, since 3.3, an implicit namespace layout). When you `import numpy` you're importing the package; when you `import numpy.linalg` you're importing a sub-module inside it.
+
+</Recall>
+
+<Angles>
+  <Angle type="computational" title="Why uv, not conda / pip / poetry">
+
+  You've probably heard of `pip`, `conda`, `virtualenv`, `poetry`, `pipenv`, `pyenv`. Each solved a real pain in its era. **`uv`** (2024, from Astral, the team behind Ruff) is the modern consolidator: written in Rust, ~10-100× faster than pip/poetry, understands `pyproject.toml`, resolves and installs in one command, ships its own Python versions if needed. It's what a Python-native `cargo` would look like.
+
+  In practice: one binary, one config file, no environment activation ceremony.
+
+  </Angle>
+
+  <Angle type="code" title="A workstation in five commands">
+
+  <CodeBlock language="bash" title="terminal · one-time setup" code={`# 1. install uv (macOS/Linux)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 2. create a new project (folder + pyproject.toml + src/ layout)
+uv init my-atlas-lab && cd my-atlas-lab
+
+# 3. add deps — uv writes them to pyproject.toml and installs
+uv add numpy pandas matplotlib scikit-learn
+uv add --dev pytest ruff
+
+# 4. run a script or REPL inside the project's env
+uv run python -c "import numpy; print(numpy.__version__)"
+
+# 5. format + lint
+uv run ruff format . && uv run ruff check .`} />
+
+  Notice: no `activate` step. `uv run` transparently uses the project's venv. This is the biggest ergonomic win over pip/virtualenv.
+
+  </Angle>
+
+  <Angle type="algebraic" title="The pyproject.toml contract">
+
+  Everything about your project — name, Python version, dependencies, tool configuration — lives in one file. Not six.
+
+  <CodeBlock language="toml" title="pyproject.toml" code={pyprojectExample} />
+
+  Once this file exists, `uv sync` on any machine reproduces the environment. Committing `pyproject.toml` + `uv.lock` to git makes builds byte-identical for everyone on the team, forever.
+
+  </Angle>
+</Angles>
+
+<Convergence>
+
+The mental model: **`uv` reads `pyproject.toml`, writes `uv.lock`, populates `.venv/`, and `uv run` executes inside that venv.** Ruff formats and lints. Pytest tests. Git tracks changes. Five tools, one config file, no ceremony.
+
+</Convergence>
+
+<Example title="pytest — testing as documentation">
+
+Pytest turns your tests into *executable documentation*. A well-named test tells the next reader (usually you, in six months) what a function is supposed to do — and proves it.
+
+<CodeBlock language="python" title="tests/test_math.py" code={pytestExample} />
+
+Run with `uv run pytest`. Each function that starts with `test_` becomes an assertion. The `parametrize` decorator turns one test into many — invaluable when the same behavior needs to hold across a family of inputs.
+
+</Example>
+
+<Nuance>
+
+**Don't `pip install` into your system Python.** Ever. It will break your OS in interesting ways. If you already have, use `uv` going forward — it won't touch the system Python once configured.
+
+**Notebooks (.ipynb) are for exploration, not for shipping.** They hide execution order (cell 3 might depend on cell 7), make version diffs hell, and can't be tested. Prototype in a notebook, then move working code into `.py` modules under `src/` and import back into a small driver notebook.
+
+**Ruff replaces black, isort, flake8, pyupgrade, and pylint (mostly).** One tool, one config. This is a huge quality-of-life upgrade over the fragmented tooling of 2020.
+
+**Lockfiles matter.** `uv.lock` records the *exact* transitive dependency versions used. Commit it. Without it, "works on my machine" is guaranteed.
+
+</Nuance>
+
+<Summary bullets={[
+  "One project = one folder with `pyproject.toml` + `.venv/` + `uv.lock` + `src/` layout.",
+  "`uv init` scaffolds it; `uv add <pkg>` installs; `uv run <cmd>` executes inside the env.",
+  "Ruff = format + lint + import sort + upgrade suggestions, in one binary.",
+  "pytest = executable documentation. `test_*` functions become assertions.",
+  "Commit `pyproject.toml` + `uv.lock` to git. Never `pip install` into system Python."
+]} />
+
+<Quiz items={[
+  {
+    q: "You clone a colleague's Python project. It has pyproject.toml and uv.lock. What single command reproduces their environment exactly?",
+    choices: [
+      { text: "pip install -r requirements.txt" },
+      { text: "uv sync", correct: true },
+      { text: "conda env create" },
+      { text: "python -m venv .venv" },
+    ],
+    explanation: <><code>uv sync</code> reads <code>pyproject.toml</code> + <code>uv.lock</code> and produces a bit-identical <code>.venv/</code>. No requirements files, no manual activation, no version drift.</>
+  },
+  {
+    q: "You add ruff to your dev dependencies. Which command formats every file in the repo?",
+    choices: [
+      { text: "uv run ruff format .", correct: true },
+      { text: "uv format ruff" },
+      { text: "ruff install ." },
+      { text: "pip run ruff" },
+    ],
+    explanation: <><code>uv run &lt;cmd&gt;</code> executes any binary inside the project's venv. Ruff's format subcommand acts on paths.</>
+  },
+  {
+    q: "Which of these is TRUE about virtual environments in modern Python?",
+    choices: [
+      { text: "You must always activate them manually before running Python" },
+      { text: "They install a global Python that everyone shares" },
+      { text: "They isolate one project's dependencies from another so versions can coexist", correct: true },
+      { text: "They are needed only in production, not local dev" },
+    ],
+    explanation: <>The whole point is isolation. Each project has its own <code>.venv/</code> with its own packages. <code>uv run</code> makes activation invisible.</>
+  }
+]} />

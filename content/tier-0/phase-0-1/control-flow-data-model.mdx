@@ -1,0 +1,191 @@
+---
+title: Control flow & the data model
+tier: 0
+phase: "0.1"
+---
+
+export const truthyCode = `# Truthiness demo
+things = [0, 0.0, "", [], {}, set(), None, False,
+          1, -1, "x", [0], {0: 0}, {0}, True]
+for t in things:
+    marker = "TRUE " if t else "false"
+    print(f"{marker}  {type(t).__name__:8s} = {t!r}")`;
+
+export const forVsIndex = `# Two ways to iterate — one is Pythonic, the other isn't.
+
+xs = ["arrival", "matrix", "solaris"]
+
+# Anti-pattern: index-then-look-up
+for i in range(len(xs)):
+    print(i, xs[i])
+
+# Idiomatic: enumerate gives you both
+print("-" * 20)
+for i, x in enumerate(xs):
+    print(i, x)
+
+# When you need to walk two lists together
+ys = [2016, 1999, 1972]
+print("-" * 20)
+for x, y in zip(xs, ys):
+    print(x, y)`;
+
+export const matchCode = `# Pattern matching, not "switch"
+def describe(obj):
+    match obj:
+        case []:
+            return "an empty list"
+        case [x]:
+            return f"a singleton [{x}]"
+        case [x, y]:
+            return f"a pair ({x}, {y})"
+        case [x, *rest]:
+            return f"list starting with {x}, {len(rest)} more"
+        case {"name": name, "age": age} if age >= 18:
+            return f"adult {name}"
+        case {"name": name}:
+            return f"person {name}"
+        case _:
+            return "something else"
+
+for o in [[], [1], [1,2], [1,2,3,4], {"name":"a","age":20}, {"name":"b"}, 42]:
+    print(f"{o!r:30}  ->  {describe(o)}")`;
+
+<Prerequisites items={[
+  { href: "/learn/foundations/python-craft/environment-tooling", label: "Environment · uv, Ruff", blurb: "Have a working Python 3.12 project you can run cells in." },
+]} />
+
+<Motivation title="Why 'for x in xs' is one of the deepest ideas in Python">
+
+Every programming language has `if` and `for`. Only Python (and a handful of others) makes them so *dead-simple* that beginners underestimate what's underneath. When you write `for x in xs`, Python is invoking a **protocol** — a formal contract that any object can implement to say "I know how to be looped over." That single protocol is why numpy arrays, pandas DataFrames, generators, dictionaries, files, and even your own custom classes all behave uniformly in a `for` loop.
+
+Understanding this lifts you from "using Python" to "reading it fluently".
+
+</Motivation>
+
+<Intuition title="Two ideas that make Python make sense">
+
+1. **Everything is an object.** Ints, functions, classes, modules, exceptions — all objects. They all have a type. They all can be assigned to a variable, passed to a function, stored in a list.
+
+2. **Behavior is negotiated through protocols.** A `for` loop calls `iter(obj)` and then `next(...)` until it raises `StopIteration`. A `len(obj)` calls `obj.__len__()`. `a + b` calls `a.__add__(b)`. Every operator you write is really a method lookup. This is why writing an `__iter__` method on your class instantly makes it work in `for` loops — you didn't inherit anything, you just implemented the contract.
+
+</Intuition>
+
+<Recall term="Iterable vs iterator">
+
+An **iterable** is any object that answers `iter()` — e.g. `list`, `dict`, `str`, `range`. An **iterator** is what `iter()` returns; it maintains state and yields the next item on each `next()` call. Iterables can be looped many times; iterators are one-shot.
+
+</Recall>
+
+<Angles>
+  <Angle type="code" title="Truthiness — the tyranny of the empty container">
+    <RunnableCode title="what counts as True in Python?" code={truthyCode} />
+
+    **Every container's emptiness is falsy.** `[]`, `{}`, `""`, `set()`, `0`, `None`, `False`` — all fall through an `if x:` check. This is a feature, not a bug: `if not results` reads better than `if len(results) == 0`. But: `if x is None` when you specifically mean *None* — the empty list `[]` should not be conflated with "missing".
+  </Angle>
+
+  <Angle type="code" title="for over iterables, not indices">
+    <RunnableCode title="enumerate + zip" code={forVsIndex} />
+
+    Java-style `for i in range(len(xs))` is almost always the wrong reflex in Python. Reach for `enumerate` when you actually need the index and `zip` when you're walking parallel sequences. This isn't cosmetic — `enumerate` avoids off-by-one bugs, and `zip` stops at the shortest sequence for you.
+  </Angle>
+
+  <Angle type="algebraic" title="Match statements — pattern matching, not switch">
+    <RunnableCode title="match/case with structural patterns" code={matchCode} />
+
+    Python 3.10+ `match/case` isn't just a switch. It *destructures*: patterns match on shape, extract sub-parts as variables, and guard with `if`. If you've written OCaml, Rust, or Haskell, this is the same idea — and it makes AST-style code readable.
+  </Angle>
+
+  <Angle type="probabilistic" title="Identity vs equality">
+    `is` compares identity (same object in memory). `==` calls `__eq__`. `1 == 1.0` is `True` but `1 is 1.0` is `False`. **Use `is` only for the singletons: `None`, `True`, `False`.** Everything else: `==`.
+  </Angle>
+</Angles>
+
+<Convergence>
+
+If you internalize *iteration is a protocol* and *empty is false*, you'll read half the standard library at a glance. `sum(open('data.txt'))` iterates lines. `max(xs, key=len)` calls `len` on each. `dict(pairs)` iterates two-tuples. These aren't tricks — they're one idea repeated.
+
+</Convergence>
+
+<Nuance>
+
+**Mutable default arguments are a trap.** `def append(x, out=[]):` — the `[]` is created *once* at definition time and shared across all calls. Use `out=None` and set inside.
+
+**`for/else` and `while/else` exist.** The `else` runs when the loop finishes *without* `break`. Useful for search-style loops. Read-friendly but rare in the wild.
+
+**Hashability = immutability, roughly.** Tuples and strings are hashable; lists and dicts are not. Only hashable objects can be dict keys or set members. If `__eq__` says two objects are equal, `__hash__` must agree — else your set will contain "duplicates" that don't appear equal.
+
+</Nuance>
+
+<CodeItYourself
+  title="Implement a tiny 'iterable' class"
+  spec={<>Write a class <code>Countdown(n)</code> that when iterated yields <code>n, n-1, ..., 1</code>, then stops. Confirm <code>list(Countdown(3)) == [3, 2, 1]</code>. Also make <code>len(Countdown(3))</code> return 3.</>}
+  hints={[
+    "Iteration protocol: __iter__ returns an iterator (often self); __next__ returns the next value or raises StopIteration.",
+    "For len() support you need __len__.",
+    "The iterator is stateful — store the current value on the instance."
+  ]}
+  solution={<CodeBlock language="python" title="Countdown" code={`class Countdown:
+    def __init__(self, n):
+        self.n = n
+        self._current = n
+
+    def __iter__(self):
+        # reset so the same instance can be iterated fresh
+        self._current = self.n
+        return self
+
+    def __next__(self):
+        if self._current <= 0:
+            raise StopIteration
+        v = self._current
+        self._current -= 1
+        return v
+
+    def __len__(self):
+        return self.n
+
+print(list(Countdown(3)))  # [3, 2, 1]
+print(len(Countdown(5)))   # 5`} />}
+/>
+
+<Summary bullets={[
+  "Everything is an object; behavior is negotiated through dunder protocols (__iter__, __len__, __eq__, ...).",
+  "Empty containers are falsy — use `if xs:` not `if len(xs) > 0:`.",
+  "Iterate values with `for x in xs`, indices with `enumerate`, parallel with `zip`.",
+  "`match/case` destructures — use it for tree-shaped data.",
+  "`is` for identity (None/True/False), `==` for equality."
+]} />
+
+<Quiz items={[
+  {
+    q: "What does `for x in obj` require obj to implement?",
+    choices: [
+      { text: "__len__" },
+      { text: "__iter__ (returning an iterator)", correct: true },
+      { text: "__eq__" },
+      { text: "__hash__" },
+    ],
+    explanation: <>The <code>for</code> loop calls <code>iter(obj)</code>, which calls <code>obj.__iter__()</code>. That returns something with a <code>__next__</code>. No <code>__len__</code> or <code>__hash__</code> is needed.</>
+  },
+  {
+    q: "Which check is idiomatic Python?",
+    choices: [
+      { text: "if len(results) == 0:" },
+      { text: "if results == []:" },
+      { text: "if not results:", correct: true },
+      { text: "if results.empty():" },
+    ],
+    explanation: <>Empty containers are falsy — <code>not results</code> covers list, dict, str, set, tuple uniformly.</>
+  },
+  {
+    q: "Which of these will raise TypeError when used as a dict key?",
+    choices: [
+      { text: "(1, 2, 3)" },
+      { text: "\"hello\"" },
+      { text: "[1, 2, 3]", correct: true },
+      { text: "42" },
+    ],
+    explanation: <>Lists are mutable and unhashable. Tuples, strings, and numbers are all hashable.</>
+  }
+]} />
