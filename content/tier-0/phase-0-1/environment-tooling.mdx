@@ -149,7 +149,7 @@ A lockfile is a machine-generated file that records the *exact resolved version*
 
 <Angles intro={<>Five ways to look at your Python workstation. Each angle changes what you see; together they give you the mental toolkit to reason about anything the setup throws at you.</>}>
 
-  <Angle type="algebraic" title="A short history — why so many tools existed">
+  <Angle type="historical" title="A short history — why so many tools existed">
 
   For fifteen years, Python packaging looked like this: **pip** installs packages, **virtualenv** creates sandboxes, **pyenv** manages Python versions, **pip-tools** locks dependencies, **poetry** (or **pipenv**) tries to unify the previous four, and **conda** does all of the above *but only for its own separate universe of packages*. Each tool solved a real problem in its era. Each shipped with its own configuration format. Learning Python meant learning six tools' quirks, plus the failure modes of moving between them.
 
@@ -159,7 +159,7 @@ A lockfile is a machine-generated file that records the *exact resolved version*
 
   </Angle>
 
-  <Angle type="code" title="A workstation in seven commands">
+  <Angle type="workflow" title="A workstation in seven commands">
 
   <CodeBlock language="bash" title="from empty terminal to running ML project" code={setupCode} />
 
@@ -167,7 +167,7 @@ A lockfile is a machine-generated file that records the *exact resolved version*
 
   </Angle>
 
-  <Angle type="physical" title="Anatomy — what's actually on disk">
+  <Angle type="anatomy" title="Anatomy — what's actually on disk">
 
   Once you've run through the setup, look at your project directory. It literally looks like this:
 
@@ -177,7 +177,7 @@ A lockfile is a machine-generated file that records the *exact resolved version*
 
   </Angle>
 
-  <Angle type="computational" title="pyproject.toml — the constitution of your project">
+  <Angle type="contract" title="pyproject.toml — the constitution of your project">
 
   Everything about your project — its identity, the Python version it requires, its runtime and dev dependencies, its formatter settings, its linter settings, its test configuration — lives in **one file**. Not six. Not scattered across `requirements.txt`, `setup.py`, `setup.cfg`, `.flake8`, `pyrightconfig.json`, and `Makefile` (the way it used to be).
 
@@ -187,7 +187,7 @@ A lockfile is a machine-generated file that records the *exact resolved version*
 
   </Angle>
 
-  <Angle type="code" title="Reproducibility — the two-file guarantee">
+  <Angle type="production" title="Reproducibility — the two-file guarantee">
 
   Here is the trick that makes modern Python worth the setup effort. Once you have `pyproject.toml` and `uv.lock` committed, any teammate — or your future self on a new laptop, or a CI machine spinning up for the fiftieth time today — can reproduce your environment with **one command**:
 

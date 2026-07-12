@@ -374,17 +374,53 @@ export function Angle({
   title,
   children,
 }: {
-  type: "geometric" | "algebraic" | "computational" | "probabilistic" | "physical" | "code";
+  type:
+    // Math lenses
+    | "geometric"
+    | "algebraic"
+    | "probabilistic"
+    | "physical"
+    // Universal
+    | "computational"
+    | "code"
+    // Programming lenses
+    | "historical"
+    | "mental-model"
+    | "anatomy"
+    | "workflow"
+    | "runtime"
+    | "contract"
+    | "comparative"
+    | "pitfall"
+    | "performance"
+    | "taste"
+    | "ecosystem"
+    | "production";
   title: string;
   children: React.ReactNode;
 }) {
   const badge: Record<string, string> = {
+    // Math lenses
     geometric: "△ Geometric",
     algebraic: "Σ Algebraic",
-    computational: "⌘ Computational",
     probabilistic: "⚀ Probabilistic",
     physical: "⌬ Physical",
+    // Universal
+    computational: "⌘ Computational",
     code: "❯ Code",
+    // Programming lenses
+    historical: "⏱ Historical",
+    "mental-model": "◉ Mental Model",
+    anatomy: "⚙ Anatomy",
+    workflow: "→ Workflow",
+    runtime: "▶ Runtime",
+    contract: "⟨⟩ Contract",
+    comparative: "⇌ Comparative",
+    pitfall: "⚠ Pitfall",
+    performance: "⚡ Performance",
+    taste: "✦ Taste",
+    ecosystem: "✚ Ecosystem",
+    production: "⚑ Production",
   };
   return (
     <div className="rounded-2xl border border-line bg-bg-2 p-6">
