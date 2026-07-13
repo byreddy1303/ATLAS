@@ -250,7 +250,7 @@ const tier0: Tier = {
             "Style, color, and honest scales",
           ],
           priority: "mandatory",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "eda-cleaning",

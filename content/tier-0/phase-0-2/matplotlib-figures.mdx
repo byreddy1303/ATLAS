@@ -1,0 +1,742 @@
+---
+title: Matplotlib — figures that communicate
+tier: 0
+phase: "0.2"
+---
+
+export const anatomyCode = `import matplotlib.pyplot as plt
+import numpy as np
+
+# This site is dark, so we style axes to match (INK-gray chrome).
+# On your machine, matplotlib's defaults are black-on-white.
+INK, LIME, ROSE = "#8a8f98", "#b8e62e", "#e05f8a"
+
+x = np.linspace(0, 4*np.pi, 200)
+
+# THE two objects. Figure = the sheet of paper. Axes = one plot ON it.
+fig, ax = plt.subplots(figsize=(7.2, 3.6))
+fig.patch.set_alpha(0)              # Figure owns: the canvas, overall size
+ax.set_facecolor("none")            # Axes owns: everything you'd call "the chart"
+
+ax.plot(x, np.sin(x), color=LIME, lw=2.2, label="sin(x)")     # -> a Line2D artist
+ax.plot(x, np.cos(x), color=ROSE, lw=2.2, label="cos(x)")     # -> another artist
+
+ax.set_title("one Axes, many artists", color="#e8e8ea")   # Axes owns the title
+ax.set_xlabel("x (radians)", color=INK)                   # ...and the labels
+ax.set_ylabel("amplitude", color=INK)
+ax.legend(frameon=False, labelcolor=INK)                  # ...and the legend
+ax.grid(color=INK, alpha=0.15)                            # ...and the grid
+
+# even the box around the plot is four artists, called SPINES
+for side in ("top", "right"):
+    ax.spines[side].set_visible(False)      # the modern look: open on two sides
+for side in ("left", "bottom"):
+    ax.spines[side].set_color(INK)
+ax.tick_params(colors=INK)                  # ticks + tick labels
+
+fig.tight_layout()
+print(type(fig).__name__, "contains", len(fig.axes), "Axes")
+print("the Axes contains", len(ax.lines), "line artists")`;
+
+export const stateCode = `import matplotlib.pyplot as plt
+import numpy as np
+
+INK = "#8a8f98"
+days = np.arange(1, 11)
+
+# Two innocent helper functions, written the "quick tutorial" way — with
+# plt.* calls that draw on whatever the CURRENT axes happens to be.
+def plot_revenue():
+    plt.plot(days, days * 110 + 40, color="#b8e62e", label="revenue")
+    plt.title("revenue")
+
+def plot_signups():
+    plt.plot(days, days ** 1.6 * 9, color="#e05f8a", label="signups")
+    plt.title("signups")            # overwrites the revenue title!
+
+# You wanted two charts. Watch what actually happens:
+plot_revenue()
+plot_signups()      # lands on the SAME current axes — a two-line mash-up
+plt.legend(frameon=False, labelcolor=INK)
+
+ax = plt.gca()      # "get current axes" — the hidden global everything used
+ax.set_facecolor("none"); plt.gcf().patch.set_alpha(0)
+ax.tick_params(colors=INK)
+for s in ("top", "right"): ax.spines[s].set_visible(False)
+for s in ("left", "bottom"): ax.spines[s].set_color(INK)
+
+print("figures alive:", len(plt.get_fignums()))   # 1 — both functions hit it
+print("lines on the current axes:", len(ax.lines))  # 2 — the collision, measured
+#
+# THE FIX: functions must take an Axes and draw on it explicitly:
+#     def plot_revenue(ax): ax.plot(...); ax.set_title(...)
+# Caller decides where things go:
+#     fig, (a1, a2) = plt.subplots(1, 2); plot_revenue(a1); plot_signups(a2)`;
+
+export const skeletonCode = `import matplotlib.pyplot as plt
+import numpy as np
+
+INK, LIME, ROSE = "#8a8f98", "#b8e62e", "#e05f8a"
+
+def dress(ax, title=""):
+    # dark-site styling helper — reuse it in every cell on this page
+    ax.set_facecolor("none")
+    ax.set_title(title, color="#e8e8ea", fontsize=11)
+    for s in ("top", "right"): ax.spines[s].set_visible(False)
+    for s in ("left", "bottom"): ax.spines[s].set_color(INK)
+    ax.tick_params(colors=INK, labelsize=9)
+    ax.xaxis.label.set_color(INK); ax.yaxis.label.set_color(INK)
+
+# ---- the five-line skeleton you will type forever ----------------------
+rng = np.random.default_rng(7)
+epochs = np.arange(1, 21)
+loss = 2.4 * np.exp(-epochs / 6) + rng.normal(0, 0.03, 20)
+
+fig, ax = plt.subplots(figsize=(7.2, 3.6))        # 1. make Figure + Axes
+fig.patch.set_alpha(0)
+ax.plot(epochs, loss, color=LIME, lw=2.2,          # 2. draw the data
+        marker="o", ms=4, label="training loss")
+ax.set_xlabel("epoch")                             # 3. label the axes
+ax.set_ylabel("loss")
+dress(ax, "loss curve — the skeleton chart")
+ax.legend(frameon=False, labelcolor=INK)           # 4. legend if >1 series
+
+best = loss.argmin()
+ax.annotate(f"min at epoch {epochs[best]}",        # 5. annotate what matters
+            xy=(epochs[best], loss[best]),
+            xytext=(epochs[best] - 7, loss[best] + 0.45),
+            color=ROSE, fontsize=10,
+            arrowprops=dict(arrowstyle="->", color=ROSE, lw=1.2))
+fig.tight_layout()
+# in a script you would now do either:
+#   fig.savefig("loss.png", dpi=200, bbox_inches="tight")   # for files
+#   plt.show()                                              # for a window`;
+
+export const selectCode = `import matplotlib.pyplot as plt
+import numpy as np
+
+INK, LIME, ROSE = "#8a8f98", "#b8e62e", "#e05f8a"
+def dress(ax, title=""):
+    ax.set_facecolor("none")
+    ax.set_title(title, color="#e8e8ea", fontsize=10.5)
+    for s in ("top", "right"): ax.spines[s].set_visible(False)
+    for s in ("left", "bottom"): ax.spines[s].set_color(INK)
+    ax.tick_params(colors=INK, labelsize=8.5)
+
+rng = np.random.default_rng(42)
+
+# one question type per panel — a 2x2 grid of small multiples
+fig, axs = plt.subplots(2, 2, figsize=(7.6, 5.6))
+fig.patch.set_alpha(0)
+
+# Q: "how are values DISTRIBUTED?"           -> histogram
+spend = rng.gamma(2.0, 14.0, 800)
+axs[0, 0].hist(spend, bins=30, color=LIME, alpha=0.85)
+dress(axs[0, 0], "distribution -> hist")
+
+# Q: "how do CATEGORIES compare?"            -> bar
+plans = ["free", "pro", "team"]
+churn = [0.31, 0.12, 0.06]
+axs[0, 1].bar(plans, churn, color=[INK, LIME, ROSE], alpha=0.9)
+dress(axs[0, 1], "comparison -> bar")
+
+# Q: "are two quantities RELATED?"           -> scatter
+tenure = rng.uniform(0, 24, 200)
+monthly = 8 + tenure * 1.7 + rng.normal(0, 6, 200)
+axs[1, 0].scatter(tenure, monthly, s=12, color=LIME, alpha=0.55)
+dress(axs[1, 0], "relationship -> scatter")
+
+# Q: "how does it change over TIME/ORDER?"   -> line
+weeks = np.arange(1, 27)
+users = 900 * 1.06 ** weeks + rng.normal(0, 120, 26)
+axs[1, 1].plot(weeks, users, color=ROSE, lw=2)
+dress(axs[1, 1], "trend -> line")
+
+fig.tight_layout()
+print("four questions, four charts — the whole selection rule")`;
+
+export const honestCode = `import matplotlib.pyplot as plt
+import numpy as np
+
+INK, LIME, ROSE = "#8a8f98", "#b8e62e", "#e05f8a"
+def dress(ax, title="", tc="#e8e8ea"):
+    ax.set_facecolor("none")
+    ax.set_title(title, color=tc, fontsize=10.5)
+    for s in ("top", "right"): ax.spines[s].set_visible(False)
+    for s in ("left", "bottom"): ax.spines[s].set_color(INK)
+    ax.tick_params(colors=INK, labelsize=9)
+
+models = ["baseline", "ours"]
+accuracy = [96.1, 97.3]      # a 1.2-point difference
+
+fig, (bad, good) = plt.subplots(1, 2, figsize=(7.6, 3.4))
+fig.patch.set_alpha(0)
+
+# LEFT: the lie. Truncating the y-axis makes 1.2 points look like 4x.
+bad.bar(models, accuracy, color=[INK, ROSE], alpha=0.9)
+bad.set_ylim(95.8, 97.6)                      # <- the crime is one line
+dress(bad, "y starts at 95.8 -> reads as 'crushed it'", tc=ROSE)
+
+# RIGHT: honest. Bars encode length; length must start at zero.
+good.bar(models, accuracy, color=[INK, LIME], alpha=0.9)
+good.set_ylim(0, 100)
+good.axhline(accuracy[0], color=INK, lw=0.8, ls="--", alpha=0.6)
+good.annotate("+1.2 pts", xy=(1, 97.3), xytext=(0.42, 88),
+              color=LIME, fontsize=10)
+dress(good, "y starts at 0 -> honest 1.2-pt gain", tc=LIME)
+
+fig.tight_layout()
+print("same numbers, opposite stories — the axis IS the message")`;
+
+export const ecosystemCode = `import matplotlib.pyplot as plt
+import pandas as pd
+import numpy as np
+
+INK, LIME, ROSE = "#8a8f98", "#b8e62e", "#e05f8a"
+
+# pandas has a .plot() accessor. It is not a rival library —
+# it is a thin wrapper that DRAWS ON A MATPLOTLIB AXES.
+rng = np.random.default_rng(0)
+df = pd.DataFrame({
+    "day": pd.date_range("2026-06-01", periods=21, freq="D"),
+    "pro": (100 + rng.normal(2, 6, 21).cumsum()).round(1),
+    "free": (80 + rng.normal(1, 5, 21).cumsum()).round(1),
+}).set_index("day")
+
+fig, ax = plt.subplots(figsize=(7.2, 3.6))
+fig.patch.set_alpha(0)
+
+df.plot(ax=ax, color=[LIME, ROSE], lw=2)     # pandas draws ONTO your ax
+
+# ...and because it's the same Axes, you finish it with raw matplotlib:
+ax.set_facecolor("none")
+ax.set_ylabel("daily active users", color=INK)
+ax.set_xlabel("")
+ax.legend(frameon=False, labelcolor=INK)
+ax.grid(color=INK, alpha=0.15)
+ax.tick_params(colors=INK, labelsize=8.5)
+for s in ("top", "right"): ax.spines[s].set_visible(False)
+for s in ("left", "bottom"): ax.spines[s].set_color(INK)
+ax.set_title("df.plot(ax=ax) — pandas draws, matplotlib finishes",
+             color="#e8e8ea", fontsize=11)
+fig.autofmt_xdate()                          # tilt date labels so they fit
+fig.tight_layout()
+print("one Axes, two APIs, zero conflict")`;
+
+export const handCode = `import matplotlib.pyplot as plt
+import numpy as np
+
+INK, LIME, ROSE = "#8a8f98", "#b8e62e", "#e05f8a"
+
+hours = [1.5, 2.0, 0.5, 2.5, 3.0, 4.5, 1.0]
+days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+fig, ax = plt.subplots(figsize=(7.2, 3.6))
+fig.patch.set_alpha(0)
+ax.set_facecolor("none")
+
+colors = [LIME if h == max(hours) else INK for h in hours]
+bars = ax.bar(days, hours, color=colors, alpha=0.92)
+
+ax.bar_label(bars, fmt="%.1f", color=INK, fontsize=9, padding=2)
+ax.set_ylabel("study hours", color=INK)
+ax.set_ylim(0, 5.2)
+ax.set_title("one honest, finished chart", color="#e8e8ea")
+ax.annotate("deep-work Saturday", xy=(5, 4.5), xytext=(2.1, 4.7),
+            color=LIME, fontsize=10,
+            arrowprops=dict(arrowstyle="->", color=LIME, lw=1.2))
+
+ax.tick_params(colors=INK)
+for s in ("top", "right"): ax.spines[s].set_visible(False)
+for s in ("left", "bottom"): ax.spines[s].set_color(INK)
+ax.grid(axis="y", color=INK, alpha=0.12)
+
+fig.tight_layout()
+print("total this week:", sum(hours), "hours")`;
+
+export const realWorldCode = `import matplotlib.pyplot as plt
+import numpy as np
+
+INK, LIME, ROSE, VIOLET = "#8a8f98", "#b8e62e", "#e05f8a", "#8b7cf6"
+def dress(ax, title=""):
+    ax.set_facecolor("none")
+    ax.set_title(title, color="#e8e8ea", fontsize=10.5)
+    for s in ("top", "right"): ax.spines[s].set_visible(False)
+    for s in ("left", "bottom"): ax.spines[s].set_color(INK)
+    ax.tick_params(colors=INK, labelsize=8.5)
+    ax.xaxis.label.set_color(INK); ax.yaxis.label.set_color(INK)
+
+# ---- synthetic but realistic training run: 30 epochs ----
+rng = np.random.default_rng(5)
+epochs = np.arange(1, 31)
+train_loss = 2.2 * np.exp(-epochs / 7) + 0.08 + rng.normal(0, 0.015, 30)
+val_loss = 2.2 * np.exp(-epochs / 7) + 0.16 + rng.normal(0, 0.03, 30)
+val_loss += np.where(epochs > 14, (epochs - 14) * 0.028, 0)   # overfitting!
+val_acc = 1 - val_loss / 2.6 + rng.normal(0, 0.008, 30)
+
+best = int(val_loss.argmin())        # the epoch you'd actually ship
+
+fig, (L, R) = plt.subplots(1, 2, figsize=(8.0, 3.5), sharex=True)
+fig.patch.set_alpha(0)
+
+# LEFT PANEL — the overfitting diagnosis
+L.plot(epochs, train_loss, color=LIME, lw=2, label="train")
+L.plot(epochs, val_loss, color=ROSE, lw=2, label="validation")
+L.fill_between(epochs, train_loss, val_loss, color=ROSE, alpha=0.12)
+L.axvline(epochs[best], color=VIOLET, lw=1.2, ls="--")
+L.annotate(f"best val @ {epochs[best]}", xy=(epochs[best], val_loss[best]),
+           xytext=(epochs[best] + 2.2, val_loss[best] + 0.5),
+           color=VIOLET, fontsize=9,
+           arrowprops=dict(arrowstyle="->", color=VIOLET, lw=1))
+L.set_xlabel("epoch"); L.set_ylabel("loss")
+L.legend(frameon=False, labelcolor=INK, fontsize=9)
+dress(L, "loss — gap opening = overfitting")
+
+# RIGHT PANEL — what the metric you REPORT is doing
+R.plot(epochs, val_acc, color=VIOLET, lw=2)
+R.axvline(epochs[best], color=VIOLET, lw=1.2, ls="--")
+R.set_xlabel("epoch"); R.set_ylabel("val accuracy")
+R.set_ylim(0.5, 1.0)
+dress(R, "val accuracy — plateaus, then decays")
+
+fig.tight_layout()
+# fig.savefig("training_curves.png", dpi=200, bbox_inches="tight")
+print(f"early-stopping pick: epoch {epochs[best]}  "
+      f"(val loss {val_loss[best]:.3f}, val acc {val_acc[best]:.3f})")`;
+
+<Prerequisites items={[
+  { href: "/learn/foundations/scientific-stack/numpy-arrays-vectorization", label: "NumPy · arrays & vectorization", blurb: "Every plotting call eats ndarrays — x and y are arrays, and vectorized math builds what you draw." },
+  { href: "/learn/foundations/scientific-stack/pandas-dataframe-fundamentals", label: "Pandas · DataFrames & Series", blurb: "Real charts start as DataFrame columns; df.plot(ax=...) hands pandas data to matplotlib Axes." },
+]} />
+
+<StudyDepth
+  intro={<>Matplotlib is the library you&apos;ll use to <em>see</em> everything for the rest of this curriculum — data before modeling, training curves during, results after. Drill the Figure/Axes reflex and the chart-selection rule; skim the vast styling API until a specific figure needs it.</>}
+  drill={[
+    <>The skeleton: <code>fig, ax = plt.subplots()</code> → <code>ax.plot(...)</code> → labels → <code>fig.savefig()</code>/<code>plt.show()</code></>,
+    <>Never <code>plt.plot(...)</code> inside a function — pass and draw on an explicit <code>ax</code></>,
+    <>Chart selection: distribution → hist · comparison → bar · relationship → scatter · trend → line</>,
+    <>Small multiples: <code>plt.subplots(rows, cols, sharex=, sharey=)</code> and indexing <code>axs</code></>,
+    <>Labels every time: title, xlabel, ylabel, legend — an unlabeled chart is a bug</>,
+    <>Honest scales: bar charts start at 0; annotate the point you want remembered</>,
+  ]}
+  skim={[
+    <><code>rcParams</code> / style sheets — global theming, look up when you brand your figures</>,
+    <>The full artist zoo (patches, collections, transforms, blended coordinates)</>,
+    <><code>constrained_layout</code> internals — use <code>tight_layout()</code> until it fails you</>,
+    <>Animation, 3-D axes, interactive backends — niche until a project demands them</>,
+  ]}
+/>
+
+<Motivation title="The chart is the interface between your numbers and every decision made about them">
+
+You now know how to compute almost anything about a table: means per group, joins across sources, ten-million-row reductions in milliseconds. Here's the uncomfortable next fact: **nobody — including you — can read the raw output.** Print a 30-row groupby result and your eyes glaze at row six. Print `describe()` for twelve columns and the one broken column hides in the noise. Human working memory holds about four numbers; your datasets hold millions. The only high-bandwidth channel into a human brain is the *visual* one — and a chart is how you put data on it.
+
+This isn't a soft skill bolted onto the real work. In 1973, statistician Francis Anscombe constructed four small datasets — now famous as *Anscombe's quartet* — with **identical** means, variances, correlations, and regression lines. Same statistics, to two decimal places. Plotted, they are obviously four completely different worlds: a clean linear trend, a curve, a line with one outlier dragging it, and a vertical stack with one point flung far right. Every summary statistic you learned to compute would call them the same. One scatter plot each exposes the truth in half a second. **Statistics summarize; plots reveal.** You will meet real Anscombes constantly — the "flat" metric that's actually two populations moving oppositely, the "strong correlation" that's one outlier, the sensor that flatlined for a week.
+
+And in ML specifically, one chart family runs the whole show: **training curves**. Train loss and validation loss per epoch — that picture is how you diagnose overfitting (the gap opens), underfitting (both stuck high), a broken learning rate (loss explodes or zigzags), or data leakage (validation suspiciously *better* than train). Every serious ML engineer stares at these curves daily; tools like TensorBoard and Weights & Biases are, at heart, machines for drawing them. You'll build one from scratch in this chapter.
+
+So why matplotlib, specifically? Because it is the substrate. pandas' `.plot()`, seaborn, TensorBoard's charts, scikit-learn's display utilities, half the figures in every arXiv paper — all matplotlib underneath, all returning matplotlib `Axes` objects you customize with the API you learn here. Learn the two-object model once and every plotting tool in the Python universe becomes "matplotlib with a head start."
+
+One warning before we start: matplotlib has *two* APIs — an implicit state-machine style (`plt.plot(...)`) that tutorials love because it saves a line, and an explicit object style (`ax.plot(...)`) that production code requires. The implicit style is this chapter's designated villain: it works right up until you write a function, and then it fails in the most confusing way possible. We'll desugar exactly why, and you'll never be confused by someone else's `plt.` code again.
+
+</Motivation>
+
+<Intuition title="A Figure is a sheet of paper; an Axes is one chart drawn on it">
+
+Matplotlib's entire object model is two nouns:
+
+The **Figure** is the sheet of paper — the canvas, the file you'll save, the window that pops up. It has a size in inches (`figsize=(7, 4)`), a resolution (`dpi`), and it *contains* things. On its own it displays nothing but background.
+
+The **Axes** is one complete chart living on that paper: the x-axis and y-axis (each an `Axis` object — mind the spelling: *Axes* is the chart, *Axis* is one ruler), the plotted lines and bars, the title, the labels, the legend, the grid, the four border lines (called **spines**). When you think "the chart," you mean the Axes. One Figure can hold one Axes (the common case) or a grid of them (**small multiples** — six little charts sharing one sheet).
+
+Everything you draw is an **artist** — a Line2D, a Rectangle (each bar of a bar chart), a Text (the title). Artists live on an Axes; Axes live on a Figure. That's the whole containment hierarchy: **Figure → Axes → artists.** Every matplotlib call you'll ever make is "create an artist on this Axes" or "adjust a property of something that exists." Nothing else is going on.
+
+The one line that hands you both objects, and the first line of essentially every real matplotlib script on Earth:
+
+```python
+fig, ax = plt.subplots()
+```
+
+From there, the division of labor is clean. Talk to `ax` for anything *inside* the chart: `ax.plot(...)`, `ax.set_title(...)`, `ax.set_xlabel(...)`, `ax.legend()`. Talk to `fig` for anything about the *sheet*: `fig.savefig(...)`, `fig.tight_layout()`, overall size. When you want six charts: `fig, axs = plt.subplots(2, 3)` — one sheet, six Axes in a 2×3 grid, and you draw on `axs[0, 0]`, `axs[0, 1]`, ... explicitly.
+
+Hold that mental picture — paper, charts on the paper, artists on the charts — and the API stops being 3,000 functions and becomes one sentence: *get the objects, then set properties on them.*
+
+</Intuition>
+
+<Recall term="ndarray">
+
+From the NumPy chapter: the **ndarray** is a typed slab of numbers with a shape. Matplotlib is an ndarray consumer — `ax.plot(x, y)` wants two same-length arrays, `ax.hist(values)` wants one, `ax.scatter` wants two (plus optional arrays for size and color). All the data-shaping happens *before* the plot call, with the vectorized tools you already have: `np.linspace` for smooth curves, comparisons for masks, reductions for the numbers you annotate. Matplotlib draws; NumPy decides *what* gets drawn.
+
+</Recall>
+
+<Recall term="DataFrame → arrays">
+
+From the pandas chapters: a DataFrame is labeled columns, and `.to_numpy()` (or just passing a Series) drops the labels when a library wants bare arrays. Plotting is friendlier than scikit-learn here — you can hand `ax.plot` a Series directly (it uses the values), or skip the manual handoff entirely with `df.plot(ax=ax)`, which reads the *index* as x, columns as series, and column *names* as legend labels. The labels you maintained all chapter finally pay rent as automatic chart annotations.
+
+</Recall>
+
+<Recall term="NaN">
+
+The float that poisons reductions has one *useful* superpower in matplotlib: **a NaN breaks the line.** `ax.plot` skips NaN points, leaving a visible gap instead of connecting across missing data — which is honest (the data *was* missing) and diagnostic (gaps show you exactly where). A sensor that died for two days should show a hole, not a confident straight bridge. When you *want* the bridge, you interpolate explicitly first — a deliberate modeling decision, exactly like `fillna` was.
+
+</Recall>
+
+<Angles intro={<>Six lenses: the two-object model, the state-machine trap hiding in every tutorial, the five-line ritual, choosing the chart from the question, the honesty rules that make charts trustworthy, and how the whole Python plotting ecosystem hands you matplotlib Axes.</>}>
+
+  <Angle type="mental-model" title="Figure → Axes → artists — everything is an object you hold">
+    <RunnableCode title="build one chart while naming every part" code={anatomyCode} captureFig />
+
+    Run the cell and read it as a tour of the containment hierarchy. `plt.subplots(figsize=(7.2, 3.6))` manufactures the *sheet* (Figure, 7.2×3.6 inches) with one *chart* (Axes) on it and hands you both. Every subsequent line is "set a property on an object":
+
+    - `ax.plot(x, np.sin(x), ...)` creates a **Line2D artist** on the Axes and returns it. Call `plot` again → a second artist on the same Axes. The final `print` proves it: `ax.lines` is a real list holding both.
+    - `ax.set_title / set_xlabel / set_ylabel` — Text artists, owned by the Axes.
+    - `ax.legend()` reads the `label=` you attached to each line and builds the key. No labels, no legend — which is why the habit is to label *at plot time*.
+    - The **spines** — `ax.spines["top"]` etc. — are the four border lines. Hiding top and right is the standard modern look (less ink competing with data); we also recolor the survivors because this site is dark. On your machine you'd skip the colors and keep the two-spine hiding.
+    - `ax.tick_params` styles the little rulers; `ax.grid` adds reference lines *behind* the data.
+
+    Notice what you never touched: any global state. Every mark on that chart traces to an explicit method call on an object you can see in the code. That property — **the code is the complete recipe** — is what makes the object style debuggable, reviewable, and function-safe. Six months from now, "why is there a legend?" has a greppable answer.
+
+    The counter-model to keep in your head: this is *not* like `print`, where output just goes "to the screen." Charts are built like LEGO — objects added to objects — and displayed only at the end (here, the site captures the finished Figure; on your laptop, `plt.show()` or `fig.savefig` does it). Between construction and display, everything is still editable — that's what makes the ecosystem angle (pandas drawing on *your* ax) possible.
+
+  </Angle>
+
+  <Angle type="pitfall" title="The pyplot state machine — why plt.plot works in tutorials and betrays you in functions">
+    <RunnableCode title="two chart functions, one current axes — watch them collide" code={stateCode} captureFig />
+
+    Every matplotlib tutorial ever written starts `plt.plot([1, 2, 3])` — no Figure, no Axes, and it *works*. How? Because `pyplot` (the `plt` module) is a **state machine**: it silently tracks a "current figure" and "current axes," and every `plt.something()` call means "do that to whatever is current." No current axes exists? `plt.plot` *creates* one for you. That implicit magic is wonderful for a three-line notebook experiment and catastrophic the day you organize code into functions.
+
+    The cell stages the accident honestly. `plot_revenue()` and `plot_signups()` are the kind of helpers everyone writes first — each intends to make "its own" chart. But neither creates a figure, so the first call manufactures one, and the second call happily draws onto *the same current axes*: two unrelated series mashed together, the second title overwriting the first. The prints measure the wreckage — one figure alive, two lines on it. In real projects the same bug wears worse costumes: a chart function called in a loop stacks twenty series onto one axes; a library function you imported quietly draws onto *your* current figure; two notebook cells run out of order swap whose chart gets which title.
+
+    The fix is a one-sentence policy, and it's the fix the whole Python ecosystem converged on: **functions never touch `plt.*` for drawing — they accept an `ax` parameter and draw on it.**
+
+    ```python
+    def plot_revenue(ax):
+        ax.plot(days, revenue, label="revenue")
+        ax.set_title("revenue")
+
+    fig, (a1, a2) = plt.subplots(1, 2)
+    plot_revenue(a1)
+    plot_signups(a2)
+    ```
+
+    The *caller* owns layout — one chart or a 2×3 grid, the helper neither knows nor cares. This is the same lesson the pandas chapter taught with chained indexing: implicit intermediate state (there, an unnamed copy; here, a hidden "current axes") is where bugs breed; explicit objects are where they die. Reserve `plt` for exactly three jobs — `plt.subplots()` to create, `plt.show()` to display, `plt.close()` to dispose — and let every mark on every chart be a method on a named `ax`.
+
+  </Angle>
+
+  <Angle type="workflow" title="The five-line skeleton — create, draw, label, legend, annotate">
+    <RunnableCode title="the ritual, on a loss curve" code={skeletonCode} captureFig />
+
+    Muscle memory time. Every finished chart you make for the next several years is this skeleton with different data:
+
+    1. **Create** — `fig, ax = plt.subplots(figsize=(w, h))`. Size in *inches*; pick it deliberately because it controls how big fonts look relative to data (a chart destined for a slide wants a smaller figsize / bigger effective text than one for a report).
+    2. **Draw** — `ax.plot(x, y, ...)` with style decided *at the call*: `color`, `lw` (line width), `marker`, and crucially `label=` for the legend. Second series? Second `ax.plot`. Different question? Different verb — `bar`, `hist`, `scatter` — same skeleton.
+    3. **Label** — `ax.set_xlabel`, `ax.set_ylabel`, `dress(ax, title)`. Non-negotiable: an unlabeled axis makes the chart unreadable to anyone but present-you, and present-you expires in about a week. Units belong in labels ("loss", "epoch", "revenue ($k)").
+    4. **Legend** — `ax.legend()` whenever two or more series share an Axes. `frameon=False` is the clean look.
+    5. **Annotate** — the professional finishing move. `ax.annotate(text, xy=point, xytext=where_the_text_sits, arrowprops=...)` plants a labeled arrow on *the one point that matters* — the minimum, the anomaly, the launch date. A chart states facts; an annotation states the *finding*. Readers' eyes go where you point.
+
+    Then the exit: `fig.tight_layout()` (fixes clipped labels — just always call it), and either `fig.savefig("name.png", dpi=200, bbox_inches="tight")` for a file or `plt.show()` for a window. On this site, the Pyodide cell captures the figure for you — which is also why you don't see `plt.show()` in these cells.
+
+    The helper `dress(ax, ...)` in the cell is worth stealing as a *pattern*: any styling you type three times becomes a function taking `ax` — exactly the ax-passing discipline from the pitfall angle, now working *for* you. (The ambient reason: this site is dark, so cells restyle spines and ticks; on your white-background machine the defaults are fine and `dress` would just be your house style.)
+
+  </Angle>
+
+  <Angle type="taste" title="Choose the chart from the question, not from the gallery">
+    <RunnableCode title="four question types → four charts, as small multiples" code={selectCode} captureFig />
+
+    Walk into the matplotlib gallery and you'll drown — hundreds of chart types, most of which you will never need. Taste here is a four-row lookup table. Ask what *question* the chart answers:
+
+    - **"How are values distributed?"** → **histogram** (`ax.hist`). One numeric column → its shape: where values pile up, how far the tail stretches, whether there are two humps (two populations hiding in one column — an Anscombe in the wild). The `bins=` knob matters: too few hides structure, too many turns to noise; try 20–50 and look.
+    - **"How do categories compare?"** → **bar** (`ax.bar`). A few named things, one number each — churn per plan, accuracy per model. Bars encode *length*, which is why the honesty angle will insist they start at zero.
+    - **"Are two quantities related?"** → **scatter** (`ax.scatter`). Two numeric columns, one dot per row. Correlation, clusters, outliers — all visible instantly, none reliably summarizable (Anscombe again). With thousands of points, drop `alpha` to ~0.3 and size `s` down so density reads as darkness.
+    - **"How does it change over time (or order)?"** → **line** (`ax.plot`). The x-axis has an inherent ordering — timestamps, epochs, weeks. Lines imply *continuity between points*, which is exactly the claim you're making about a trend, and exactly why a line through unordered categories is wrong.
+
+    That's the whole starter kit: four verbs cover ~90% of working data science. (The next tier of usefulness — `boxplot` for distribution-per-category, `imshow` for matrices like confusion matrices and attention maps — arrives when EDA and ML chapters need them.)
+
+    The cell also smuggles in the layout tool you'll use constantly: **small multiples** — `plt.subplots(2, 2)` returning an *array* of Axes, one small honest chart per question, sharing one sheet. Four modest panels beat one heroic chart-of-everything, because each panel makes exactly one comparison. Note the indexing (`axs[0, 0]` — it's a 2-D ndarray of Axes objects; your NumPy indexing works on charts now) and the loop-friendliness: `for ax, col in zip(axs.flat, columns): ...` is the idiom for plotting a dozen features fast.
+
+  </Angle>
+
+  <Angle type="production" title="Honest scales — the axis is part of the claim">
+    <RunnableCode title="one dataset, two stories: the truncated-axis lie, side by side with the truth" code={honestCode} captureFig />
+
+    The same two numbers — 96.1 and 97.3 — told two ways. On the left, the y-axis starts at 95.8 and "ours" towers over the baseline at roughly four times its height: a chart that *screams breakthrough*. On the right, the axis starts at zero and you see the truth — a real but modest 1.2-point improvement. Same data. The **axis limits are part of the claim**, and the left panel's claim is false.
+
+    The rule and its boundary, precisely: **bar charts must start at zero, always** — bars encode value as *length*, and truncating the axis clips every bar by the same amount, which distorts their *ratio* (the very thing bars exist to show). **Line charts may zoom** — lines encode value as *position*, and zooming into ±0.5° of temperature variation is often the only way to see the signal at all. The test: if the chart invites "A is twice B" comparisons (bars do), the baseline must be zero; if it shows *shape of change* (lines), zoom deliberately and label the axis so the zoom is visible. When someone hands you a truncated bar chart — cable news, a vendor deck, a paper's figure 3 — you now know exactly which line of code committed the crime: `set_ylim`.
+
+    Three more production honesty habits, cheap to adopt:
+
+    - **Shared scales for compared panels.** Small multiples comparing the same quantity must share axis limits (`sharey=True`), or panel-to-panel comparison silently lies the same way truncation does. (The training-curves cell below uses `sharex` for aligned epochs.)
+    - **Annotate the takeaway, cite the units.** The right panel's `+1.2 pts` and the dashed baseline do the reader's arithmetic for them — the difference between a chart someone *glances at* and one they *repeat in a meeting*.
+    - **Color is meaning, so spend it.** One accent color for the thing you're arguing about, gray for context (exactly what the cell does — lime for "ours," ink-gray for baseline). Rainbow-everything charts spend the reader's attention on decoding instead of deciding. And never encode meaning in color *alone* — about 1 in 12 men can't separate red from green; pair color with position, label, or line style.
+
+    None of this is aesthetics for its own sake. A chart is an argument; these rules are what make it a *sound* one — able to survive the code review, the skeptical PM, and reviewer #2.
+
+  </Angle>
+
+  <Angle type="ecosystem" title="Everything returns an Axes — pandas, seaborn, scikit-learn all draw on your canvas">
+    <RunnableCode title="pandas draws the data, matplotlib finishes the chart" code={ecosystemCode} captureFig />
+
+    Here's the payoff of learning the object model rather than memorized incantations: **the entire Python plotting ecosystem speaks Axes.** The cell shows the pattern with pandas — `df.plot(ax=ax)` — and it generalizes everywhere.
+
+    pandas' `.plot()` accessor is a convenience wrapper: it reads the DataFrame's *index* as x, plots each *column* as a series, uses column *names* as legend labels, and — the crucial part — **draws onto the matplotlib Axes you pass via `ax=`**. It saves you the `for col in df: ax.plot(...)` loop and the manual date handling. But it stops at "data on screen." Titles, honest limits, annotations, spine styling, the finishing that makes a chart communicate? That's you, talking to the same `ax` afterwards with the exact API from this chapter. Division of labor: *high-level library draws the data, raw matplotlib finishes the chart.* One new matplotlib-ism sneaks in: `fig.autofmt_xdate()` tilts date labels so they don't overlap — the standard move for time axes.
+
+    The same contract runs through the whole stack you'll meet later: **seaborn** (statistical charts — most functions take and return `ax=`), **scikit-learn's displays** (`ConfusionMatrixDisplay`, ROC curves — all expose the underlying `ax_`), **statsmodels** diagnostics, even pandas' `hist()` and `boxplot()`. The workflow is always: let the specialist library produce the 80% chart in one line, then customize the remaining 20% with `ax.set_*` because you know what an Axes *is*.
+
+    This is also the argument for *not* learning "a simpler plotting library instead." Tutorials pitch seaborn or plotly-express as escapes from matplotlib's verbosity — but the moment you need to change *anything* the wrapper didn't anticipate (and you always do: the title, a reference line, that one annotation), you're back at the Axes API. Learn the substrate once — you just did — and every wrapper becomes a time-saver instead of a wall.
+
+  </Angle>
+
+</Angles>
+
+<Convergence>
+
+Every lens lands on the same object model. **A Figure is the sheet; Axes are the charts on it; everything drawn is an artist owned by an Axes** — and all real code holds these objects explicitly (`fig, ax = plt.subplots()`) instead of trusting pyplot's hidden "current axes," which is exactly the implicit-state trap the pandas chapter taught you to distrust. On that foundation, craft is a short checklist: pick the chart from the *question* (distribution/comparison/relationship/trend), run the five-line skeleton (create → draw → label → legend → annotate), keep the axes honest (bars from zero, shared scales across compared panels), and let higher-level libraries draw onto *your* `ax` before you finish the chart by hand.
+
+The deeper convergence: a chart is not decoration on the analysis — it *is* the analysis, delivered. Anscombe's quartet showed identical statistics hiding four different truths; the training curves you're about to build show a model's whole biography in two panels. Numbers compute; pictures communicate; you now own the machine that turns one into the other.
+
+</Convergence>
+
+<Derivation title="What actually happens when you call plt.plot(...) — the state machine, desugared">
+
+Not math — the hidden machinery behind the two-API confusion, one step at a time. After this, no `plt.` code will ever mystify you again.
+
+<Step n={1} math={<code>plt.plot(xs, ys)</code>}>
+  The tutorial one-liner. No Figure exists, no Axes exists, yet a chart appears. Something is doing object creation behind your back — the question is what, and where it hides its state.
+</Step>
+
+<Step n={2} math={<code>ax = plt.gca()</code>}>
+  Inside, <code>plt.plot</code> is nearly one line: <em>get the current axes, forward everything to it</em>. <code>gca()</code> — &quot;get current axes&quot; — asks the hidden state machine for whichever Axes is &quot;current.&quot; If none exists, <strong>it creates one</strong> (on the current figure) and blesses it as current. That silent auto-creation is the entire magic of step 1.
+</Step>
+
+<Step n={3} math={<code>fig = plt.gcf()  ·  Gcf.figs = {"{"}1: fig{"}"}</code>}>
+  One level deeper: <code>gca()</code> itself calls <code>gcf()</code> — &quot;get current figure&quot; — which consults a module-level registry (a class literally named <code>Gcf</code>) mapping figure numbers to live figures, again auto-creating on empty. So the full chain is: <em>module global → current figure → current axes → forward the call</em>. Every <code>plt.title</code>, <code>plt.xlabel</code>, <code>plt.legend</code> walks this same chain — they all mean &quot;...on whatever is current.&quot;
+</Step>
+
+<Step n={4} math={<span>{"two functions × one 'current' = collision"}</span>}>
+  Now the pitfall-angle bug is mechanical, not mysterious. <code>plot_revenue()</code> runs: registry empty → figure 1 created → axes created → line drawn. <code>plot_signups()</code> runs: registry <em>not</em> empty → same figure, same &quot;current&quot; axes → second line and a title overwrite land on the first chart. Neither function did anything wrong <em>locally</em> — the shared mutable global did it. It&apos;s the same disease as pandas&apos; global RNG (<code>np.random.seed</code>) and the chained-assignment temporary: <strong>invisible shared state plus innocent-looking calls</strong>. And it explains the notebook illusion: in a fresh cell-by-cell notebook, &quot;current&quot; usually happens to be what you meant — until you re-run cells out of order, and suddenly it isn&apos;t.
+</Step>
+
+<Step n={5} math={<code>fig, ax = plt.subplots()  →  ax.plot(xs, ys)</code>}>
+  The object API is the same machinery with the state <em>reified into variables you hold</em>. <code>subplots()</code> creates the Figure and Axes and hands them to you; <code>ax.plot</code> skips <code>gca()</code> entirely — no lookup, no auto-creation, no &quot;current.&quot; Which chart gets the line? The one whose name is on the call. That&apos;s the whole difference between the two APIs: <strong>pyplot resolves targets through hidden globals; the object API resolves them through your variable names.</strong> Same artists, same rendering — one of them is just legible.
+</Step>
+
+</Derivation>
+
+<Example title="One finished chart, every line accounted for">
+
+<RunnableCode title="a week of study hours — built to the checklist" code={handCode} captureFig />
+
+A bar chart humble enough to check by eye, finished to the standard this chapter argues for. The checklist audit: chart matches question (*compare categories* → bar); created via `subplots` with an explicit `figsize`; y-axis starts at zero (bars!) with headroom via `set_ylim(0, 5.2)`; axis labeled with units ("study hours"); the finding annotated with an arrow ("deep-work Saturday") rather than left for the reader to hunt.
+
+Three touches worth stealing: **`ax.bar_label(bars, ...)`** prints each bar's value on top — killing the "squint at the grid lines" problem for small category counts. **Selective color** — the list comprehension paints the maximum lime and everything else ink-gray, so the eye lands exactly where the annotation points (color = meaning, spent on one thing). **`ax.grid(axis="y", alpha=0.12)`** — horizontal reference lines only, faint; enough to read values, not enough to compete with data.
+
+Total ink devoted to decoration: nearly zero. Total time for a reader to extract the point: about one second. That ratio is the whole craft.
+
+</Example>
+
+<Nuance>
+
+The traps and fine print, in rough order of how soon they'll bite:
+
+- **`plt.show()` behaves differently by habitat.** Scripts: it *blocks* — code stops until you close the window; call it once, at the end. Notebooks: usually unnecessary (`%matplotlib inline` displays figures automatically after each cell). This site: the cell captures the current figure itself — that's why you don't see `show()` above. Order matters too: **`savefig` before `show`** — show can flush/clear the figure, and saving after it writes blank PNGs on some backends. The classic "my saved file is empty" bug.
+
+- **Figures leak.** Every `plt.subplots()` registers a live figure that Python keeps until `plt.close(fig)`. Make one per training epoch in a loop and you'll meet the warning `More than 20 figures have been opened` on the way to an out-of-memory. The pattern for chart-per-item loops: create, `savefig`, **`plt.close(fig)`** — every iteration.
+
+- **`tight_layout()` is the cure for clipped labels.** Rotated tick labels or a y-label sliced off at the edge means layout ran with defaults; `fig.tight_layout()` (or creating with `plt.subplots(constrained_layout=True)`, its smarter successor) fixes 95% of cases. Just always call it — you'll notice the 5% when a colorbar gets weird.
+
+- **`figsize` and `dpi` fight over "how big."** `figsize` is inches; `dpi` is dots per inch; pixels = product. But *fonts* are set in points (an absolute unit) — so a small figsize blown up to full-slide width shows **huge** text, and a poster-size figsize shrunk into a column shows *microscopic* text. Rule: set figsize to the *final display size*, then `dpi=200`-ish at save time for sharpness; if text looks wrong, fix figsize, not font sizes.
+
+- **Log scales are a tool and a trap.** `ax.set_yscale("log")` is *right* for quantities spanning decades (loss curves that fall 1000×, word frequencies, model-size scaling laws — Tier 4 will live here) — a straight line on log-y means exponential change. The trap: log axes visually compress *huge* differences into small distances, so label loudly. And log-anything with zeros or negatives in the data simply errors — filter first.
+
+- **Dates deserve their own chapter but get three habits**: keep them as real datetimes (pandas datetime64 → matplotlib handles them natively), call `fig.autofmt_xdate()` to tilt labels, and plot *sorted-by-time* data or lines will scribble back and forth.
+
+- **Big scatters need transparency math.** 100k points at `alpha=1` is a solid blob; `alpha=0.1, s=4` turns overplotting into a density map. Past ~1M, switch tools (`hexbin`, or histogram the data first).
+
+- **The `axs` from `plt.subplots(2, 2)` is an ndarray**, so 1-row/1-col calls return different shapes (`subplots(1, 2)` → 1-D array; `subplots(1, 1)` → bare Axes). The loop-safe idiom: `axs = np.atleast_1d(axs).ravel()`, or just `axs.flat` when iterating.
+
+</Nuance>
+
+<RealWorldML title="Training curves — the two-panel chart every ML engineer reads daily">
+
+<RunnableCode title="loss + accuracy panels with early-stopping annotation" code={realWorldCode} captureFig />
+
+This is the chart. Not "a" chart — *the* chart: the one you will draw (or have TensorBoard/W&B draw) for every model you ever train. It answers the only question that matters mid-training — *is this run healthy, and when should it stop?* The cell fakes a realistic 30-epoch run (exponential loss decay, noisy validation, overfitting onset after epoch 14) so the diagnosis is visible, then builds the standard two-panel readout.
+
+**Line-by-line:**
+
+- `train_loss = 2.2 * np.exp(-epochs / 7) + 0.08 + noise` — vectorized curve-building, no loops: exponential decay (the canonical shape of a learning curve) plus a floor (models never reach zero loss) plus Gaussian jitter. `val_loss` gets a higher floor (validation is always a bit worse — the model never saw it) **plus** `np.where(epochs > 14, (epochs - 14) * 0.028, 0)`: after epoch 14, validation loss starts *climbing* while train keeps falling. That divergence is **overfitting** — the model has stopped learning generalizable patterns and started memorizing training quirks. You'll meet the theory in Tier 2; you now already own its *picture*.
+- `best = int(val_loss.argmin())` — the argmax/argmin reflex from NumPy, deciding a real thing: the epoch whose weights you'd actually keep. Stopping there instead of training on is **early stopping**, and this line is its entire logic.
+- `plt.subplots(1, 2, figsize=(8.0, 3.5), sharex=True)` — small multiples with a *shared x*: both panels agree on what "epoch 14" means, so your eye can trace one vertical line across both. That's the shared-scales honesty rule doing real work.
+- `L.fill_between(epochs, train_loss, val_loss, alpha=0.12)` — shades the **generalization gap**, the vertical distance between the curves. The gap *is* the diagnosis: parallel-and-small = healthy; opening like a mouth = overfitting; both-high = underfitting. `fill_between` turns an abstract quantity into a visible wedge — annotation by geometry.
+- `axvline(epochs[best], ls="--")` on *both* panels plus `annotate("best val @ ...")` — the finding, marked. A reader who sees only this figure for five seconds still leaves with the run's one actionable fact: *ship epoch 14's checkpoint.*
+- The right panel plots `val_acc` with `set_ylim(0.5, 1.0)` — a *line* chart legitimately zoomed (position encoding, shape-of-change question — the taste angle's boundary case, used correctly), showing the same story in the metric your stakeholders actually ask about: accuracy plateaus exactly where loss bottoms out, then decays.
+- The commented `fig.savefig("training_curves.png", dpi=200, bbox_inches="tight")` is the line that, in a real training script, runs every N epochs so you can watch the run from your phone. Chart-in-a-loop — which is why the Nuance section's `plt.close(fig)` habit exists.
+
+When you meet TensorBoard and Weights & Biases in the deep-learning tier, you'll recognize them instantly: they are *this figure*, automated, live-updating, with a slider. The skill of *reading* it — gap means overfit, floor means capacity, zigzag means learning-rate chaos — transfers unchanged, because you built it from raw arrays once, right here.
+
+</RealWorldML>
+
+<CodeItYourself title="Three drills — refactor, choose, diagnose">
+
+**Drill 1 — Exorcise the state machine.** Take this tutorial-style snippet and refactor it to the object API with *zero* `plt.*` calls except `subplots`: `plt.plot(xs, ys); plt.title("sales"); plt.xlabel("week"); plt.ylabel("$"); plt.show()`. Then extend your refactor: wrap it in `def plot_sales(ax, xs, ys):` and call it twice on a 1×2 grid with different data. If both charts come out independent and correctly titled, you've internalized the fix; the broken version can't even express this.
+
+**Drill 2 — Four questions about your books.** Using the books DataFrame from the pandas drills: (a) distribution of `pages`, (b) mean `rating` per author, (c) `pages` vs `rating` relationship, (d) count of books per publication decade, in order. First decide the four chart types *before* coding (the taste-angle table), then build them as one 2×2 small-multiples figure with a `dress`-style helper. Labels on everything; annotate the single most interesting panel.
+
+**Drill 3 — The lie detector.** Fabricate a "growth" bar chart the dishonest way: monthly revenue `[102, 103, 104.5, 105]` with `set_ylim(101, 106)` — screenshot-worthy hockey stick. Then draw the honest zero-baseline version beside it. Third panel: same data as a *line* chart, zoomed, with the y-axis clearly labeled — legitimate. Write one sentence per panel explaining why it lies or doesn't. You'll never un-see this pattern in the wild again.
+
+</CodeItYourself>
+
+<LifeLesson title="You live by the charts you draw of yourself — check the axes">
+
+Everyone runs a private dashboard — mental charts of "how I'm doing": career trajectory, fitness, savings, learning. The lesson of the honest-scales angle is that **the frame does as much work as the data**, and most people frame themselves dishonestly without noticing.
+
+The truncated axis is the anxiety machine. Compare this month's progress to last month's on a zoomed-in scale and every wobble looks like a crisis — a 1% dip renders as a cliff, exactly like the 95.8-baseline bar chart. Zoom out to the zero baseline — where you actually started, three years ago — and the same wobble vanishes into an unmistakable upward line. Both charts are "true." One of them is honest about magnitudes. When a bad week feels like collapse, you're usually reading a truncated axis; re-plot from zero before you conclude anything.
+
+The unshared scale is the comparison trap. Measuring your chapter 3 against someone else's chapter 30 is two panels with different y-limits — the comparison *looks* valid (both are charts of "success"!) and means nothing, the same silent lie as small multiples without `sharey`. Comparisons only carry information when the axes match: same starting point, same units, same time window. Mostly, the only panel that shares your scale is your own past self.
+
+And the deepest one comes from Anscombe: **summary statistics hide what pictures reveal.** A single number — GPA, salary, follower count, weight — can stay flat while the underlying shape of your life changes completely, for better or worse. Don't govern yourself by one aggregate. Plot the distribution: where the hours actually go, which days were good, what the outliers were. Then annotate the finding — name the one thing the picture shows — because a chart without an annotation is data without a decision, on dashboards and in Decembers alike.
+
+</LifeLesson>
+
+<MLConnection>
+
+Plots aren't adjacent to ML work — they're load-bearing at every phase:
+
+- **Training curves** (you just built them) are the daily instrument of deep learning. TensorBoard, Weights & Biases, and MLflow's chart tabs are this chapter's two-panel figure with a websocket; overfitting, LR problems, and divergence are all *diagnosed visually* before any metric table would show them.
+- **EDA — the very next chapters — is plotting.** Histograms expose skew that breaks linear models, scatter plots expose the outliers that hijack means, and Anscombe-style surprises are found (only) by looking. The professional loop is `groupby → plot → question → repeat`.
+- **Model evaluation is chart-shaped:** confusion matrices (`imshow` — a matrix as a picture), ROC and precision-recall curves, calibration plots, residual plots for regression. scikit-learn ships `*Display` classes for all of them — each one returns matplotlib Axes you'll finish with this chapter's API.
+- **Embeddings become scatter plots.** When Tier 4 hands you 768-dimensional vectors, t-SNE/UMAP squash them to 2-D and `ax.scatter` (with `alpha`, colored by label) shows the clusters — how everyone from word2vec's authors to today's RAG debuggers *sees* semantic space.
+- **Attention maps and feature importance** are `imshow` heatmaps and sorted `barh` charts respectively — interpretability is largely the craft of plotting model internals honestly.
+- **Scaling laws** — the charts that justified spending millions training GPT-class models — are loss-vs-compute lines on log-log axes; a straight line there is a power law. The log-scale nuance from this chapter is literally how frontier-lab strategy decks are read.
+- **And every paper you'll ever submit or read** lives by its figures: small multiples, shared scales, annotated findings. Reviewers skim figures first; so will you.
+
+The through-line: models compute, but *people* decide — and every handoff from computation to decision crosses a chart. Draw them honestly and your work gets believed; draw them well and it gets acted on.
+
+</MLConnection>
+
+<Summary>
+
+- **Two objects:** Figure = the sheet (size, saving); Axes = one chart on it (data, labels, legend, spines). Everything drawn is an artist owned by an Axes. `fig, ax = plt.subplots()` is line one, forever.
+- **Never `plt.plot` inside a function.** pyplot routes calls through hidden "current figure/axes" globals (`gca()`/`gcf()` — desugared in the Derivation); functions take an explicit `ax` and draw on it. Reserve `plt` for `subplots`, `show`, `close`.
+- **The five-line skeleton:** create → draw (with `label=`) → label axes (with units) → legend → **annotate the finding**. Then `tight_layout` and `savefig(dpi=200, bbox_inches="tight")` *before* any `show`.
+- **Chart = question:** distribution → hist · comparison → bar · relationship → scatter · trend → line. Small multiples (`plt.subplots(r, c)`) beat one chart-of-everything; `axs` is an ndarray of Axes.
+- **Honest axes:** bars start at zero (length encoding); lines may zoom (position encoding) but label it; compared panels share scales (`sharex`/`sharey`); color is meaning — one accent, gray context, never meaning by color alone.
+- **Housekeeping:** figures leak — `plt.close(fig)` in loops; NaN breaks lines (honestly); log scales for decade-spanning data; `figsize` controls font-to-data proportion, `dpi` controls sharpness.
+- **The ecosystem speaks Axes:** `df.plot(ax=ax)`, seaborn, scikit-learn displays all draw on your canvas — specialist library for the first 80%, this chapter's API for the finishing 20%.
+- **The chart that runs ML:** train/val loss per epoch — gap opening = overfitting, `argmin` of val loss = early stopping. You built it from raw arrays; TensorBoard just automates it.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>In one sentence each: what does the Figure own, and what does the Axes own? Which object does <code>set_xlabel</code> belong to, and which does <code>savefig</code> belong to?</>,
+      hint: <>Sheet of paper vs chart drawn on it.</>,
+      answer: <>The <strong>Figure</strong> owns the sheet: overall size (<code>figsize</code>), resolution, and file output — so <code>fig.savefig</code>. The <strong>Axes</strong> owns one chart: the plotted artists, title, axis labels, legend, grid, spines — so <code>ax.set_xlabel</code>. Quick test for any method: &quot;is this about the paper or about the chart?&quot;</>
+    },
+    {
+      difficulty: "easy",
+      q: <>Pick the chart type for each question: (a) &quot;Is monthly spend related to tenure?&quot; (b) &quot;What does the distribution of session lengths look like?&quot; (c) &quot;Which of five models has the best accuracy?&quot; (d) &quot;How did daily active users change over Q2?&quot;</>,
+      hint: <>relationship / distribution / comparison / trend.</>,
+      answer: <>(a) <strong>scatter</strong> — two numeric quantities, one dot per row, relationship visible as shape. (b) <strong>histogram</strong> — one numeric column&apos;s shape: center, spread, skew, humps. (c) <strong>bar</strong> — few named categories, one value each (and the y-axis starts at zero). (d) <strong>line</strong> — ordered x (time), continuity of a trend is exactly the claim being made.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>A colleague&apos;s function contains <code>plt.plot(x, y)</code> and works fine in their notebook, but when your script calls it twice for two reports, both datasets appear on one chart. Why — and what is the one-line signature change that fixes the class of bug forever?</>,
+      hint: <>Where does <code>plt.plot</code> decide which chart to draw on?</>,
+      answer: <><code>plt.plot</code> draws on the hidden <em>current axes</em> (<code>plt.gca()</code>), auto-creating one only if none exists. First call: no figure → creates one. Second call: figure exists → draws on the <em>same</em> axes — collision. Fix: <code>def plot_report(ax, x, y):</code> — take an explicit Axes and use <code>ax.plot(...)</code>; the caller makes the layout with <code>fig, axs = plt.subplots(...)</code>. Functions never touch <code>plt.*</code> for drawing.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Your saved chart file is blank, but the chart displayed on screen perfectly. The script ends with <code>plt.show()</code> then <code>fig.savefig("out.png")</code>. Diagnose and fix.</>,
+      hint: <>What does <code>show()</code> do to the figure when its window closes?</>,
+      answer: <>Order bug: <code>plt.show()</code> blocks until the window closes, and on many backends closing flushes/tears down the figure — so the later <code>savefig</code> writes an empty canvas. Fix: <strong>save first, then show</strong> — <code>fig.savefig("out.png", dpi=200, bbox_inches="tight")</code> before <code>plt.show()</code>. General habit: treat <code>show()</code> as the <em>last</em> line a script ever runs.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>A vendor&apos;s deck shows their model at 94.8% accuracy vs your 94.1% as a bar chart where their bar is ~5× taller. What exactly did they do, why is it misleading for <em>bars specifically</em>, and when would a zoomed axis have been legitimate?</>,
+      hint: <>What visual property does a bar encode, and what operation breaks it?</>,
+      answer: <>They truncated the y-axis (something like <code>set_ylim(93.9, 95.0)</code>), so a 0.7-point gap spans most of the plot height. Bars encode value as <strong>length from the baseline</strong>, and readers instinctively compare bar <em>ratios</em> — truncation clips both bars by the same absolute amount, wildly distorting that ratio (0.9 vs 0.2 units of visible height ≈ &quot;4–5× better&quot;). Zooming is legitimate for <strong>line charts</strong>, which encode value as <em>position</em> and answer shape-of-change questions — e.g., plotting both models&apos; accuracy <em>over training time</em> on a zoomed, clearly-labeled axis. Encoding determines the rule: length → zero baseline; position → zoom deliberately and label it.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>You plot six sensors&apos; temperature histories as a 2×3 small-multiples grid. Each panel looks similar, but sensor 4 actually runs 15° hotter than the rest. Why didn&apos;t the grid show it, and which single argument fixes it?</>,
+      hint: <>Each Axes chose something automatically, and chose differently.</>,
+      answer: <>Each Axes auto-scaled its own y-limits to its own data, so every panel fills its frame and sensor 4&apos;s offset is absorbed into its private scale — panel-to-panel comparison silently lies. Fix: <code>plt.subplots(2, 3, sharey=True)</code> (shared y-limits across all panels; <code>sharex</code> likewise for aligned time). Rule: <strong>panels that will be compared must share scales</strong> — auto-scaling is per-Axes and doesn&apos;t know your panels are a comparison.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>A line chart of a week of sensor readings shows a confident straight segment bridging Tuesday–Thursday, but you know the sensor was offline then. The data has those rows <em>removed</em>. What&apos;s wrong, and what&apos;s the honest fix?</>,
+      hint: <>What does <code>ax.plot</code> do between consecutive points? What value makes it stop?</>,
+      answer: <><code>ax.plot</code> draws a straight line between <em>consecutive points in the array</em> — with the offline rows deleted, Monday connects directly to Friday, fabricating data where none existed. Honest fix: keep the timeline complete and set the offline readings to <strong>NaN</strong> (e.g., reindex to the full date range so missing timestamps become NaN) — matplotlib breaks the line at NaN, leaving a visible gap that truthfully says &quot;no data here.&quot; If you must bridge it, interpolate <em>explicitly</em> and style it differently (dashed) so the reconstruction is visible.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Your training script saves a loss chart every epoch: <code>fig, ax = plt.subplots(); ax.plot(losses); fig.savefig(f"epoch_{"{"}e{"}"}.png")</code> inside the loop. Around epoch 300 the process is killed for memory. Explain the leak mechanically and give the corrected loop (two acceptable variants).</>,
+      hint: <>Who keeps a reference to every figure ever created?</>,
+      answer: <>pyplot&apos;s global registry (<code>Gcf</code> — the same state machine behind <code>gcf()</code>) holds a reference to <em>every</em> figure created via <code>plt.subplots</code>, so none are garbage-collected: 300 figures × (canvas buffers + artists) accumulate until the OOM killer arrives (matplotlib even warns at 20 open figures). Fix 1 — dispose per iteration: <code>fig, ax = plt.subplots(); ...; fig.savefig(...); plt.close(fig)</code>. Fix 2 — allocate once, reuse: create <code>fig, ax</code> before the loop, then per epoch <code>ax.clear(); ax.plot(losses); fig.savefig(...)</code> (faster, too). The deeper lesson: <code>plt</code>-created figures are globally registered — creation without disposal is a leak.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Design the figure for a report comparing 4 models × 2 datasets on accuracy-per-epoch (8 curves total). Specify: layout, what&apos;s shared, color strategy, annotations, and two dishonesty risks you&apos;re explicitly avoiding. Sketch the skeleton code.</>,
+      hint: <>Small multiples; something is shared; color should mean one thing, not eight.</>,
+      answer: <>Layout: <code>fig, axs = plt.subplots(1, 2, figsize=(10, 4), sharex=True, sharey=True)</code> — one panel per <em>dataset</em>, 4 model curves per panel (8 curves on one Axes is spaghetti; 2 panels × 4 curves reads). Shared: both axes — identical epoch range and accuracy scale so cross-dataset comparison is valid. Color: one hue per <em>model</em>, consistent across both panels (color means &quot;model,&quot; nothing else), with a single legend (<code>axs[0].legend()</code> or a figure-level legend); optionally gray for baselines, accent for your candidate. Annotations: mark each panel&apos;s best model at its final/peak epoch (<code>ax.annotate</code>), and state the headline in the title (&quot;Model C wins on both, +2.1 pts on dataset B&quot;). Dishonesty avoided: (1) unshared y-limits making one dataset&apos;s gains look bigger — killed by <code>sharey=True</code>; (2) zoom exaggeration — accuracy axis either starts at a labeled, deliberate zoom (line charts may zoom) or at a common round baseline, stated in the caption; bonus (3) color-only meaning — vary line style too for the colorblind. Skeleton: loop <code>for ax, ds in zip(axs, datasets):</code> then <code>for model in models: ax.plot(epochs, acc[ds][model], label=model)</code>, dress, annotate, <code>fig.tight_layout(); fig.savefig(..., dpi=200)</code>.</>
+    },
+  ]}
+/>
+
+<Quiz items={[
+  {
+    q: <>Which object owns the x-axis label, and which owns the saved PNG file?</>,
+    choices: [
+      { text: <>Figure owns both</> },
+      { text: <>Axes owns the label (<code>ax.set_xlabel</code>); Figure owns the file (<code>fig.savefig</code>)</>, correct: true },
+      { text: <>Axes owns both</> },
+      { text: <>pyplot owns both — objects are just aliases</> },
+    ],
+    explanation: <>The Axes is the chart (labels, artists, legend, spines); the Figure is the sheet (size, layout, saving). <code>plt.xlabel</code>/<code>plt.savefig</code> merely forward to the <em>current</em> Axes/Figure through the hidden state machine.</>
+  },
+  {
+    q: <>What does <code>plt.plot(x, y)</code> draw on when no figure exists yet?</>,
+    choices: [
+      { text: <>It raises an error — you must create a figure first</> },
+      { text: <>It auto-creates a figure and axes via <code>gca()</code>, blesses them &quot;current,&quot; and draws there</>, correct: true },
+      { text: <>It draws to a temporary buffer discarded at the next call</> },
+      { text: <>It reuses the most recently closed figure</> },
+    ],
+    explanation: <><code>plt.plot</code> ≈ <code>plt.gca().plot(...)</code>, and <code>gca()</code> auto-creates a current figure/axes when the registry is empty. That silent creation is why tutorials &quot;just work&quot; — and why two chart functions collide on one axes in scripts.</>
+  },
+  {
+    q: <>You&apos;re comparing the same metric across 6 small-multiple panels. Which argument keeps the comparison honest?</>,
+    choices: [
+      { text: <><code>tight_layout=True</code></> },
+      { text: <><code>sharey=True</code> (shared axis limits across panels)</>, correct: true },
+      { text: <><code>alpha=0.5</code></> },
+      { text: <><code>figsize=(10, 6)</code></> },
+    ],
+    explanation: <>Each Axes auto-scales privately by default, so identical-looking panels can sit on wildly different scales — the small-multiples version of axis truncation. <code>sharey=True</code> (and <code>sharex</code> for aligned domains) forces one scale so cross-panel comparisons mean something.</>
+  },
+  {
+    q: <>Why must bar charts start their value axis at zero when line charts may zoom?</>,
+    choices: [
+      { text: <>Tradition — both rules are purely stylistic</> },
+      { text: <>Bars encode value as <em>length</em>, and truncation distorts length ratios; lines encode value as <em>position</em>, where zooming shows shape without ratio claims</>, correct: true },
+      { text: <>Line charts can&apos;t render below zero</> },
+      { text: <>Bars are for categories, which have no zero</> },
+    ],
+    explanation: <>The encoding sets the rule. Readers compare bar <em>lengths</em> as ratios (&quot;twice as tall = twice as much&quot;) — truncating the baseline falsifies exactly that. Lines communicate position and change-of-shape, so a deliberate, labeled zoom (e.g., val-accuracy 0.5–1.0) is legitimate.</>
+  },
+  {
+    q: <>A loop creates and saves 500 charts and eventually dies with a memory error. The essential missing line is:</>,
+    choices: [
+      { text: <><code>gc.collect()</code> each iteration</> },
+      { text: <><code>plt.close(fig)</code> after each <code>savefig</code></>, correct: true },
+      { text: <><code>fig.tight_layout()</code> before saving</> },
+      { text: <><code>del fig</code> at loop end</> },
+    ],
+    explanation: <>pyplot&apos;s global registry keeps a live reference to every figure it created, so <code>del</code>/GC can&apos;t reclaim them — only <code>plt.close(fig)</code> deregisters. (Even better in hot loops: create the figure once and <code>ax.clear()</code> per iteration.)</>
+  }
+]} />
+
+<MarkDone slug="foundations/scientific-stack/matplotlib-figures" title="Matplotlib — figures that communicate" />
