@@ -8,6 +8,10 @@ import {
   type Tier,
 } from "@/curriculum/curriculum";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { StatusChip } from "@/components/ui/StatusChip";
+import { FLAGSHIP_SLUGS } from "@/curriculum/flagship";
+import { PaletteTrigger } from "@/components/palette/PaletteTrigger";
+import { StreakBadge } from "@/components/landing/SessionSignal";
 
 export function generateStaticParams() {
   return CURRICULUM.map((t) => ({ tierSlug: t.slug }));
@@ -31,7 +35,7 @@ function TierView({ tier }: { tier: Tier }) {
   const next = tierIdx < CURRICULUM.length - 1 ? CURRICULUM[tierIdx + 1] : null;
 
   return (
-    <div className={`tier-hue-${tier.id} relative flex min-h-screen flex-col overflow-hidden bg-bg text-ink`}>
+    <div className={`tier-hue-${tier.id} relative flex min-h-screen flex-col overflow-x-clip bg-bg text-ink`}>
       <div className="mesh-bg">
         <div className="mesh-blob mesh-a" />
         <div className="mesh-blob mesh-b" />
@@ -47,9 +51,11 @@ function TierView({ tier }: { tier: Tier }) {
             <span className="label-mono">Vol. {tier.numeral}</span>
           </Link>
           <div className="flex items-center gap-2">
+            <StreakBadge className="hidden sm:inline-flex" />
             <Link href="/" className="pill">
               ← All volumes
             </Link>
+            <PaletteTrigger compact />
             <ThemeToggle />
           </div>
         </div>
@@ -221,20 +227,20 @@ function TopicRow({
           {String(n).padStart(2, "0")}
         </span>
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <div className="text-[15.5px] font-semibold leading-snug text-ink group-hover:text-lime">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <div className="mr-0.5 text-[15.5px] font-semibold leading-snug text-ink group-hover:text-lime">
               {topic.title}
             </div>
-            {topic.priority === "core" && (
-              <span className="pill pill-lime !py-[3px] !px-[8px] !text-[9px]">Core</span>
-            )}
             {topic.status === "written" ? (
-              <span className="pill !py-[3px] !px-[8px] !text-[9px]" style={{ color: "var(--lime)" }}>
-                ● Written
-              </span>
+              <StatusChip kind="written" size="sm" />
             ) : (
-              <span className="pill !py-[3px] !px-[8px] !text-[9px]">Outline</span>
+              <StatusChip kind="outline" size="sm" />
             )}
+            {topic.status === "written" && <StatusChip kind="runnable" size="sm" />}
+            {FLAGSHIP_SLUGS.has(topic.slug) && (
+              <StatusChip kind="flagship" size="sm" />
+            )}
+            {topic.priority === "core" && <StatusChip kind="core" size="sm" />}
           </div>
           <div className="mt-1 text-[13.5px] leading-relaxed text-ink-2">
             {topic.description}

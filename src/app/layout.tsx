@@ -5,6 +5,15 @@ import { ThemeProvider, themeInitScript } from "@/lib/theme";
 import { ProgressProvider } from "@/lib/progress";
 import { SmoothScroll } from "@/lib/smooth-scroll";
 import { CursorHalo } from "@/components/ambient/LivingBackground";
+import { CommandPalette } from "@/components/palette/CommandPalette";
+import { CURRICULUM, tierCounts } from "@/curriculum/curriculum";
+
+const PALETTE_VOLUMES = CURRICULUM.map((t) => ({
+  numeral: t.numeral,
+  title: t.title,
+  slug: t.slug,
+  topics: tierCounts(t).topics,
+}));
 
 const manrope = Manrope({
   variable: "--font-manrope",
@@ -48,6 +57,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <ProgressProvider>
             <SmoothScroll>
               <CursorHalo />
+              <CommandPalette volumes={PALETTE_VOLUMES} />
               {children}
             </SmoothScroll>
           </ProgressProvider>

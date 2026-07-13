@@ -53,6 +53,11 @@
   --lime-soft: oklch(94% 0.18 118 / 0.14);
   --lime-ink:  oklch(20% 0.05 118);   /* dark text on lime CTAs */
 
+  /* --- secondary instrument hues (chips, surfaces, telemetry) --- */
+  --amber:  oklch(84% 0.15 82);
+  --violet: oklch(72% 0.19 288);
+  --rose:   oklch(74% 0.19 340);
+
   /* --- per-tier hue defaults (overridden by .tier-hue-N) --- */
   --tier-h: 118;
   --tier-c: 0.18;
@@ -80,6 +85,10 @@
   --lime-2:    oklch(58% 0.20 122);
   --lime-soft: oklch(72% 0.19 118 / 0.16);
   --lime-ink:  oklch(15% 0.05 118);
+
+  --amber:  oklch(60% 0.14 78);
+  --violet: oklch(48% 0.21 288);
+  --rose:   oklch(56% 0.21 340);
 
   --accent-ink:   oklch(98% 0.008 var(--tier-h));
 }
@@ -633,4 +642,311 @@ body {
   width: 40px;
   background: var(--lime);
   opacity: .6;
+}
+
+/* ————————————————————————————————————————————————
+   STATUS CHIP VOCABULARY — monospace instrument glyphs
+   [● written] [○ outline] [▲ flagship] [◆ runnable] [▮ core]
+   ———————————————————————————————————————————————— */
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px 3px 7px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: oklch(from var(--ink) l c h / 0.03);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.status-chip .glyph { font-size: 9px; line-height: 1; translate: 0 -0.5px; }
+.status-chip[data-size="sm"] { padding: 2px 7px 2px 6px; font-size: 9px; gap: 5px; }
+
+.chip-written {
+  color: var(--lime);
+  border-color: oklch(from var(--lime) l c h / 0.32);
+  background: oklch(from var(--lime) l c h / 0.09);
+}
+.chip-outline { color: var(--ink-3); border-style: dashed; }
+.chip-flagship {
+  color: var(--amber);
+  border-color: oklch(from var(--amber) l c h / 0.35);
+  background: oklch(from var(--amber) l c h / 0.09);
+}
+.chip-runnable {
+  color: var(--violet);
+  border-color: oklch(from var(--violet) l c h / 0.38);
+  background: oklch(from var(--violet) l c h / 0.10);
+}
+.chip-core {
+  color: var(--lime);
+  border-color: oklch(from var(--lime) l c h / 0.32);
+}
+.chip-live { color: var(--lime); border-color: oklch(from var(--lime) l c h / 0.32); }
+
+/* ————————————————————————————————————————————————
+   PRODUCT LIGHT — blurred glow a surface floats over.
+   Static gradient on its own GPU layer; never repaints on scroll.
+   ———————————————————————————————————————————————— */
+
+.product-light {
+  position: absolute;
+  inset: -12% -18%;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(42% 46% at 30% 26%, oklch(from var(--lime) l c h / 0.20) 0%, transparent 70%),
+    radial-gradient(40% 44% at 74% 64%, oklch(from var(--violet) l c h / 0.22) 0%, transparent 70%),
+    radial-gradient(30% 34% at 58% 18%, oklch(from var(--rose) l c h / 0.12) 0%, transparent 70%);
+  filter: blur(28px);
+  transform: translateZ(0);
+  will-change: transform;
+  contain: strict;
+}
+
+/* gentle levitation for the hero instrument */
+@keyframes levitate {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  50%      { transform: translate3d(0, -8px, 0); }
+}
+.levitate { animation: levitate 7s ease-in-out infinite; will-change: transform; }
+
+/* ————————————————————————————————————————————————
+   INSTRUMENT WINDOW — the framed product surface used by
+   the hero preview + chapter tour mock
+   ———————————————————————————————————————————————— */
+
+.instrument {
+  position: relative;
+  border-radius: 20px;
+  border: 1px solid oklch(from var(--ink) l c h / 0.10);
+  background: linear-gradient(165deg,
+    oklch(from var(--bg-2) l c h / 0.98),
+    oklch(from var(--bg) l c h / 0.94));
+  box-shadow:
+    0 1px 0 oklch(100% 0 0 / .05) inset,
+    0 40px 80px -32px oklch(0% 0 0 / .6);
+  overflow: hidden;
+}
+.light .instrument {
+  box-shadow:
+    0 1px 0 oklch(100% 0 0 / .6) inset,
+    0 32px 64px -30px oklch(30% 0.02 90 / .35);
+}
+.instrument-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: oklch(from var(--bg-3) l c h / 0.6);
+}
+
+/* scene crossfade inside the hero instrument */
+.scene {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transform: translate3d(0, 10px, 0);
+  transition: opacity .55s cubic-bezier(.19,1,.22,1), transform .55s cubic-bezier(.19,1,.22,1);
+  pointer-events: none;
+}
+.scene[data-on="true"] {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+  pointer-events: auto;
+}
+
+/* typing caret */
+.type-caret::after {
+  content: "▍";
+  color: var(--lime);
+  animation: ticker 1s steps(2) infinite;
+}
+
+/* self-drawing stroke (SVG paths with pathLength=1) */
+.draw-path {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+}
+.scene[data-on="true"] .draw-path,
+.draw-now .draw-path {
+  animation: draw-in 1.4s cubic-bezier(.4,0,.2,1) forwards;
+}
+@keyframes draw-in { to { stroke-dashoffset: 0; } }
+
+/* staged line reveals inside an active scene */
+.stage-line {
+  opacity: 0;
+  transform: translate3d(0, 8px, 0);
+}
+.scene[data-on="true"] .stage-line {
+  animation: fade-up .6s cubic-bezier(.19,1,.22,1) forwards;
+  animation-delay: var(--d, 0s);
+}
+
+/* scene progress track */
+.scene-track { height: 2px; background: var(--line); border-radius: 999px; overflow: hidden; }
+.scene-track > span {
+  display: block; height: 100%;
+  background: var(--lime);
+  transform-origin: left;
+  transform: scaleX(0);
+}
+.scene-track[data-run="true"] > span {
+  animation: track-fill var(--scene-ms, 4200ms) linear forwards;
+}
+@keyframes track-fill { to { transform: scaleX(1); } }
+
+/* ————————————————————————————————————————————————
+   COMMAND PALETTE — the front door
+   ———————————————————————————————————————————————— */
+
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--line-2);
+  border-bottom-width: 2px;
+  background: var(--bg-3);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--ink-2);
+}
+
+.palette-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: oklch(from var(--bg) l c h / 0.78);
+  animation: fade-in .18s ease both;
+}
+.palette-panel {
+  position: fixed;
+  z-index: 91;
+  left: 50%;
+  top: 14vh;
+  width: min(660px, calc(100vw - 32px));
+  transform: translateX(-50%);
+  border-radius: 18px;
+  border: 1px solid oklch(from var(--ink) l c h / 0.12);
+  background: linear-gradient(180deg, var(--bg-2), var(--bg));
+  box-shadow:
+    0 1px 0 oklch(100% 0 0 / .06) inset,
+    0 48px 96px -32px oklch(0% 0 0 / .7);
+  overflow: hidden;
+  animation: palette-pop .22s cubic-bezier(.19,1,.22,1) both;
+}
+@keyframes palette-pop {
+  from { opacity: 0; transform: translateX(-50%) translateY(10px) scale(.985); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+}
+.palette-item { border-radius: 12px; transition: background .12s ease; }
+.palette-item[data-active="true"] {
+  background: oklch(from var(--lime) l c h / 0.10);
+  outline: 1px solid oklch(from var(--lime) l c h / 0.28);
+}
+
+/* ————————————————————————————————————————————————
+   TWO SURFACES — read (lime) vs practice (violet)
+   ———————————————————————————————————————————————— */
+
+.surface-read, .surface-practice {
+  position: relative;
+  overflow: hidden;
+  border-radius: 26px;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+}
+.surface-read::before, .surface-practice::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.surface-read::before {
+  background:
+    radial-gradient(90% 70% at 18% 0%, oklch(from var(--lime) l c h / 0.12) 0%, transparent 60%);
+}
+.surface-practice::before {
+  background:
+    radial-gradient(90% 70% at 82% 0%, oklch(from var(--violet) l c h / 0.16) 0%, transparent 60%);
+}
+.surface-read    { border-color: oklch(from var(--lime) l c h / 0.22); }
+.surface-practice{ border-color: oklch(from var(--violet) l c h / 0.30); }
+
+/* ————————————————————————————————————————————————
+   PLATE THUMBNAILS — peek-inside chapter miniatures
+   ———————————————————————————————————————————————— */
+
+.plate-page {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 264px;
+  flex-shrink: 0;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, var(--bg-2), var(--bg));
+  transition: transform .35s cubic-bezier(.19,1,.22,1), border-color .3s ease;
+  transform: translateZ(0);
+}
+.plate-page:hover {
+  transform: translate3d(0, -6px, 0);
+  border-color: oklch(from var(--accent) l c h / 0.45);
+}
+.plate-skel {
+  height: 5px;
+  border-radius: 999px;
+  background: oklch(from var(--ink) l c h / 0.10);
+}
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
+/* ————————————————————————————————————————————————
+   CHAPTER TOUR — pinned dissection
+   ———————————————————————————————————————————————— */
+
+.tour-stage-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  color: var(--ink-3);
+  transition: color .25s ease, background .25s ease, border-color .25s ease;
+}
+.tour-stage-btn[data-on="true"] {
+  color: var(--ink);
+  background: oklch(from var(--ink) l c h / 0.04);
+  border-color: var(--line);
+}
+.tour-stage-btn .glyph { color: var(--ink-4); transition: color .25s ease; }
+.tour-stage-btn[data-on="true"] .glyph { color: var(--lime); }
+
+.tour-panel {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transform: translate3d(0, 18px, 0) scale(.99);
+  transition: opacity .5s cubic-bezier(.19,1,.22,1), transform .5s cubic-bezier(.19,1,.22,1);
+  pointer-events: none;
+}
+.tour-panel[data-on="true"] {
+  opacity: 1;
+  transform: translate3d(0, 0, 0) scale(1);
+  pointer-events: auto;
 }

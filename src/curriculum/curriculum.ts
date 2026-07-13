@@ -208,7 +208,7 @@ const tier0: Tier = {
             "einsum for the ambitious",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "pandas-dataframe-fundamentals",

@@ -111,10 +111,7 @@ export function RunnableCode({
   }
 
   return (
-    <div
-      className="not-prose my-6 overflow-hidden rounded-2xl border border-line bg-bg-2"
-      data-lenis-prevent
-    >
+    <div className="not-prose my-6 overflow-hidden rounded-2xl border border-line bg-bg-2">
       <div className="flex items-center justify-between border-b border-line bg-bg-3 px-4 py-2">
         <div className="flex items-center gap-2">
           <span className="h-2.5 w-2.5 rounded-full bg-lime" />
@@ -187,10 +184,7 @@ export function CodeBlock({
       ? children
       : "";
   return (
-    <div
-      className="not-prose my-6 overflow-hidden rounded-2xl border border-line bg-bg-2"
-      data-lenis-prevent
-    >
+    <div className="not-prose my-6 overflow-hidden rounded-2xl border border-line bg-bg-2">
       {title && (
         <div className="border-b border-line bg-bg-3 px-4 py-2">
           <span className="label-mono !text-[10.5px]">{title}</span>

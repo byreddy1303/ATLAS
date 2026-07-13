@@ -20,6 +20,9 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { Breadcrumbs } from "@/components/layout/Breadcrumbs";
 import { PrevNext } from "@/components/layout/PrevNext";
 import { MarkDone } from "@/components/pedagogy/interactive";
+import { StatusChip } from "@/components/ui/StatusChip";
+import { TopicVisit } from "@/components/landing/SessionSignal";
+import { FLAGSHIP_SLUGS } from "@/curriculum/flagship";
 
 export function generateStaticParams() {
   return allTopicPaths().map((tp) => ({ slug: tp.urlSlugParts }));
@@ -74,20 +77,19 @@ export default async function TopicPage({
           </div>
 
           <div className="mt-6 flex flex-wrap items-center gap-2">
-            {tp.topic.priority === "core" && (
-              <span className="pill pill-lime">Core chapter</span>
-            )}
             {tp.topic.status === "written" ? (
-              <span className="pill" style={{ color: "var(--lime)" }}>
-                ● Written
-              </span>
+              <StatusChip kind="written" />
             ) : (
-              <span className="pill">Outline · draft in progress</span>
+              <StatusChip kind="outline" label="outline · draft" />
             )}
+            {FLAGSHIP_SLUGS.has(tp.topic.slug) && <StatusChip kind="flagship" />}
+            {tp.topic.status === "written" && <StatusChip kind="runnable" />}
+            {tp.topic.priority === "core" && <StatusChip kind="core" label="core chapter" />}
             <span className="pill">
               Phase {tp.phase.id} · {tp.phase.title}
             </span>
           </div>
+          <TopicVisit slug={progressSlug} title={tp.topic.title} />
 
           <hr className="my-10 border-line" />
 

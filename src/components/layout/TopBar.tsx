@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { PaletteTrigger } from "@/components/palette/PaletteTrigger";
+import { StreakBadge } from "@/components/landing/SessionSignal";
 
 export function TopBar({ trail }: { trail?: React.ReactNode }) {
   return (
@@ -17,6 +19,8 @@ export function TopBar({ trail }: { trail?: React.ReactNode }) {
           )}
         </div>
         <div className="flex items-center gap-2">
+          <StreakBadge className="hidden sm:inline-flex" />
+          <PaletteTrigger compact />
           <ThemeToggle />
         </div>
       </div>

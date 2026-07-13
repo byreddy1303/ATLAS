@@ -62,7 +62,7 @@ Section flow (not every section on every topic):
 2. `<Motivation>` — the problem that forces this concept to exist
 3. `<Intuition>` — core idea in plain language
 4. Build-up — from-zero explanation with `<Recall>` cards re-teaching basics inline
-5. `<Angle type="geometric|algebraic|computational|probabilistic|physical|code">` — 3–5 perspectives
+5. `<Angle type="...">` — 4–6 perspectives. **The type is a lens, not decoration** — it names the *kind of understanding* the angle produces, and the chip is visible to the reader. Use math lenses for math topics (`geometric | algebraic | probabilistic | physical`) and programming lenses for programming topics (`historical | mental-model | anatomy | workflow | runtime | contract | comparative | pitfall | performance | taste | ecosystem | production`). `computational` and `code` are the two universal types that work for both. See "Angle-lens taxonomy" below.
 6. `<Convergence>` — all angles land on the same spot
 7. `<Derivation>` — stepped ledger: every line = math + beginner-English what/why
 8. `<Example>` — worked by hand, then runnable code cell
@@ -74,6 +74,118 @@ Section flow (not every section on every topic):
 14. `<ProblemSet>` — easy→medium→hard, hint → full solution reveal
 15. `<Quiz>` — quick self-check
 Plus: `<Term>` glossary tooltips, path context strip, keyboard prev/next. Flashcards = later milestone.
+
+## Angle-lens taxonomy (governs every `<Angle type=...>` chip)
+
+The `Angle` chip is visible to the reader. Its label tells them *what kind of understanding* the angle produces. Picking a math lens ("Σ Algebraic") for a Python concept ("LEGB scope resolution") reads as noise. Rule: **the lens must match the topic's shape.**
+
+### Universal (work for math OR programming)
+
+- **`code`** ❯ Code — the runnable code angle; syntax you'd type
+- **`computational`** ⌘ Computational — algorithm, complexity, or the mechanism that makes it run
+
+### Math lenses (use for Tier 1+ math topics)
+
+- **`geometric`** △ Geometric — the picture, the arrows, the shape in space
+- **`algebraic`** Σ Algebraic — the symbolic identity, the closed-form
+- **`probabilistic`** ⚀ Probabilistic — random variables, distributions, expectation
+- **`physical`** ⌬ Physical — where the same object shows up in physics/engineering
+
+### Programming lenses (use for Tier 0 Python + later systems topics)
+
+- **`historical`** ⏱ Historical — how did we get here? What did this replace?
+- **`mental-model`** ◉ Mental Model — the metaphor to hold in your head
+- **`anatomy`** ⚙ Anatomy — what's actually inside; the structure on disk / in memory
+- **`workflow`** → Workflow — how you use it day-to-day; the muscle-memory commands
+- **`runtime`** ▶ Runtime — what the interpreter/OS actually does at execution
+- **`contract`** ⟨⟩ Contract — the interface, the typing, the promises
+- **`comparative`** ⇌ Comparative — this vs alternatives (past tools, other languages)
+- **`pitfall`** ⚠ Pitfall — the trap; the classic bug; the anti-pattern
+- **`performance`** ⚡ Performance — cost, memory, throughput, when it matters
+- **`taste`** ✦ Taste — when to reach for this; when not to; the design choice
+- **`ecosystem`** ✚ Ecosystem — how this composes with the rest of the language/tools
+- **`production`** ⚑ Production — the ship-it pattern you'll write again and again
+
+### Per-chapter angle map (Phase 0.1 + gradient descent)
+
+For each written chapter, the primary angles that would actually illuminate the topic — **the lenses a beginner needs to see it whole**. This is the reference for rewrites.
+
+#### T0 · P0.1 · `environment-tooling`
+1. **historical** — pip → virtualenv → conda → poetry → uv. Why each existed. Why uv consolidates.
+2. **workflow** — the seven-command daily ritual (init, add, run, sync, format, check, commit).
+3. **anatomy** — what's inside `.venv/`, `pyproject.toml`, `uv.lock`. Physical file layout.
+4. **contract** — `pyproject.toml` as the single source of truth; the identity of a Python project.
+5. **production** — reproducibility: two files, one `uv sync`, byte-identical envs on every machine.
+
+#### T0 · P0.1 · `control-flow-data-model`
+1. **mental-model** — everything is an object; behavior is negotiated through protocols.
+2. **taste** — truthiness and "empty is false"; `if not xs` beats `if len(xs)==0`.
+3. **workflow** — the idiomatic iteration vocabulary (`for x in xs`, `enumerate`, `zip`, `dict.items`).
+4. **runtime** — how `match/case` destructures at execution (not switch).
+5. **pitfall** — `is` vs `==`; identity vs equality; small-int caching.
+6. **contract** — hashability: `__eq__` and `__hash__` must agree.
+
+#### T0 · P0.1 · `comprehensions-generators-decorators`
+1. **taste** — comprehensions as loops-as-expressions; when they aid readability, when they hurt.
+2. **code** — the syntax vocabulary (list/dict/set/generator comprehensions, filter clauses).
+3. **performance** — the generator memory-profile story; 10M items in 100 bytes.
+4. **ecosystem** — generator pipelines (pull-based dataflow, the DataLoader shape).
+5. **runtime** — what `@decorator` above `def` actually compiles to.
+6. **runtime** — decorator factories: `@retry(3)` is `f = retry(3)(f)`.
+
+#### T0 · P0.1 · `functions-scope-closures`
+1. **mental-model** — functions are first-class values; you can assign, pass, store, return them.
+2. **code** — the five argument styles (positional, default, *args, keyword-only, **kwargs).
+3. **runtime** — LEGB name resolution: how Python actually finds `x`.
+4. **anatomy** — closures capture *cells*, not values; inspect `fn.__closure__`.
+5. **pitfall** — the late-binding trap and its three fixes.
+6. **contract** — type hints as documentation the tools read.
+
+#### T0 · P0.1 · `classes-protocols-dataclasses`
+1. **historical** — old OOP (deep inheritance trees) → modern minimalism (dataclass + Protocol + composition).
+2. **code** — `@dataclass(frozen=True, slots=True)` gives you `__init__`, `__repr__`, `__eq__`, `__hash__` for free.
+3. **pitfall** — `field(default_factory=list)` vs mutable class-level defaults.
+4. **contract** — `Protocol` as structural typing; anything shaped-right satisfies.
+5. **runtime** — dunder methods as the hooks Python's built-ins call through.
+6. **taste** — composition over inheritance; `has-a` beats `is-a` for readability + testability.
+
+#### T0 · P0.1 · `errors-testing-logging`
+1. **mental-model** — three roles: exceptions communicate, tests document, logs narrate.
+2. **taste** — custom exception hierarchies; specific types unlock precise `except`.
+3. **runtime** — `raise X from Y` chains the cause into the traceback.
+4. **workflow** — pytest: `test_*` functions, `parametrize`, `pytest.raises`, fixtures.
+5. **comparative** — EAFP vs LBYL — the Python happy-path preference.
+6. **production** — structured JSON logging with levels; retry-with-backoff decorator.
+
+#### T0 · P0.1 · `concurrency-async`
+1. **mental-model** — one decision: I/O-bound vs CPU-bound; the tool follows.
+2. **runtime** — the GIL, honestly; why threads help for I/O but not CPU.
+3. **runtime** — what `await` actually does inside the event loop.
+4. **comparative** — threads vs processes vs asyncio; when each wins.
+5. **production** — semaphore + gather + timeout + retry (the LLM/RAG pattern).
+6. **pitfall** — one sync blocking call freezes the whole event loop.
+
+#### T0 · P0.1 · `cli-io-serialization`
+1. **mental-model** — four boundaries: args, paths, formats, streams.
+2. **taste** — pathlib over strings; Path is the modern default.
+3. **workflow** — argparse for scripts you own; the `type=int` / `--dry-run` habits.
+4. **comparative** — argparse vs Typer vs Click; the CLI-parser choice.
+5. **comparative** — format trade-off table (JSON / YAML / TOML / CSV / Parquet / safetensors).
+6. **performance** — streaming vs materializing; how the file iterator saves you.
+7. **production** — atomic writes; `encoding="utf-8"` discipline; two-file reproducibility for datasets.
+
+#### T1 · P1.3 · `gradient-descent-intuition` (math — keep math lenses)
+1. **geometric** — the mountain-in-fog picture; follow the negative gradient.
+2. **algebraic** — `θ ← θ − η ∇f(θ)`; two lines of code, forever.
+3. **computational** — every smooth function looks linear up close (Taylor).
+4. **code** — vanilla GD from scratch; runnable trace.
+5. **physical** — learning rate as the one knob that owns everything.
+
+Math lenses are correct here; do not "programming-ize" this chapter.
+
+### What this means for the recently-rewritten chapters
+
+Every Phase 0.1 chapter currently uses math lenses (`algebraic`, `physical`, `probabilistic`) as visual variety. **This must be fixed** — the reader's chip is misleading. Extend the `Angle` component with the programming-lens types above and update each Python chapter's `<Angle type=...>` per the map above.
 
 ## Widgets
 
