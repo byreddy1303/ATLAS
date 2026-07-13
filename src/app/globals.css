@@ -143,15 +143,28 @@ body {
 }
 
 /* ——————————————————— scroll boundary safety ——————————————————— */
-/* Keep wheel events inside inner scrollables from bouncing back to the page
-   when they hit an edge. Prevents the "scroll down pulls up" symptom that
-   happens when a nested scroll (CodeMirror, wide code blocks) is at its
-   extent and the browser cascades the event weirdly. */
+/* Code blocks/editors scroll HORIZONTALLY when lines are wide. A blanket
+   `overscroll-behavior: contain` on a horizontal scroller also traps
+   VERTICAL wheel events in Chrome (the carousel scroll-trap), which killed
+   page scroll whenever the cursor sat over a wide code cell. Contain the
+   x-axis only; let vertical wheel chain to the page. */
 .cm-editor,
 .cm-scroller,
-pre,
+pre {
+  overscroll-behavior-x: contain;
+  overscroll-behavior-y: auto;
+}
+
+/* Real vertical scrollers (sidebar, palette list) must not bounce the page
+   when they hit an edge. */
 [data-lenis-prevent] {
   overscroll-behavior: contain;
+}
+
+/* Native-scroll pages (everything except the landing, where Lenis adds the
+   .lenis class) still get smooth anchor/TOC jumps. */
+html:not(.lenis) {
+  scroll-behavior: smooth;
 }
 
 /* ——————————————————— typography utilities ——————————————————— */
