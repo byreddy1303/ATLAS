@@ -32,47 +32,6 @@ print(matrix + col)                              # col added to every column
 print("\\nrow + col.T:")
 print(row + col)                                 # every combination`;
 
-export const broadcastRulesCode = `import numpy as np
-
-# The rules, spelled out. Read each cell like a puzzle: what will broadcasting produce?
-
-def try_broadcast(a, b):
-    try:
-        c = a + b
-        print(f"OK  {a.shape} + {b.shape}  ->  {c.shape}")
-    except ValueError as e:
-        print(f"FAIL {a.shape} + {b.shape}  ({e})")
-
-# The rule set: shapes are compared RIGHT-TO-LEFT.
-# At each position:
-#   - if dims match, keep going
-#   - if one is 1, it stretches to match the other
-#   - if both are >1 and unequal, ERROR
-
-a = np.ones((3, 4))
-b = np.ones((4,))                # right-align: (3, 4) vs   (4,) -> (3, 4)  ✓
-try_broadcast(a, b)
-
-a = np.ones((3, 4))
-b = np.ones((3, 1))              # right-align: (3, 4) vs (3, 1) -> (3, 4)  ✓
-try_broadcast(a, b)
-
-a = np.ones((3, 4))
-b = np.ones((1, 4))              # right-align: (3, 4) vs (1, 4) -> (3, 4)  ✓
-try_broadcast(a, b)
-
-a = np.ones((3, 4))
-b = np.ones((3, 5))              # (3, 4) vs (3, 5): 4 vs 5, both > 1 -> FAIL
-try_broadcast(a, b)
-
-a = np.ones((5, 1, 4))
-b = np.ones((3, 4))              # right-align: (5, 1, 4) vs (   3, 4) -> (5, 3, 4)
-try_broadcast(a, b)
-
-a = np.ones((3, 4))
-b = np.ones((2, 3, 4))           # right-align: (   3, 4) vs (2, 3, 4) -> (2, 3, 4)
-try_broadcast(a, b)`;
-
 export const slicingCode = `import numpy as np
 
 a = np.arange(24).reshape(4, 6)
@@ -145,53 +104,11 @@ print("aa[0,0] after c1[0,0]=-1:", a[0, 0])              # still 999 — unchang
 # The np.shares_memory helper is your friend when in doubt
 print("\\nshares_memory(a, v1):", np.shares_memory(a, v1))
 print("shares_memory(a, c1):", np.shares_memory(a, c1))
-print("shares_memory(a, c2):", np.shares_memory(a, c2))
 
 # When you need independence, use .copy()
 independent = a[:2, :3].copy()
 independent[0, 0] = -42
 print("\\na[0,0] after independent[0,0]=-42:", a[0, 0])   # still 999`;
-
-export const einsumCode = `import numpy as np
-
-# einsum — Einstein summation. The most powerful array-shape operator in NumPy.
-# Rules:
-#   - Repeated letters in the input are SUMMED OVER
-#   - Letters that appear on the output survive
-#   - Read the '->' as "produces"
-
-# 1. Inner product of two vectors
-a = np.array([1, 2, 3])
-b = np.array([4, 5, 6])
-print("dot  ", np.einsum("i,i->", a, b))            # 32   (1*4 + 2*5 + 3*6)
-# The 'i' appears twice on the left (repeated -> sum), zero times on the right (scalar)
-
-# 2. Outer product
-print("outer\\n", np.einsum("i,j->ij", a, b))       # 3x3 — all pairwise products
-
-# 3. Matrix-vector product
-A = np.arange(12).reshape(3, 4)
-x = np.arange(4)
-print("A @ x         :", np.einsum("ij,j->i", A, x))     # sum-over-j; shape (3,)
-
-# 4. Matrix-matrix product
-B = np.arange(20).reshape(4, 5)
-print("A @ B shape   :", np.einsum("ij,jk->ik", A, B).shape)   # (3, 5) — classical matmul
-
-# 5. Batched matrix multiply — one letter for the batch axis (b), matmul over (i,j)
-batch_A = np.random.default_rng(0).normal(size=(8, 3, 4))
-batch_B = np.random.default_rng(1).normal(size=(8, 4, 5))
-print("batched A@B   :", np.einsum("bij,bjk->bik", batch_A, batch_B).shape)  # (8, 3, 5)
-
-# 6. Trace of a matrix — sum along the diagonal
-M = np.arange(16).reshape(4, 4)
-print("trace         :", np.einsum("ii->", M))            # 0 + 5 + 10 + 15
-
-# 7. Attention pattern (QK^T) — the tensor at the heart of every transformer
-Q = np.random.default_rng(2).normal(size=(4, 8))          # 4 queries,   dim 8
-K = np.random.default_rng(3).normal(size=(6, 8))          # 6 keys,      dim 8
-scores = np.einsum("qd,kd->qk", Q, K)                     # 4x6 similarity matrix
-print("attention scores shape:", scores.shape)`;
 
 export const brdcastBugCode = `import numpy as np
 
@@ -210,10 +127,7 @@ print("distances:", dists)                     # [0. 5. 10. 15. 1.414]
 
 # Now you want to NORMALIZE each point to a unit vector.
 # The naive attempt — DOES NOT WORK as you expect:
-normed_wrong = points / dists                   # shape (5, 2) / (5,)
-# broadcasting right-aligns: (5, 2) vs (5,) becomes (5, 2) vs (1, 5)? No — (5,) is (1, 5)?
-# Actually (5,) right-aligns to the LAST dim of (5, 2): so (5,) matches the 2? Only if it's (2,).
-# Here (5,) has size 5, points last dim has size 2 -> mismatch or accidental match if broadcast
+# points / dists  is  (5, 2) / (5,)  →  right-align: (5, 2) vs (1, 5) → 2 vs 5 mismatch
 
 # Try it:
 try:
@@ -251,8 +165,43 @@ print("\\nAFTER z-scoring:")
 print("  means:", Z.mean(axis=0).round(6))     # ~0
 print("  stds :", Z.std(axis=0).round(6))      # ~1
 
-# This is EXACTLY what sklearn.preprocessing.StandardScaler does internally.
-# Reading its source is illuminating — it's about 40 lines and heavy on this pattern.`;
+# This is EXACTLY what sklearn.preprocessing.StandardScaler does internally.`;
+
+export const einsumCode = `import numpy as np
+
+# einsum — Einstein summation. The most powerful array-shape operator in NumPy.
+# Rules:
+#   - Repeated letters in the input are SUMMED OVER
+#   - Letters that appear on the output survive
+#   - Read the '->' as "produces"
+
+# 1. Inner product of two vectors
+a = np.array([1, 2, 3])
+b = np.array([4, 5, 6])
+print("dot  ", np.einsum("i,i->", a, b))            # 32   (1*4 + 2*5 + 3*6)
+
+# 2. Outer product
+print("outer\\n", np.einsum("i,j->ij", a, b))       # 3x3 — all pairwise products
+
+# 3. Matrix-vector product
+A = np.arange(12).reshape(3, 4)
+x = np.arange(4)
+print("A @ x         :", np.einsum("ij,j->i", A, x))     # sum-over-j; shape (3,)
+
+# 4. Matrix-matrix product
+B = np.arange(20).reshape(4, 5)
+print("A @ B shape   :", np.einsum("ij,jk->ik", A, B).shape)   # (3, 5) — classical matmul
+
+# 5. Batched matrix multiply — one letter for the batch axis (b), matmul over (i,j)
+batch_A = np.random.default_rng(0).normal(size=(8, 3, 4))
+batch_B = np.random.default_rng(1).normal(size=(8, 4, 5))
+print("batched A@B   :", np.einsum("bij,bjk->bik", batch_A, batch_B).shape)  # (8, 3, 5)
+
+# 6. Attention pattern (QK^T) — the tensor at the heart of every transformer
+Q = np.random.default_rng(2).normal(size=(4, 8))          # 4 queries,   dim 8
+K = np.random.default_rng(3).normal(size=(6, 8))          # 6 keys,      dim 8
+scores = np.einsum("qd,kd->qk", Q, K)                     # 4x6 similarity matrix
+print("attention scores shape:", scores.shape)`;
 
 export const attentionCode = `import numpy as np
 
@@ -292,328 +241,146 @@ print("output shape:", out.shape)             # (3, 8) — one context vector pe
   { href: "/learn/foundations/scientific-stack/numpy-arrays-vectorization", label: "NumPy · arrays & vectorization", blurb: "Shape, dtype, buffer, strides — the four fields of an ndarray." },
 ]} />
 
-<StudyDepth
-  intro={<>Broadcasting is the mental model that turns matrix math into one-liners; view-vs-copy is the source of half the NumPy bugs you&apos;ll ever debug. Drill the shape rules and the view rule; skim einsum until you touch attention or contractions.</>}
-  drill={[
-    <>The three broadcasting rules: right-align, size-1 stretches, unequal &gt;1 fails</>,
-    <>Basic slicing (<code>arr[1:5, ::2]</code>) is a <strong>view</strong>; fancy (list/bool) indexing is a <strong>copy</strong></>,
-    <><code>arr[:, np.newaxis]</code> / <code>arr.reshape(-1, 1)</code> to promote (N,) → (N, 1) for column broadcasting</>,
-    <>Boolean masks: <code>arr[arr &gt; threshold]</code>, <code>arr[mask] = 0</code> — the vectorized <code>if</code></>,
-    <><code>np.shares_memory(a, b)</code> when you&apos;re not sure whether an operation returned a view or copy</>,
-  ]}
-  skim={[
-    <>Full <code>einsum</code> grammar (ellipsis, output-order permutation, arbitrary rank contractions) — reach for it when Q·Kᵀ shows up</>,
-    <>Stride tricks like <code>np.lib.stride_tricks.as_strided</code> — powerful, footgun-heavy, rarely needed</>,
-    <>Every corner case of when reshape falls back to copy — <code>np.ascontiguousarray</code> when you must</>,
-    <>Structured-array slicing rules (records/void dtype)</>,
-  ]}
-/>
+<Motivation title="Shape math is the language of every model you'll ever build">
 
-<Motivation title="The idea that turns matrix code into one-line poetry">
+Z-score a `(1000, 3)` sensor matrix column-by-column: in pure Python, twenty loop lines; in NumPy, `(X - X.mean(axis=0)) / X.std(axis=0)`. The step that makes the shapes fit — matching a `(3,)` vector against every row of a `(1000, 3)` matrix — is **broadcasting**, and it's the same mechanism behind adding a bias to a layer's output, normalizing embeddings, and computing attention scores. Learn the rule once and matrix code in NumPy, PyTorch, and JAX stops needing loops.
 
-Imagine you have a table of 1000 sensor readings across 3 columns (temperature, humidity, pressure), and you want to *z-score* each column — subtract its mean, divide by its standard deviation. In pure Python you'd write three nested loops: outer over rows, then over columns, and for the stats you'd do a first pass to compute means and stds. Twenty lines, easy to get wrong, and roughly the speed of a slow bicycle.
-
-In NumPy it's one line:
-
-```python
-Z = (X - X.mean(axis=0)) / X.std(axis=0)
-```
-
-`X.shape == (1000, 3)`. `X.mean(axis=0).shape == (3,)`. The subtraction *reshapes the mean vector to match every row of X*, then subtracts element-wise. The division does the same. That "reshape and match" step is called **broadcasting**, and once you internalize it, most matrix code in NumPy, PyTorch, JAX, and pandas becomes short, obvious, and fast.
-
-The other half of this chapter is subtler and bites harder: **which indexing operations share memory with the original, and which allocate a copy?** A tiny mistake here — assuming a slice is independent when it's not, or the opposite — is the classic "why did my array change" bug of ML data pipelines. NumPy makes a strict distinction between *basic* indexing (slices with `:` and `int`s, always a view) and *fancy* indexing (lists, bool arrays, always a copy). Knowing which is which is not optional; it's the difference between correct code and silent data corruption.
-
-By the end of this chapter you'll (1) read a broadcasting expression without allocating brain cycles, (2) tell view from copy at a glance, (3) reach for `einsum` when the shape story gets rich (like `attention = softmax(QK^T / √d) V`), and (4) understand why every ML library's shape math looks so much like NumPy's. That last point is not a coincidence — every one of them ported the ndarray mental model.
+The chapter's second skill bites harder: **which indexing operations share memory with the original, and which allocate a copy?** Assume a slice is independent when it isn't and you get the classic "why did my array change" bug — silent data corruption in a training pipeline. NumPy's rule is strict and learnable in one sitting, and it's also the origin story of pandas' `SettingWithCopyWarning`.
 
 </Motivation>
 
-<Intuition title="Right-align, stretch size-1, fail on unequal &gt;1">
+<Intuition title="Right-align, stretch size-1, fail on unequal">
 
-Broadcasting is a mechanical procedure. Given two arrays `A.shape` and `B.shape`, NumPy tries to reconcile them dimension-by-dimension **from the right**. At each position it applies these three rules:
+Broadcasting is a mechanical procedure. Given two shapes, NumPy compares them dimension-by-dimension **from the right**:
 
-1. **If the two sizes are equal**, leave them alone.
-2. **If one of them is `1`**, stretch it (conceptually) to match the other.
-3. **If neither of the above holds** (both are &gt;1 and unequal), *broadcasting fails* with a `ValueError`.
+1. **If the sizes match**, keep going.
+2. **If one of them is 1**, stretch it to match the other.
+3. **If both are &gt;1 and unequal**, fail with a `ValueError`.
 
-If one array has fewer dimensions than the other, imagine `1`s prepended to its shape until they're the same length. So `(3,)` broadcast against `(4, 3)` becomes `(1, 3)` vs `(4, 3)` — and rule 2 stretches the `1` to `4`. But `(3,)` vs `(4, 5)` fails: after prepending, it's `(1, 3)` vs `(4, 5)`, and 3 vs 5 breaks rule 3.
+If one array has fewer dimensions, imagine `1`s prepended to its shape until the lengths match. So `(1000, 3) + (3,)` becomes `(1000, 3)` vs `(1, 3)`: the 3s match, the 1 stretches to 1000, the result is `(1000, 3)` — the 3-vector added to *every row*. And `(1000, 3) - (1000, 1)`: the 1 stretches across the 3 columns — the 1000-vector subtracted from *every column*.
 
-Two examples to lock this in:
+No memory is copied during any of this. The C loop just re-reads the small array's buffer as many times as needed — broadcasting is a lie the loop tells itself, and the lie is free. The output shape is the element-wise max of the aligned shapes.
 
-- `(1000, 3) + (3,)` — right-align, prepend, get `(1000, 3)` vs `(1, 3)`. The 1 stretches to 1000. Result shape: `(1000, 3)`. **Meaning:** add the 3-vector to *every row*.
-- `(1000, 3) - (1000, 1)` — same length; last-dim comparison is 3 vs 1, size-1 stretches. Result shape: `(1000, 3)`. **Meaning:** subtract the 1000-vector from *every column*.
-
-And *no memory is copied* during any of this. Broadcasting is a lie the C loop tells itself — it iterates as if the smaller array were the target shape, but under the hood it just re-reads the same tiny buffer over and over. That's why broadcasting isn't just short — it's *free*.
-
-**The mental model that lasts**: shapes are tuples; broadcasting is a rule for matching them from the right; size-1 stretches for free; unequal breaks. Everything else is an application of this.
+That's the whole mental model: **shapes are tuples; align them from the right; size-1 stretches for free; unequal breaks.** Everything below is an application.
 
 </Intuition>
 
-<Recall term="Shape">
+## Broadcasting in practice
 
-A **shape** in NumPy is a tuple of positive integers describing the size along each axis. `(5,)` is a 1-D vector of length 5. `(3, 4)` is a 3-row 4-column matrix. `(64, 3, 224, 224)` is a batch of 64 RGB images at 224×224. The *length* of the shape is the array's rank (number of dimensions). Whenever two ndarrays interact, NumPy tries to reconcile their shapes via the broadcasting rules.
+<RunnableCode title="scalar + array; row + matrix; column + matrix; outer sums" code={broadcastBasicsCode} />
 
-</Recall>
+Four one-liners cover most real usage — each a direct application of right-align-and-stretch:
 
-<Recall term="View">
+- **Bias to every row**: `X + b` with `X:(N, D)`, `b:(D,)`.
+- **Scale every row by its own factor**: `X * s[:, None]` with `s:(N,)` promoted to `(N, 1)`.
+- **Outer product**: `a[:, None] * b[None, :]` → `(m, n)`.
+- **Pairwise differences**: `X[:, None, :] - Y[None, :, :]` → `(N, M, D)` — every X-row minus every Y-row, the primitive behind all distance matrices.
 
-A **view** is an ndarray that shares its data buffer with another ndarray. Modifying an element in one modifies the same element in the other. Views are created by *basic* slicing (`arr[1:5, ::2]`), reshape, transpose, and swapaxes — anything that can be expressed by manipulating shape and strides without moving bytes.
+**The pitfall:** broadcasting can silently succeed on the *wrong* axes when dimensions accidentally match. The reflex that prevents it: before writing the operator, right-align the two shapes in your head and check the three rules. Two seconds of shape-checking saves twenty minutes of debugging.
 
-</Recall>
+## The indexing vocabulary
 
-<Recall term="Copy">
+<RunnableCode title="rows, columns, sub-rectangles, index lists, and masks" code={slicingCode} />
 
-A **copy** is an ndarray with its own independent buffer. Modifying it does not affect any other array. Copies are created explicitly by `.copy()`, and implicitly by *fancy* indexing (integer lists, boolean masks), by `.astype(...)` when the dtype changes, and by reshape when the memory layout can't accommodate the request as a view.
+Three levels, each with a job:
 
-</Recall>
+- **Basic slicing** — colons and integers, per axis: `arr[1:5, ::2]`, `arr[-1, -3:]`. Picks rectangular sub-regions. Returns a **view**.
+- **Fancy indexing** — a list/array of indices: `arr[[3, 0, 2]]` picks whole rows in that order; `arr[[0, 1], [0, 2]]` picks specific elements by (row, col) pairs. Returns a **copy**.
+- **Boolean masks** — `arr[arr > 10]` keeps elements where the condition holds; `X[X[:, 0] > 0]` filters rows. This is the vectorized `if`. Returns a **copy** — but *assigning* through a mask (`arr[arr < 0] = 0`) writes the original, in place.
 
-<Angles intro={<>Five lenses on shape math. Broadcasting as a rule, indexing as syntax, view-vs-copy as a rule, the pitfalls that catch every beginner, and einsum as the escape hatch for the shape-rich patterns in modern ML.</>}>
+And the promotion move you'll type daily: `arr[:, np.newaxis]` (synonym: `arr[:, None]`) adds a size-1 axis, turning `(N,)` into `(N, 1)` for column-wise broadcasting.
 
-  <Angle type="mental-model" title="Broadcasting: right-align, stretch size-1, fail on unequal">
-    <RunnableCode title="scalar + array; row + matrix; column + matrix; outer sums" code={broadcastBasicsCode} />
+**The pitfall:** `X[X[:, 0]]` (missing comparison) is fancy indexing *by the column's values as row numbers* — valid, silent, wrong. `X[X[:, 0] > 0]` is the filter you meant. The comparison operator is the entire difference.
 
-    Every use of broadcasting reduces to *one* rule set. Read the shapes right-to-left. At each position: match, stretch (if one is 1), or fail (if both are &gt;1 and different). If the shapes have different lengths, the shorter is padded with 1s on the LEFT until they match.
+## View vs copy — the memory-sharing rule
 
-    The consequence is that a huge fraction of matrix math becomes one-liners:
+<RunnableCode title="what shares memory, what doesn't" code={viewCopyCode} />
 
-    - **Add a bias to every row of a matrix**: `X + b` where `X.shape == (N, D)` and `b.shape == (D,)`.
-    - **Multiply every column of a matrix by a scale**: `X * s.reshape(-1, 1)` where `X.shape == (N, D)` and `s.shape == (N,)`.
-    - **Outer product of two vectors**: `a[:, None] * b[None, :]` — turn a `(m,)` into a column and a `(n,)` into a row; the multiplication broadcasts into an `(m, n)` matrix.
-    - **Pairwise distances**: `X[:, None, :] - Y[None, :, :]` produces `(N, M, D)` — every X-row minus every Y-row, componentwise. Square, sum along axis=-1, sqrt, and you have the `(N, M)` distance matrix.
+The classification is mechanical, not intuitive — memorize it:
 
-    These aren't tricks — they're all direct applications of "right-align and stretch." Once you see broadcasting as *shape arithmetic*, you stop reaching for loops entirely.
+- **Views** (share the buffer): basic slices, `reshape` (when strides permit), `.T`, `swapaxes`.
+- **Copies** (independent buffer): fancy indexing, boolean masks, `.astype()` to a new dtype, `np.concatenate`, explicit `.copy()`.
 
-    The reflex to build: whenever two arrays are about to interact and their shapes aren't identical, mentally right-align them and check the rules *before* writing the operator. Ninety-nine percent of "why did I get a shape error" moments trace back to this five-second check.
+The reason is architectural: a basic slice can always be expressed as *same buffer, new shape/strides/offset* — no bytes move. Fancy indexing can't (the result may repeat elements or reorder them arbitrarily), so NumPy must allocate.
 
-  </Angle>
+Two consequences to internalize: **(1)** a slice returned from a function is a live handle into the caller's data — mutate it and you've mutated theirs; `.copy()` at boundaries you don't own. **(2)** Reading `x = arr[mask]` gives a copy, but *assigning* `arr[mask] = 0` writes in place — the LHS/RHS asymmetry is deliberate and useful. When unsure, `np.shares_memory(a, b)` settles it definitively.
 
-  <Angle type="code" title="Slicing, fancy indexing, boolean masks — the whole indexing vocabulary">
-    <RunnableCode title="rows, columns, sub-rectangles, index lists, and masks" code={slicingCode} />
+## The (N,) vs (N, 1) bug
 
-    NumPy indexing is bigger than Python list indexing on purpose: it's designed to express, in a few characters, operations that would take pages of loops. The vocabulary has three levels:
+<RunnableCode title="the classic normalization bug, and the newaxis fix" code={brdcastBugCode} />
 
-    - **Basic slicing** — colons, integers, and `Ellipsis`. `arr[1:5, ::2]`, `arr[-1, ...]`. Always returns a **view**. The syntax is the same as Python lists, but works independently on each axis.
-    - **Fancy indexing (integer)** — pass a *list* or *array* of indices. `arr[[3, 0, 2]]` picks rows 3, 0, 2 in that order. `arr[[0, 1, 2], [0, 2, 4]]` picks *three specific elements* by (row, col) pairs — the two index arrays combine element-wise. Always returns a **copy**.
-    - **Boolean masks** — an array of `True/False` the same shape as the target axis. `arr[arr &gt; threshold]` returns the elements where the mask is `True`, flattened. This is the vectorized `if`. Always returns a **copy**.
+You compute per-row norms of a `(N, D)` matrix — `np.linalg.norm(X, axis=1)` gives shape `(N,)` — then write `X / norms`. Right-aligned, `(N,)` matches against `D`, not `N`: it errors, or worse, silently divides the wrong axis when `N == D`. The fix is always the same: `X / norms[:, np.newaxis]` promotes to `(N, 1)`, which broadcasts across columns — one divisor per row, as intended.
 
-    Two rules of thumb that save you every time:
+This single bug shape — a per-row statistic accidentally aligned per-column — accounts for a remarkable share of real ML feature-pipeline defects. When a 1-D array is "one value per row," promote it to a column *before* it meets the matrix.
 
-    1. **When picking a rectangular sub-region**, use basic slicing.
-    2. **When picking specific elements/rows by condition or by explicit index list**, use fancy indexing or a boolean mask.
+## The pattern you'll type forever: per-column statistics
 
-    Combine them freely: `X[X[:, 0] &gt; 0]` filters rows of `X` by "the first column is positive" — one line that would be a nested loop in Python. `X[np.argsort(X[:, 0])]` sorts rows by the first column. `X[np.argsort(-X[:, 2])][:10]` picks the top 10 rows by the third column (descending). Each of these one-liners is what makes NumPy read like a domain-specific language.
+<RunnableCode title="one-line z-scoring, powered by broadcasting" code={zscoreCode} />
 
-    A minor but useful sub-trick: `arr[:, np.newaxis]` (or `arr[:, None]`) *adds* a size-1 axis at that position, promoting `(N,)` to `(N, 1)`. This is the standard move for turning a 1-D array into a column vector to make broadcasting align correctly.
+`X.mean(axis=0)` and `X.std(axis=0)` are `(3,)` vectors; subtraction and division broadcast them across all 1000 rows. This exact line is what `sklearn.preprocessing.StandardScaler` runs internally. The two moves it demonstrates — per-**column** stat broadcast with shape `(D,)`, per-**row** stat broadcast with shape `(N, 1)` — are the entire toolkit for normalizing tabular data and embeddings.
 
-  </Angle>
+## einsum — the shape language for rich patterns
 
-  <Angle type="anatomy" title="View vs. copy — the memory-sharing rule">
-    <RunnableCode title="what shares memory, what doesn't" code={viewCopyCode} />
+<RunnableCode title="dot, outer, matmul, batched matmul, attention scores" code={einsumCode} />
 
-    Every NumPy operation either produces a **view** (shares the source buffer) or a **copy** (independent buffer). Confusing the two is the single most common source of "why did that other array change" bugs.
+`np.einsum` is a tiny grammar: give each input axis a letter; **repeated letters are summed over** (contracted); **letters after `->` survive**. Worth memorizing:
 
-    The classification is *mechanical*, not intuitive:
+- `"i,i->"` dot product · `"i,j->ij"` outer product · `"ij,jk->ik"` matmul (`A @ B`)
+- `"bij,bjk->bik"` batched matmul (the `b` axis passes through untouched)
+- `"qd,kd->qk"` attention scores — every query dotted with every key
 
-    - **Views**: basic slicing (`arr[1:5]`, `arr[:, 2]`, `arr[..., ::-1]`), reshape (when strides accommodate), transpose (`arr.T`), swapaxes, `.view()`.
-    - **Copies**: fancy indexing (list-of-indices), boolean masks, `.astype()` with a *different* dtype, most `np.concatenate`/`np.stack` outputs, explicit `.copy()`, and reshape when the layout can't accommodate it.
-
-    The reason for this classification is *architectural*, not arbitrary. Basic slicing can always be expressed by a change of shape + strides + starting offset — no bytes need to move. Fancy indexing can't: the result may contain the same element twice, or elements in an order not expressible by contiguous strides, so NumPy has to allocate a new buffer and copy the chosen elements into it.
-
-    Two consequences you *must* internalize:
-
-    1. **A slice returned from a function is a live handle to the caller's data.** If you slice into a caller's array, mutate it, and return, you may have silently modified the caller. Defensive code either `.copy()`s at the boundary or documents "returns a view."
-
-    2. **A fancy-indexed assignment writes to the original**, even though *reading* fancy-indexed values returns a copy. `arr[[0, 2, 4]] = 0` sets rows 0, 2, 4 of `arr` to zero. `arr[arr &lt; 0] = 0` clips negatives *in place*. These are among the most useful patterns in the language — but reading `x = arr[arr &lt; 0]` gives you a *copy*.
-
-    When in doubt, `np.shares_memory(a, b)` answers the question definitively. Cheap, boolean, no ambiguity.
-
-  </Angle>
-
-  <Angle type="pitfall" title="The three-classic-bugs of shape math">
-    <RunnableCode title="the (5,) vs (5, 1) confusion — the bug that keeps giving" code={brdcastBugCode} />
-
-    Three shapes-of-bug that catch every ML engineer more than once:
-
-    1. **The `(N,)` vs `(N, 1)` confusion.** You want to normalize each row of a `(N, D)` matrix by a per-row norm. Compute `norms = np.linalg.norm(X, axis=1)` — that gives shape `(N,)`. Then `X / norms` right-aligns to `(N, D)` vs `(N,)` → `(N, D)` vs `(1, N)`? No — after prepending, `(N,)` becomes `(1, N)` and only matches when `D == N`. Almost always this is silently wrong or crashes. The fix: `X / norms[:, np.newaxis]` — reshapes to `(N, 1)`, broadcasts across columns correctly.
-
-    2. **View-and-mutate.** A colleague hands you a function that returns `frames[10:20]` from a video buffer. You "just" set `frame[0] = 0` to zero out one frame. You've now silently zeroed the caller's frame 10. Rule: if you don't own the caller's data, don't mutate a view without documenting it. If you got a slice and *plan* to mutate, `.copy()` it first.
-
-    3. **Mask alignment.** You have `X.shape == (N, D)` and want to keep rows where the first column is positive. You write `X[X[:, 0]]` — subtly wrong. That's fancy indexing with the first *column* as row-indices, meaning "pick rows numbered by the first-column values." The correct expression is `X[X[:, 0] &gt; 0]` — construct a boolean mask, then index. The presence or absence of the comparison operator is the entire difference.
-
-    A gentler fourth pitfall: **`SettingWithCopyWarning` isn't NumPy — that's pandas**. But it *comes from* NumPy's view-vs-copy semantics leaking into pandas. When you understand this chapter, `SettingWithCopyWarning` stops being mysterious — pandas is telling you: "the thing you tried to set might have been a copy, not a view of the original. I refuse to guess."
-
-    All four pitfalls are avoided by the same discipline: **look at the shapes and the memory-sharing before you look at the operator**. Two seconds of shape-checking saves twenty minutes of debugging.
-
-  </Angle>
-
-  <Angle type="performance" title="einsum — the shape language for anything BLAS can't do">
-    <RunnableCode title="dot, outer, matmul, trace, batched matmul, attention scores" code={einsumCode} />
-
-    `np.einsum` is Einstein-summation notation as a NumPy function. It's a *tiny grammar* for describing operations on tensors of any rank:
-
-    - You give each input axis a letter.
-    - **Letters repeated across inputs** name the axes that will be *summed over* (contracted).
-    - **Letters appearing in the output** are the axes that survive.
-    - The `->` separates inputs from output.
-
-    Read it as "for every combination of *output letters*, sum over the *repeated letters* the product of the corresponding entries." Once your eyes learn the grammar, `einsum` expressions become the most compact readable description of a tensor operation.
-
-    Examples that are worth memorizing:
-
-    - `"i,i->"` — dot product. Two vectors, contract on `i`, no surviving axis.
-    - `"i,j->ij"` — outer product. Vector `(m,)` and vector `(n,)`, produce matrix `(m, n)`.
-    - `"ij,jk->ik"` — matrix multiplication. This is exactly what `A @ B` does.
-    - `"bij,bjk->bik"` — batched matrix multiplication. The `b` axis is untouched (a batch axis); the `(i,j)`/`(j,k)` axes contract.
-    - `"qd,kd->qk"` — attention scores. Every query vector dotted with every key vector.
-    - `"ii->"` — the trace: sum of diagonal.
-
-    Why bother when `@` and `.dot()` exist? Because attention, cross-attention, batched linear projections, tensor contractions in physics, and any-rank ML shapes are *far* clearer in einsum than in matmul-plus-transpose gymnastics. Read a modern transformer's forward pass and you'll see `einsum` (or its evil twin `einops.rearrange`) everywhere.
-
-    Two caveats: (1) `einsum` isn't always the fastest — for pure `A @ B` matmul, `@` dispatches to BLAS which is a heavily-tuned Fortran library and can beat `einsum` on very large matrices. (2) The `optimize=True` flag can drastically speed up multi-argument contractions by choosing a good contraction order; use it when you have three or more inputs.
-
-  </Angle>
-
-</Angles>
-
-<Convergence>
-
-All five lenses collapse into one takeaway. **Broadcasting is a mechanical shape-reconciliation rule** (right-align, stretch size-1). **Indexing is a small grammar** (basic slice → view; fancy or bool → copy). **Views share memory; copies don't** — always know which one you have. **einsum** is the shape-language escape hatch when the pattern gets rich.
-
-Every non-trivial NumPy expression you'll write is a composition of these four. Learn them here, and pandas, PyTorch, JAX, and every ML library become extensions of the same vocabulary.
-
-</Convergence>
-
-<Derivation title="How broadcasting matches (1000, 3) and (3,) — step by step">
-
-<Step n={1} math={<code>X.shape = (1000, 3),  b.shape = (3,)</code>}>
-  Two arrays, unequal ranks. Broadcasting starts by *right-aligning* the shapes. When ranks differ, imagine the shorter shape padded on the LEFT with `1`s until both have the same length.
-</Step>
-
-<Step n={2} math={<code>{"(1000, 3) vs (   1, 3)  ← b padded to rank 2"}</code>}>
-  `b`'s shape becomes conceptually `(1, 3)`. Now both shapes have rank 2 and we compare them position by position, right-to-left.
-</Step>
-
-<Step n={3} math={<code>{"axis -1: 3 == 3  ✓   axis 0: 1000 vs 1 (size-1 stretches)  ✓"}</code>}>
-  The last axis matches (3 == 3). The first axis has 1000 on one side and 1 on the other — the size-1 stretches to 1000. Result shape: `(1000, 3)`.
-</Step>
-
-<Step n={4} math={<span>{"C loop iterates i in [0, 1000), j in [0, 3):  out[i, j] = X[i, j] - b[j]"}</span>}>
-  Under the hood, the C loop treats the operation as if `b` were a `(1000, 3)` array where every row equals `b`. But **no allocation happens** — the loop just re-reads `b[j]` for every row `i`. Broadcasting is a lie the C code tells itself, and the lie is free.
-</Step>
-
-<Step n={5} math={<span>{"result shape = broadcast(X.shape, b.shape)"}</span>}>
-  The resulting shape is the element-wise MAX of the aligned shapes. `broadcast((1000, 3), (3,))` = `(1000, 3)`. This is the mental shortcut: the output shape is the "envelope" of the inputs.
-</Step>
-
-</Derivation>
-
-<Example title="Z-score every column of a 1000×3 sensor matrix — one line">
-
-<RunnableCode title="one-line normalization, powered by broadcasting" code={zscoreCode} />
-
-Read the pattern once and it becomes autonomic. `X.mean(axis=0)` produces a `(3,)` vector of column means. `X.std(axis=0)` produces a `(3,)` vector of column stds. Subtracting broadcasts across all 1000 rows; dividing does the same. One line replaces what would be twenty in a pure-Python loop, and the result is exactly what `sklearn.preprocessing.StandardScaler` does under the hood.
-
-Notice something else: the *shape* of this pattern is universal. Any per-column statistic can be applied to every row via `X - stat[np.newaxis, :]` if `stat` starts as `(D,)`. Any per-row statistic can be applied to every column via `X - stat[:, np.newaxis]` if `stat` starts as `(N,)`. These two moves — column-wise broadcast and row-wise broadcast — are the entire toolkit for feature engineering on tabular data.
-
-</Example>
-
-<Nuance>
-
-The pitfalls that separate "works" from "silently wrong":
-
-- **Broadcasting can silently succeed on the wrong axes.** `(5, 3)` and `(3,)` broadcast as "add 3-vector to every row." If you *meant* "one number per row" (i.e. a `(5,)` vector applied across columns), broadcasting will silently do the *wrong* thing when 3 == 3 by accident, or fail loudly when the dimensions don't match. **Reflex**: sketch the shapes on paper before you write the operator.
-
-- **Fancy indexing on the LHS assigns to the original**, but reading with fancy indexing returns a copy. `arr[[0, 2, 4]] = 0` mutates. `x = arr[[0, 2, 4]]; x[0] = 99` does *not* affect `arr`. This asymmetry is Python's convention for "in-place" vs "expression" contexts.
-
-- **Boolean indexing lengths don't broadcast — they must match exactly.** `X[mask]` requires `mask.shape[0] == X.shape[0]` (or the full shape for multi-D masks). A shorter mask errors; a longer one errors; a same-length mask works. Broadcasting doesn't extend to bool-indexing lengths.
-
-- **`arr.reshape(-1, 1)` and `arr[:, np.newaxis]` are equivalent.** Both promote a `(N,)` array to `(N, 1)`. The `None` (a synonym for `np.newaxis`) form is idiomatic in ML code — `arr[:, None, :]` is the standard move for adding a "pairwise" axis in distance computations.
-
-- **`np.newaxis` costs zero memory.** It just adds a size-1 axis, and size-1 axes are the currency of broadcasting. Reach for it liberally.
-
-- **Reshape can copy silently.** If the underlying strides can't accommodate the requested reshape (usually after some non-contiguous slicing), NumPy falls back to allocating a copy and rearranging bytes. If performance matters and you *know* the array is contiguous, `np.ascontiguousarray(arr)` guarantees a contiguous buffer, and then reshape is O(1).
-
-- **`.T` on a rank-3+ array reverses ALL axes.** `X` with shape `(2, 3, 4)` has `X.T.shape == (4, 3, 2)`. If you wanted to swap just two, use `X.transpose(0, 2, 1)` or `np.swapaxes(X, 1, 2)`.
-
-Two gnarly ones for later:
-
-- **In-place fancy-index assignment doesn't dedupe.** `arr[[0, 0]] += 1` adds only *once* to `arr[0]` — the last write wins because NumPy doesn't guarantee ordering with repeated indices. For "add with repeats", use `np.add.at(arr, [0, 0], 1)` — the "at" variant does the deduped scatter.
-
-- **Advanced indexing with mixed slice + list can be tricky.** `arr[:, [0, 2, 4]]` picks 3 columns from every row — this "combines" a slice with a fancy index. The behavior is well-defined but subtle when both fancy dimensions appear; when in doubt, split into two indexing steps or use `np.ix_` for the intended outer-product indexing.
-
-</Nuance>
+Use `@` for plain matmul (it dispatches to BLAS, the fastest path). Reach for einsum when the pattern involves batch axes or unusual contractions — modern transformer code is full of it because it beats matmul-plus-transpose gymnastics for readability.
 
 <RealWorldML title="A tiny attention block — eight lines that power every LLM">
 
 <RunnableCode title="Q · Kᵀ, softmax along keys, weighted sum of V" code={attentionCode} />
 
-Every transformer — GPT-4, Claude, Llama, Gemini — computes attention with exactly this shape math, just at industrial scale (thousands of queries, thousands of keys, dozens of heads, batches of tens or hundreds). The eight lines in the cell contain the *entire mathematical heart* of the attention mechanism. Read them.
+Every transformer — GPT, Claude, Llama — computes attention with exactly this shape math, just at industrial scale. Line by line:
 
-**Line-by-line walkthrough**:
+- `Q:(3, d)`, `K:(5, d)`, `V:(5, d)` — 3 queries (things asking), 5 keys (things asked about), 5 values (each key's payload). In a language model all three are learned linear projections of the same input embeddings.
+- `scores = np.einsum("qd,kd->qk", Q, K) / np.sqrt(d)` — every query dotted with every key; the `d` axis contracts, leaving `(3, 5)` similarity scores. The `√d` division keeps magnitudes stable (from the original transformer paper).
+- `weights = softmax(scores, axis=-1)` — normalize each row into a probability distribution over keys. Note the stability trick inside `softmax`: subtracting the row max before `exp` prevents overflow, and `keepdims=True` keeps the reduced axis as size-1 so the result broadcasts straight back — two of this chapter's ideas in two lines.
+- `out = weights @ V` — `(3, 5) @ (5, 8) → (3, 8)`: each query's output is a weighted average of the value vectors, weighted by its attention distribution.
 
-- `d = 8; Q = ...(3, d); K = ...(5, d); V = ...(5, d)` — three tensors. `Q` is 3 "queries" (things asking a question); `K` is 5 "keys" (things being asked about); `V` is 5 "values" (the payload for each key). In a language model, these come from projecting the same input embeddings through three different learned linear layers.
-
-- `scores = np.einsum("qd,kd->qk", Q, K) / np.sqrt(d)` — for every (query, key) pair, dot their vectors together. The `d` axis is contracted (summed over); `q` and `k` survive. Divide by `√d` for numerical stability (a norm-preserving trick from the original transformer paper). Output shape: `(3, 5)` — one similarity score per (query, key) pair.
-
-- `weights = softmax(scores, axis=-1)` — normalize each row of `scores` so it sums to 1. Every query now has a probability distribution over keys. The `axis=-1` argument says "softmax along the last axis," which for a `(3, 5)` array means "softmax each row independently."
-
-- `out = weights @ V` — for each query, take its 5-element probability vector and use it as weights to average the 5 value vectors. `(3, 5) @ (5, 8) → (3, 8)`. Each of the 3 output rows is a *weighted combination* of the 5 value vectors, where the weights come from that query's attention distribution.
-
-That's it. The rest of "attention" as an engineering problem — multi-head (do the whole thing in parallel `h` times with different learned projections), rotary embeddings (add positional info to Q and K before dotting), KV-cache (memoize `K` and `V` across autoregressive decoding steps), Flash-Attention (compute the same result with far less memory) — is *all* engineering on top of these eight lines. Understand this cell and the rest becomes a series of *how do we compute the same thing faster/cheaper* questions, not fundamental new math.
+Multi-head attention, rotary embeddings, KV-caches, FlashAttention — all engineering on top of these eight lines. Understand this cell and the rest of the transformer stack becomes "how do we compute the same thing faster," not new math.
 
 </RealWorldML>
 
+<StudyDepth
+  intro={<>Broadcasting is the mental model that turns matrix math into one-liners; view-vs-copy is the source of half the NumPy bugs you&apos;ll ever debug. Drill the shape rules and the view rule; skim einsum until you touch attention or contractions.</>}
+  drill={[
+    <>The three broadcasting rules: right-align, size-1 stretches, unequal &gt;1 fails</>,
+    <>Basic slicing is a <strong>view</strong>; fancy (list/bool) indexing is a <strong>copy</strong></>,
+    <><code>arr[:, np.newaxis]</code> to promote (N,) → (N, 1) for column broadcasting</>,
+    <>Boolean masks: <code>arr[arr &gt; t]</code> to filter, <code>arr[mask] = 0</code> to assign in place</>,
+    <><code>np.shares_memory(a, b)</code> when you&apos;re not sure what an operation returned</>,
+  ]}
+  skim={[
+    <>Full <code>einsum</code> grammar (ellipsis, arbitrary-rank contractions) — reach for it when Q·Kᵀ shows up</>,
+    <>Stride tricks (<code>as_strided</code>) — powerful, footgun-heavy, rarely needed</>,
+    <>When reshape falls back to copy — <code>np.ascontiguousarray</code> when you must</>,
+    <><code>np.add.at</code> and scatter-with-repeats semantics until you hit the bug</>,
+  ]}
+/>
+
 <CodeItYourself title="Three broadcasting drills">
 
-**Drill 1 — Pairwise Euclidean distances.** Given `X.shape == (N, D)` and `Y.shape == (M, D)`, produce a `(N, M)` matrix where entry `(i, j)` is the Euclidean distance between `X[i]` and `Y[j]`. Do it *without* a Python loop. Hint: `X[:, None, :] - Y[None, :, :]` produces `(N, M, D)`; square, sum over the last axis, sqrt.
+**Drill 1 — Pairwise Euclidean distances.** Given `X:(N, D)` and `Y:(M, D)`, produce the `(N, M)` distance matrix without a loop. Hint: `X[:, None, :] - Y[None, :, :]` is `(N, M, D)`; square, sum along the last axis, sqrt.
 
-**Drill 2 — Row-wise softmax.** Given a `(N, K)` matrix of "logits," return a `(N, K)` matrix where each row is a softmax-normalized probability distribution. Watch out for numerical stability — subtract the row max before exponentiating.
+**Drill 2 — Row-wise softmax.** Given `(N, K)` logits, return `(N, K)` probabilities where each row sums to 1. Subtract the row max first (with `keepdims=True`) for numerical stability.
 
-**Drill 3 — Top-k per row.** Given a `(N, K)` matrix of scores, return the *indices* of the top-k largest scores per row. `np.argsort` returns ascending; think about the axis and the slicing. (Bonus: `np.argpartition` does this in linear time when you only need the *unordered* top-k.)
-
-For each drill, verify with a small hand-checked example before scaling up.
+**Drill 3 — Top-k per row.** Given `(N, K)` scores, return the indices of the top-k per row. `np.argsort` sorts ascending — think about the axis and the slice. Verify each drill on a small hand-checked example first.
 
 </CodeItYourself>
 
-<LifeLesson title="Right-align, then reconcile">
-
-Broadcasting has a shape outside math. When two people (or two teams, or two ideas) try to interact and their shapes don't match, the productive move is often the NumPy move: **right-align first, look for the size-1 axes, and stretch those to accommodate**.
-
-A junior engineer says "we should refactor this whole module." A senior says "we should ship the feature." Right-aligned, both want good software. The size-1 axis on the junior's side is *scope* — narrow that to just the module that most needs it, and both proposals agree. The size-1 axis on the senior's side is *time horizon* — stretch that to include next quarter, and refactoring pays off.
-
-A product manager says "customers want speed." An engineer says "the code base is fragile." Right-aligned, both want a healthy business. Size-1 on the PM's side: what specific speed. Size-1 on the engineer's side: what specific fragility. Aligned, the conversation stops being adversarial and becomes: *for this specific slowness, does the specific fragility get in the way?*
-
-The general move: don't stretch the axes where both sides have real constraints (broadcasting fails on unequal-and-both-&gt;1). Stretch the axes where one side just has "1" — an unspecified assumption you can meet the other side on. Most disagreements have a size-1 axis somewhere; the alignment is where the productive conversation starts.
-
-</LifeLesson>
-
-<MLConnection>
-
-Broadcasting and view/copy semantics propagate through *every* library that inherited the ndarray:
-
-- **PyTorch** — same broadcasting rules, same view/copy semantics. `tensor.view(...)` is like NumPy `.reshape()` but with stricter contiguity requirements; `tensor.reshape(...)` matches NumPy. Every attention implementation in every transformer uses the exact `einsum` patterns above.
-
-- **JAX** — same rules, but *pure functional* (arrays are immutable). `x.at[idx].set(val)` is JAX's way of doing "fancy-index assignment" without mutation. Broadcasting works identically.
-
-- **pandas** — DataFrames broadcast along their labeled axes. `df - df.mean()` is column-wise subtraction (broadcast across rows). The confused `SettingWithCopyWarning` is pandas telling you it can't be sure whether your `df[cond]` was a view or a copy.
-
-- **scikit-learn** — every transformer (`StandardScaler`, `MinMaxScaler`, `PolynomialFeatures`) internally uses this vocabulary. Reading their source is a great way to internalize broadcasting patterns — they're rarely longer than 30 lines.
-
-- **einops** — a small library that generalizes `einsum` and adds a domain-specific mini-language for tensor rearrangement (`rearrange(x, "b n h d -> b h n d")`). Modern transformer code (LLM, ViT, diffusion) is more einops than raw NumPy at this point. But einops is *inconceivable* without first understanding NumPy broadcasting.
-
-Nothing you learn in this chapter is throw-away. Every micro-decision — where to reshape, when to `.copy()`, how to align a bias — will show up daily for the next several years of GenAI work.
-
-</MLConnection>
-
 <Summary>
 
-- **Broadcasting**: right-align shapes; size-1 dims stretch; unequal &gt;1 fails. Output shape is the element-wise max.
-- **Basic slicing** (`arr[a:b, c:d]`) returns a **view** — shares memory with the source.
-- **Fancy indexing** (list of indices, boolean masks) returns a **copy**.
-- **`arr[:, np.newaxis]`** (or `[:, None]`) is the standard promote-to-column-vector move for broadcasting.
-- **Boolean-mask assignment** (`arr[arr &lt; 0] = 0`) is the vectorized `if`.
-- **`np.shares_memory(a, b)`** is the definitive "am I looking at a view?" check.
-- **`einsum`** is the shape-language escape hatch for attention, batched matmul, and any-rank contractions.
-- The whole vocabulary carries 1:1 into PyTorch, JAX, and pandas.
+- **Broadcasting**: right-align shapes; size-1 stretches free; unequal &gt;1 fails. Output shape = element-wise max. No memory is copied.
+- **Basic slicing → view** (shares memory); **fancy/boolean indexing → copy**. Reading a mask copies; assigning through a mask writes in place.
+- **`arr[:, np.newaxis]`** promotes `(N,)` to `(N, 1)` — the fix for the per-row-statistic bug.
+- **`np.shares_memory(a, b)`** answers view-or-copy definitively.
+- **einsum**: repeated letters contract, surviving letters shape the output — the readable form of attention and batched matmul.
+- The whole vocabulary carries 1:1 into PyTorch, JAX, and pandas (where view-vs-copy resurfaces as `SettingWithCopyWarning`).
 
 </Summary>
 
@@ -629,49 +396,31 @@ Nothing you learn in this chapter is throw-away. Every micro-decision — where 
       difficulty: "easy",
       q: <>Does <code>a[1:3, ::2]</code> return a view or a copy?</>,
       hint: <>Basic slicing (only colons and integers) or fancy?</>,
-      answer: <>A <strong>view</strong>. Basic slicing (colons and integers) always returns a view — the result shares the source's buffer, just with different shape/strides/offset.</>
-    },
-    {
-      difficulty: "easy",
-      q: <>What does <code>arr[arr &lt; 0] = 0</code> do?</>,
-      hint: <>Boolean mask on the left-hand side of an assignment.</>,
-      answer: <>Clips all negative entries of <code>arr</code> to zero, <strong>in place</strong>. Boolean-mask assignment mutates the original — even though reading with a bool mask returns a copy. This asymmetry is a Python convention: LHS assignments are &quot;in-place,&quot; RHS reads produce independent values.</>
+      answer: <>A <strong>view</strong>. Basic slicing (colons and integers) always returns a view — the result shares the source&apos;s buffer, just with different shape/strides/offset. Mutating it mutates the original.</>
     },
     {
       difficulty: "medium",
       q: <>You have <code>X.shape == (1000, 3)</code> and <code>norms = np.linalg.norm(X, axis=1)</code> (shape <code>(1000,)</code>). What&apos;s the correct way to divide each row by its norm?</>,
       hint: <><code>(1000,)</code> right-aligns badly against <code>(1000, 3)</code>. Promote to <code>(1000, 1)</code>.</>,
-      answer: <><code>X / norms[:, np.newaxis]</code> (or equivalently <code>X / norms[:, None]</code>, or <code>X / norms.reshape(-1, 1)</code>). This promotes <code>norms</code> to <code>(1000, 1)</code>, which broadcasts across the 3 columns — dividing every column of a row by that row&apos;s norm. Writing <code>X / norms</code> directly would try to right-align <code>(1000,)</code> against <code>(1000, 3)</code>, which fails (or silently uses the wrong axis if dimensions accidentally match).</>
+      answer: <><code>X / norms[:, np.newaxis]</code> (equivalently <code>norms[:, None]</code> or <code>norms.reshape(-1, 1)</code>). This promotes <code>norms</code> to <code>(1000, 1)</code>, which broadcasts across the 3 columns — one divisor per row. Writing <code>X / norms</code> directly right-aligns <code>(1000,)</code> against the columns axis and fails (or silently divides the wrong axis if the dimensions accidentally match).</>
     },
     {
       difficulty: "medium",
       q: <>What&apos;s the shape of <code>np.einsum(&quot;ij,jk-&gt;ik&quot;, A, B)</code> where <code>A.shape == (5, 3)</code> and <code>B.shape == (3, 7)</code>?</>,
       hint: <>Contracted letter is summed away; surviving letters form the output shape.</>,
-      answer: <><code>(5, 7)</code>. This is exactly matrix multiplication. <code>j</code> is repeated and thus contracted (the middle dimension of 3 disappears). <code>i</code> and <code>k</code> survive as the output axes.</>
-    },
-    {
-      difficulty: "medium",
-      q: <>Explain why <code>a = np.arange(6).reshape(2, 3); b = a[:, ::-1]; b[0, 0] = -1; print(a)</code> also changes <code>a</code>.</>,
-      hint: <>Basic slicing — even reversed — returns a view.</>,
-      answer: <>Reversal via <code>[:, ::-1]</code> is basic slicing, which returns a view. The view has negative strides on the last axis but points into the same buffer as <code>a</code>. Writing <code>b[0, 0] = -1</code> writes to the memory location that <code>a[0, -1]</code> reads (because the view is reversed). So <code>a[0, -1]</code> becomes <code>-1</code>. The takeaway: even &quot;funny&quot; basic slices share memory — the memory-sharing rule doesn&apos;t care about stride direction.</>
+      answer: <><code>(5, 7)</code>. This is exactly matrix multiplication: <code>j</code> is repeated across inputs and thus contracted (the 3 disappears); <code>i</code> and <code>k</code> survive as the output axes.</>
     },
     {
       difficulty: "hard",
-      q: <>Given <code>X.shape == (N, D)</code> and <code>Y.shape == (M, D)</code>, write a one-line NumPy expression for the <code>(N, M)</code> matrix of squared Euclidean distances between every row of <code>X</code> and every row of <code>Y</code>.</>,
-      hint: <>Add size-1 axes to make <code>X</code> and <code>Y</code> broadcast into a <code>(N, M, D)</code> tensor, then square and sum along the last axis.</>,
-      answer: <><code>((X[:, None, :] - Y[None, :, :]) ** 2).sum(axis=-1)</code>. The <code>[:, None, :]</code> promotes <code>X</code> to <code>(N, 1, D)</code>; <code>[None, :, :]</code> promotes <code>Y</code> to <code>(1, M, D)</code>. Subtraction broadcasts them to <code>(N, M, D)</code>. Square element-wise, sum over the last axis, and you get the <code>(N, M)</code> distance-squared matrix. Add a <code>np.sqrt(...)</code> outside for actual Euclidean distance. This one-liner is the entire &quot;pairwise distances&quot; primitive — under-the-hood, scikit-learn&apos;s <code>pairwise_distances</code>, faiss&apos; L2 index, and torch&apos;s <code>cdist</code> all compute this shape.</>
+      q: <>Given <code>X.shape == (N, D)</code> and <code>Y.shape == (M, D)</code>, write a one-line expression for the <code>(N, M)</code> matrix of squared Euclidean distances between every row of <code>X</code> and every row of <code>Y</code>.</>,
+      hint: <>Add size-1 axes so <code>X</code> and <code>Y</code> broadcast into <code>(N, M, D)</code>, then square and sum the last axis.</>,
+      answer: <><code>((X[:, None, :] - Y[None, :, :]) ** 2).sum(axis=-1)</code>. The <code>[:, None, :]</code> promotes <code>X</code> to <code>(N, 1, D)</code>; <code>[None, :, :]</code> promotes <code>Y</code> to <code>(1, M, D)</code>; subtraction broadcasts to <code>(N, M, D)</code>; square and sum the last axis. This one-liner is the pairwise-distance primitive inside sklearn&apos;s <code>pairwise_distances</code>, faiss&apos; L2 index, and torch&apos;s <code>cdist</code>.</>
     },
     {
       difficulty: "hard",
       q: <>Predict the output of <code>arr = np.zeros(5); arr[[0, 0, 0]] += 1; print(arr)</code>, and explain.</>,
-      hint: <>Fancy-index in-place addition with repeated indices doesn&apos;t dedupe.</>,
-      answer: <><code>[1. 0. 0. 0. 0.]</code>. You might expect <code>arr[0] = 3</code> after three additions, but that&apos;s not what NumPy does. <code>arr[[0, 0, 0]] += 1</code> is <code>arr[[0, 0, 0]] = arr[[0, 0, 0]] + 1</code>. The right side reads <code>arr[[0, 0, 0]] → [0, 0, 0]</code>, adds 1 → <code>[1, 1, 1]</code>, then writes back to indices <code>[0, 0, 0]</code>. The three writes to index 0 happen sequentially — each just sets <code>arr[0] = 1</code>. Only the last write matters. For a &quot;deduplicated scatter-add,&quot; use <code>np.add.at(arr, [0, 0, 0], 1)</code> — this hits <code>arr[0] = 3</code>.</>
-    },
-    {
-      difficulty: "hard",
-      q: <>Write an <code>einsum</code> expression that computes the *dot product of every row of A with every row of B*, given <code>A.shape == (N, D)</code> and <code>B.shape == (M, D)</code>. What shape does it produce?</>,
-      hint: <>The <code>d</code> axis contracts; <code>n</code> and <code>m</code> survive.</>,
-      answer: <><code>np.einsum(&quot;nd,md-&gt;nm&quot;, A, B)</code> produces an <code>(N, M)</code> matrix where entry <code>(i, j)</code> is <code>A[i] · B[j]</code>. This is the attention-score computation without the scaling, and equivalent to <code>A @ B.T</code>. The <code>einsum</code> form is what makes multi-head attention readable — add batch and head axes with more letters (<code>bhnd,bhmd-&gt;bhnm</code>) and you have industrial-strength attention scoring.</>
+      hint: <>Fancy-index in-place addition with repeated indices doesn&apos;t accumulate.</>,
+      answer: <><code>[1. 0. 0. 0. 0.]</code> — not 3. The statement expands to <code>arr[[0,0,0]] = arr[[0,0,0]] + 1</code>: the read returns <code>[0, 0, 0]</code> (a copy), adding 1 gives <code>[1, 1, 1]</code>, and the three writes to index 0 each just set <code>arr[0] = 1</code> — the last write wins. For an accumulating scatter-add, use <code>np.add.at(arr, [0, 0, 0], 1)</code>, which produces 3.</>
     },
   ]}
 />
@@ -703,9 +452,9 @@ Nothing you learn in this chapter is throw-away. Every micro-decision — where 
       { text: <><code>x.reshape(1, -1)</code></> },
       { text: <><code>x[:, np.newaxis]</code></>, correct: true },
       { text: <><code>x.T</code></> },
-      { text: <><code>np.expand_dims(x, 1)</code> only</> },
+      { text: <><code>np.expand_dims(x, 0)</code></> },
     ],
-    explanation: <><code>x[:, np.newaxis]</code> (or the synonym <code>x[:, None]</code>) adds a size-1 axis at position 1, turning <code>(N,)</code> into <code>(N, 1)</code>. <code>x.reshape(-1, 1)</code> also works. <code>x.T</code> on a 1-D array is a no-op. <code>np.expand_dims(x, 1)</code> works too — but the bracket-notation is more idiomatic in modern NumPy/PyTorch code.</>
+    explanation: <><code>x[:, np.newaxis]</code> (or <code>x[:, None]</code>) adds a size-1 axis at position 1: <code>(N,)</code> → <code>(N, 1)</code>. <code>x.reshape(-1, 1)</code> also works. <code>x.T</code> on a 1-D array is a no-op, and the other two options put the new axis in the wrong place.</>
   },
   {
     q: <>Which <code>einsum</code> spec computes a batched matrix multiplication?</>,
@@ -715,7 +464,7 @@ Nothing you learn in this chapter is throw-away. Every micro-decision — where 
       { text: <><code>&quot;bij,bji-&gt;b&quot;</code></> },
       { text: <><code>&quot;ii-&gt;i&quot;</code></> },
     ],
-    explanation: <>The <code>b</code> letter is a batch axis that appears identically in both inputs and the output — it&apos;s not contracted, just passes through. The <code>(i, j)</code> and <code>(j, k)</code> axes do a per-batch matmul. This is exactly <code>torch.bmm</code>&apos;s pattern.</>
+    explanation: <>The <code>b</code> axis appears identically in both inputs and the output — a batch axis that passes through. The <code>(i, j)</code>/<code>(j, k)</code> axes do a per-batch matmul. This is exactly <code>torch.bmm</code>&apos;s pattern.</>
   },
   {
     q: <>Which is TRUE about the memory-sharing behavior of NumPy operations?</>,
@@ -725,7 +474,7 @@ Nothing you learn in this chapter is throw-away. Every micro-decision — where 
       { text: <>Every operation returns a view unless you explicitly <code>.copy()</code></> },
       { text: <>Transpose returns a copy on ndim &gt; 2</> },
     ],
-    explanation: <>The classification is architectural. Basic slicing (colons and integers) can always be expressed by adjusting shape/strides/offset — no bytes need to move — so it returns a view. Fancy indexing (index lists, boolean masks) may produce results not expressible by strides, so it always copies.</>
+    explanation: <>Basic slicing can always be expressed by adjusting shape/strides/offset — no bytes move — so it returns a view. Fancy indexing may reorder or repeat elements, so it must copy.</>
   }
 ]} />
 
