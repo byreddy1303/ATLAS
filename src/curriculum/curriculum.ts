@@ -264,7 +264,7 @@ const tier0: Tier = {
             "Categorical encoding trade-offs (before sklearn)",
           ],
           priority: "mandatory",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "sklearn-shape-of-ml",

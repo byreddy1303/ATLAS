@@ -1,0 +1,436 @@
+---
+title: EDA & data cleaning workflows
+tier: 0
+phase: "0.2"
+---
+
+export const auditCode = `import pandas as pd
+import numpy as np
+
+# A support-desk export, exactly as messy as real intake data
+raw = pd.DataFrame({
+    "user_id": [101, 102, 103, 103, 104, 105, 106, 107],
+    "age":     [34, -999, 29, 29, 41, 250, 38, -999],
+    "plan":    ["Pro", "free", "Free", "Free", "pro ", "team", "Pro", "free"],
+    "spend":   [30.0, 0.0, 12.5, 12.5, np.nan, 99.0, 45.0, 0.0],
+    "signup":  ["2024-01-15", "2024-02-01", "2024-02-13", "2024-02-13",
+                "2024-03-08", "not_available", "2024-04-22", "2024-05-30"],
+})
+
+print(raw.shape)
+print()
+print(raw.dtypes)                    # signup is object: dates stored as strings
+print()
+print(raw.isna().sum())              # "official" missingness: 1 lonely NaN
+print()
+print("exact dup rows:", raw.duplicated().sum())
+print("dup user_ids:  ", raw["user_id"].duplicated().sum())
+print()
+print("age values: ", sorted(raw["age"].unique()))    # -999?! 250?!
+print("plan values:", sorted(raw["plan"].unique()))   # Pro / pro_ / Free / free...
+print()
+print(raw["age"].describe().round(1))
+# mean age is NEGATIVE: the -999 sentinels poisoned every statistic
+print()
+sign = pd.to_datetime(raw["signup"], errors="coerce")
+print("unparseable dates:", sign.isna().sum())  # coerce turns junk into honest NaT`;
+
+export const missingCode = `import pandas as pd
+import numpy as np
+
+df = pd.DataFrame({
+    "age":    [23.0, 41, 25, 55, np.nan, np.nan, 27, 46],
+    "plan":   ["free", "pro", "free", "pro", "team", "free", "free", "pro"],
+    "spend":  [0.0, 60.0, np.nan, 99.0, 12.5, 8.0, np.nan, 75.0],
+    "income": [np.nan, 82_000, np.nan, 120_000, np.nan, 55_000, np.nan, 98_000],
+})
+
+# 1 - how much is missing, per column?
+print(df.isna().mean().round(2))       # fraction missing, not just count
+print()
+
+# 2 - is missingness RELATED to other columns? (the MAR question, in code)
+print(df.groupby(df["income"].isna())["age"].mean().round(1))
+# users who skipped the income field are ~25; those who filled it are ~47.
+# Missing NOT at random -> dropping those rows would quietly age the dataset.
+print()
+
+# 3 - impute with the median, and RECORD that you did (indicator column)
+df["spend_missing"] = df["spend"].isna().astype(int)
+df["spend"] = df["spend"].fillna(df["spend"].median())
+
+# 4 - group-aware imputation: fill age with the median FOR THAT PLAN...
+df["age"] = df["age"].fillna(df.groupby("plan")["age"].transform("median"))
+# ...with a global fallback, because a whole group can be empty (team is)
+df["age"] = df["age"].fillna(df["age"].median())
+
+print(df.round(2))`;
+
+export const outlierCode = `import pandas as pd
+import numpy as np
+
+rng = np.random.default_rng(0)
+spend = pd.Series(rng.lognormal(mean=3.0, sigma=0.5, size=200).round(2))
+spend.iloc[7]  = 4200.0    # one whale: decimal slip? genuinely big account?
+spend.iloc[42] = -50.0     # impossible: negative spend
+
+# Rule 0 - DOMAIN rules first. Impossible values are ERRORS, not outliers.
+print("impossible (spend < 0):", (spend < 0).sum())
+spend = spend.mask(spend < 0)          # unknowable -> honest NaN
+
+# IQR fences - built from quartiles, which extremes can barely move
+q1, q3 = spend.quantile([0.25, 0.75])
+lo, hi = q1 - 1.5 * (q3 - q1), q3 + 1.5 * (q3 - q1)
+flagged = spend[(spend < lo) | (spend > hi)]
+print(f"IQR fences [{lo:.1f}, {hi:.1f}] flag {len(flagged)} points for review")
+print()
+
+# Why mean +/- 3*std betrays you: the whale corrupts the fence meant to catch it
+z_hi_with = spend.mean() + 3 * spend.std()
+no_whale = spend.drop(spend.index[7])
+z_hi_without = no_whale.mean() + 3 * no_whale.std()
+q1n, q3n = no_whale.quantile([0.25, 0.75])
+print(f"z fence, whale in the stats: {z_hi_with:7.1f}")
+print(f"z fence, whale excluded:     {z_hi_without:7.1f}   <- moved ~15x")
+print(f"IQR fence, with vs without:  {hi:7.1f} vs {q3n + 1.5*(q3n-q1n):.1f}")
+print()
+
+# Tame, don't delete: clip caps the leverage; log1p tames the whole tail
+clipped = spend.clip(upper=hi)
+print("skew raw / clipped / log1p:",
+      spend.skew().round(1), "/", clipped.skew().round(1), "/",
+      np.log1p(clipped).skew().round(1))`;
+
+export const textCode = `import pandas as pd
+
+df = pd.DataFrame({
+    "order_id": [1, 2, 2, 3, 4, 5, 6],
+    "city":     ["Austin", "austin", "austin", "AUSTIN ", "Dallas", "Huston", "houston"],
+    "plan":     ["Pro", "pro ", "pro ", "PRO", "free", "Team", "team"],
+    "amount":   [50, 20, 20, 30, 10, 99, 45],
+})
+
+# Exact duplicate ROWS vs duplicate KEYS are different questions
+print("exact dup rows:", df.duplicated().sum())     # row 2 repeats row 1
+print("dup order_ids: ", df["order_id"].duplicated().sum())
+df = df.drop_duplicates()      # exact copies: always safe to drop
+# duplicate keys whose other columns DISAGREE need investigation, not a drop
+print()
+
+# Normalize text BEFORE counting categories
+print("plans before:", df["plan"].nunique(), sorted(df["plan"].unique()))
+df["plan"] = df["plan"].str.strip().str.lower()
+df["city"] = df["city"].str.strip().str.lower()
+print("plans after: ", df["plan"].nunique(), sorted(df["plan"].unique()))
+print()
+
+# Consolidate known variants with an EXPLICIT mapping - auditable, greppable
+df["city"] = df["city"].replace({"huston": "houston"})
+print(df["city"].value_counts())`;
+
+export const encodeCode = `import pandas as pd
+import numpy as np
+
+df = pd.DataFrame({
+    "plan":   ["free", "pro", "team", "pro", "free"],
+    "size_t": ["S", "L", "M", "XL", "M"],       # T-shirt size: a TRUE order exists
+    "city":   ["austin", "dallas", "houston", "austin", "dallas"],
+})
+
+# 1 - ONE-HOT for nominal (unordered) categories: no fake arithmetic possible
+print(pd.get_dummies(df["plan"], prefix="plan"))
+print()
+
+# 2 - ORDINAL map for genuinely ordered categories: YOU write the order down
+size_order = {"S": 0, "M": 1, "L": 2, "XL": 3}
+df["size_num"] = df["size_t"].map(size_order)
+print(df[["size_t", "size_num"]])
+print()
+
+# 3 - THE TRAP: arbitrary integer codes on nominal data
+codes, labels = pd.factorize(df["city"])
+print("factorize:", codes, "->", list(labels))
+# austin=0, dallas=1, houston=2 quietly claims austin < dallas < houston,
+# and that "the average of austin and houston is dallas". A linear model
+# will happily use that nonsense arithmetic.
+
+# 4 - high cardinality: frequency encoding as the simple starter
+df["city_freq"] = df["city"].map(df["city"].value_counts())
+print()
+print(df[["city", "city_freq"]])`;
+
+export const realWorldCode = `import pandas as pd
+import numpy as np
+
+# The intake: churn data as it actually arrives
+raw = pd.DataFrame({
+    "user_id": [1, 2, 3, 4, 4, 5, 6, 7, 8],
+    "plan":    ["Pro", "free", "FREE", "pro ", "pro ", "Team", "free", "PRO", "free"],
+    "age":     [34, -999, 29, 41, 41, 250, 23, 38, -999],
+    "tickets": [0, 3, 1, 0, 0, 2, 5, 1, 2],
+    "spend":   [49.0, 0.0, np.nan, 89.0, 89.0, 199.0, 0.0, np.nan, 12.0],
+    "churned": [0, 1, 0, 0, 0, 0, 1, 0, 1],
+})
+
+# 1 - audit before touching anything
+print(raw.shape, "| dup rows:", raw.duplicated().sum(),
+      "| official NaNs:", int(raw.isna().sum().sum()))
+
+# 2 - exact duplicates out FIRST (user 4 was exported twice)
+df = raw.drop_duplicates().copy()
+
+# 3 - sentinels and impossibilities -> real NaN (BEFORE any statistics)
+df["age"] = df["age"].mask(df["age"] < 0)      # -999 meant "didn't answer"
+df["age"] = df["age"].mask(df["age"] > 120)    # 250 is a typo, not a person
+print("true missing after sentinel sweep:")
+print(df.isna().sum()[lambda s: s > 0])
+print()
+
+# 4 - normalize the category, then impute with a paper trail
+df["plan"] = df["plan"].str.strip().str.lower()
+for col in ["age", "spend"]:
+    df[col + "_missing"] = df[col].isna().astype(int)
+    df[col] = df[col].fillna(df[col].median())
+
+# 5 - encode and assemble the matrix; the label is never touched
+X = pd.get_dummies(df.drop(columns=["user_id", "churned"]), columns=["plan"])
+y = df["churned"]
+print(X.dtypes)
+print()
+X_mat = X.to_numpy(dtype="float64")
+print("X:", X_mat.shape, "| churn rate:", y.mean().round(2))`;
+
+<Prerequisites items={[
+  { href: "/learn/foundations/scientific-stack/pandas-dataframe-fundamentals", label: "Pandas · DataFrames & Series", blurb: "Masks, loc-writes, dtypes, and the first-look ritual — cleaning is those tools applied with judgment." },
+  { href: "/learn/foundations/scientific-stack/pandas-groupby-merges", label: "Pandas · GroupBy & merges", blurb: "Group-aware imputation is transform; dedup-before-merge is join discipline." },
+  { href: "/learn/foundations/scientific-stack/matplotlib-figures", label: "Matplotlib · figures", blurb: "A histogram is the fastest outlier detector you own — you'll eyeball distributions constantly here." },
+]} />
+
+<Motivation title="The model learns whatever the data says — including the lies">
+
+A model is a mirror of its training table. Feed it ages of −999 and it learns that some customers are a thousand years young; leave user 4 duplicated and that user votes twice in every statistic; let `"Pro"`, `"pro "` and `"PRO"` stay three separate plans and the model splits one signal across three columns. **No error will be raised at any point.** The model trains, the metrics print, the numbers are just quietly wrong — and you ship a system that confidently encodes the dirt.
+
+This is why practitioners repeat that cleaning is "60% of the job": not because it's hard, but because it's *always there* and skipping it poisons everything downstream. It matters double in GenAI work — fine-tuning sets, eval benchmarks, and RAG corpora are all tables, and duplicated rows there cause memorization, inflated eval scores (test questions leaked into training), and retrieval that returns the same document three times.
+
+The skills in this chapter are the difference between "I ran the model" and "I can defend every number that went in."
+
+</Motivation>
+
+<Intuition title="Every column is a witness — interrogate it, then write the verdict down as code">
+
+Treat a fresh dataset as testimony from a witness who might be lying. You ask each column three questions: **Is anything absent?** (missing values — including the ones disguised as −999 or `"unknown"`). **Is everything possible?** (a 250-year-old customer isn't an outlier, it's an error; a $4,200 order might be your best customer). **Is everything consistent?** (duplicated rows, `"Pro"` vs `"pro "`, dates stored as strings).
+
+The second half of the mental model is just as important: **every fix is a decision, recorded as code.** You never edit the CSV, never fix a value by hand, never let a default silently decide for you. The cleaning script *is* the audit trail — six months later, `df["age"].mask(df["age"] < 0)` still tells everyone exactly what you did and why. Interrogate, decide, write it down.
+
+</Intuition>
+
+## The audit — interrogate before you touch
+
+<Recall term="The first-look ritual">
+From the DataFrame chapter: on any new table, run `shape` → `dtypes` → `head()` → `isna().sum()` → `describe()` before doing anything else. This chapter turns that ritual into a full interrogation — because the ritual's official answers routinely understate the damage.
+</Recall>
+
+<RunnableCode title="the official answers vs the truth — one messy table, fully audited" code={auditCode} />
+
+The official report says: one missing value. The interrogation finds: two `-999` ages (a *sentinel* — a made-up code meaning "didn't answer"), one impossible age of 250, one exact duplicate row, one `"not_available"` hiding in the date column, and a plan column where the same three plans masquerade as five. `isna()` can only see genuine `NaN` — **sentinels wear valid dtypes as camouflage**, which is why `describe()` (impossible min/max, absurd mean) and `sorted(unique())` on every suspicious column are part of the audit. The `describe()` output is the smoking gun: a mean age of −197 means every downstream statistic is already poisoned.
+
+Two closing moves: `pd.to_datetime(..., errors="coerce")` converts unparseable date-strings to `NaT` — junk becomes *honestly missing* instead of secretly corrupt. And check duplicates twice: `df.duplicated()` for exact repeated rows, `df["user_id"].duplicated()` for repeated keys — different diseases, as you'll see below.
+
+## Missingness — three reasons data is absent, three different responses
+
+<RunnableCode title="measure it, test whether it's random, impute with a paper trail" code={missingCode} />
+
+Statisticians sort missingness into three patterns, and the pattern decides what you're allowed to do:
+
+- **MCAR — missing completely at random.** A sensor occasionally drops a reading; a form sometimes fails to save. The gap is unrelated to anything. Dropping those rows loses data but introduces *no bias* — the survivors still look like the population.
+- **MAR — missing at random, given other columns.** The gap is predictable from data you *have*: in the demo, income is missing almost exclusively for young users (skippers average 25, fillers 47). Dropping those rows would silently age your dataset by two decades. Instead, impute *using* the related columns — that's the group-median move.
+- **MNAR — missing not at random.** The gap depends on the missing value *itself*: high earners decline to state income; struggling students skip the survey. No imputation can recover what's systematically hidden — the honest move is an **indicator column** (`spend_missing`), because here the *fact of absence is itself signal* a model can use.
+
+You can't formally prove which pattern you have, but the groupby-on-`isna()` probe in the demo catches the common MAR cases in one line. The workflow that survives all three: impute with the **median** (robust to the outliers you haven't cleaned yet), add the indicator column *before* filling, use group medians when a related category exists — with a global fallback, because a whole group can be empty and `transform` will hand you NaN right back.
+
+Two hard rules. **Never impute the target** — a row with a missing label is not training data; drop it. And imputation statistics are *learned from data*, so in real pipelines they must be learned from the training set only — the next chapter's Pipeline machinery exists largely to enforce that.
+
+## Outliers — domain rules first, robust fences second
+
+<RunnableCode title="the whale, the impossible value, and the fence that moves" code={outlierCode} />
+
+Order of operations: **domain rules → robust detection → a decision that isn't deletion.**
+
+*Domain rules first.* Negative spend, age 250, a timestamp from 1970 — these aren't outliers, they're **errors**, and no statistics are needed to convict them. Encode the rule (`spend.mask(spend < 0)`), route the finding back to whoever owns the data, and move on.
+
+*Then robust fences.* The classic `mean ± 3·std` rule has a fatal flaw the demo makes visible: **the outlier inflates the very mean and std used to judge it** — with the whale included the fence sits near 900, without it near 60. The whale moves its own goalposts. **IQR fences** — `Q1 − 1.5·IQR` to `Q3 + 1.5·IQR`, the same rule behind box-plot whiskers — are built from quartiles, which barely move when one value goes berserk: the demo's IQR fence shifts by pennies. That robustness is the entire argument. (And before any formula: `spend.hist()` — a histogram shows you the tail in one glance.)
+
+*Then decide — and deletion is the last resort.* A fence **flags for review**; it doesn't convict. The demo flags several perfectly legitimate heavy spenders alongside the whale, and in fraud detection *the outliers are the entire point* — delete them and you've deleted the signal. The gentler tools: **clip/winsorize** (`spend.clip(upper=hi)`) keeps the row but caps its leverage, and **log1p** tames a whole right-skewed tail at once (watch skew fall from double digits to near zero) — often the right "fix" for money-like columns is a transform, not a removal.
+
+## Duplicates and category chaos
+
+<RunnableCode title="dedup, normalize, then count — in that order" code={textCode} />
+
+**Duplicates come in two species.** *Exact duplicate rows* are almost always mechanical (a double export, a retried upload) — `drop_duplicates()` is safe and should happen **before any statistic is computed**, or the duplicated row votes twice in every mean, median, and imputation value. *Duplicate keys with disagreeing data* (order 2 appearing twice with different amounts) are a real inconsistency — investigate which record is true; a blind drop just picks a winner at random.
+
+**Categories lie through formatting.** `"Pro"`, `"pro "`, `"PRO"` are one plan wearing three costumes, and every tool downstream — `value_counts`, groupby, one-hot encoding — will treat them as three. The two-step cure: **normalize** (`.str.strip().str.lower()` collapses six "plans" to three), then **consolidate known variants with an explicit dict** (`.replace({"huston": "houston"})`). The dict looks manual because it *should* be — it's auditable, greppable, and reviewable in a way no fuzzy-matching magic ever is. `value_counts()` before and after is the proof the cleanup worked; run it on every categorical column you intend to use.
+
+## Encoding categories as numbers
+
+<RunnableCode title="one-hot, ordinal, and the fake-arithmetic trap" code={encodeCode} />
+
+Models eat numbers, so every category must become numeric — and the encoding you pick is a claim about the world:
+
+- **One-hot** (`pd.get_dummies`) for **nominal** categories — no order exists among `free/pro/team`, and one column per value means no fake arithmetic can be done. For linear models, pass `drop_first=True` (the dropped column is implied by the others; keeping all three creates redundancy that destabilizes coefficients).
+- **Ordinal mapping** (`.map({"S": 0, "M": 1, ...})`) only when a **true order exists** — sizes, ratings, education levels — and *you* write the order down explicitly. The distances are still a modeling assumption (is XL−L the same gap as M−S?), but at least the ranking is real.
+- **The trap:** `pd.factorize` or any "just assign each city a number" scheme on nominal data. `austin=0, dallas=1, houston=2` quietly claims Austin is less than Dallas and that their average is meaningful — a linear model will happily learn from that nonsense geometry. Arbitrary codes are only acceptable for things that treat them as labels, never as quantities.
+- **High cardinality** (thousands of cities): one-hot explodes into thousands of columns. The simple starter is **frequency encoding** — replace each value with its count. The powerful upgrade, *target encoding* (replace each city with its average churn rate), is also the easiest way to leak your labels into your features — park it until the cross-validation chapter shows you how to do it safely.
+
+Bigger picture: `get_dummies` is fine for learning and one-off analyses, but it has a production flaw — if next month's data is missing a plan (or has a new one), you get a *different set of columns* and the model breaks. The next chapter's `ColumnTransformer` fixes exactly that.
+
+<RealWorldML title="Raw churn export → defensible training matrix, in five recorded decisions">
+
+<RunnableCode title="audit → dedup → sentinel sweep → impute with indicators → encode" code={realWorldCode} />
+
+This is the whole chapter compressed into one runnable pipeline — the same table the audit section dissected, taken all the way to `X, y`. Line by line:
+
+- **Step 1, audit:** shape, duplicate count, official NaN count — printed *before* anything is touched, so you know what you walked into (9 rows, 1 dup, 2 official NaNs).
+- **Step 2, dedup first:** `drop_duplicates()` before any statistic. Had we imputed first, user 4's duplicated spend of 89 would have voted twice in the median that fills other users' gaps — duplicates corrupt the *repairs*, not just the counts.
+- **Step 3, sentinel sweep before statistics:** `mask(df["age"] < 0)` and `mask(df["age"] > 120)` convert lies to honest NaN. **Order is everything** — impute first and the median of `[34, -999, 29, ...]` is garbage; the sweep must run before any `fillna`. Watch the missing count jump from 2 official to 5 true.
+- **Step 4, normalize then impute with a paper trail:** plans collapse to `free/pro/team`; each numeric column gets its `_missing` indicator *before* the median fill — if "didn't answer their age" predicts churn (plausibly MNAR), the model can still see it.
+- **Step 5, encode and hand off:** one-hot the plan, drop the identifier (`user_id` is a label, not a feature) and the target from `X`, exit to the float64 matrix. `churned` itself was never imputed, never scaled, never touched — labels are read-only.
+
+Eight rows survive with eight defensible columns, and every decision is a greppable line of code. Scale the table to eight million rows and *nothing about the script changes* — that's the point of doing cleaning as code instead of edits.
+
+</RealWorldML>
+
+<StudyDepth
+  intro={<>Cleaning is judgment plus a small toolbox you already own (masks, fillna, groupby, get_dummies). Drill the order of operations and the audit reflexes until they&apos;re automatic; the statistical taxonomy and fancy imputers can stay shallow until a project forces them.</>}
+  drill={[
+    <>The audit ritual: <code>shape → dtypes → isna().sum() → duplicated().sum() → describe() → sorted(unique())</code> on suspect columns</>,
+    <>The order of operations: dedup → sentinel sweep → normalize text → impute (with indicators) → encode</>,
+    <>Sentinels vs NaN: <code>mask()</code> + <code>to_datetime(errors="coerce")</code> turn disguised missingness into honest missingness</>,
+    <>Median + indicator column as the default imputation; group medians via <code>transform</code> when a related category exists</>,
+    <>IQR fences over mean±3σ, and <em>why</em> (robustness); flag-for-review, clip, or transform before ever deleting</>,
+    <>One-hot for nominal, explicit ordinal map for ordered, never arbitrary integer codes</>,
+  ]}
+  skim={[
+    <>Formal MCAR/MAR/MNAR theory and statistical tests for it — the groupby-on-<code>isna()</code> probe covers daily practice</>,
+    <>Model-based imputation (KNN, iterative) — know it exists in sklearn; median + indicator wins on defensibility first</>,
+    <>Target encoding mechanics — deliberately parked until cross-validation teaches leak-free evaluation</>,
+    <>Fuzzy string matching / dedup libraries — reach for them when explicit mapping dicts stop scaling</>,
+  ]}
+/>
+
+<CodeItYourself title="Three drills — break a table, then defend your repairs">
+
+**Drill 1 — Sabotage, then audit.** Rebuild your 8-book DataFrame and vandalize it: duplicate one row, set one `pages` to −1, one `year` to 3024, one rating to a `-999` sentinel, and give one author three spelling variants (`"Tolkien"`, `"tolkien "`, `"TOLKIEN"`). Now run the full audit ritual and confirm it catches **all five** injected problems. The audit is only trustworthy once you've watched it catch crimes you committed yourself.
+
+**Drill 2 — Write `sentinel_sweep(df, rules)`.** Take a dict like `{"age": lambda s: (s < 0) | (s > 120), "rating": lambda s: s == -999}` and return a copy where every flagged value is NaN, printing a per-column count of conversions. Then run your imputation (median + indicator) and verify with `isna().sum()` that the frame ends genuinely clean — in both the official and the true sense.
+
+**Drill 3 — Clean end-to-end, with pictures.** Generate 300 fake order amounts with `rng.lognormal(3, 0.7, 300)`, plant two impossible negatives and one 50,000 whale. Plot the histogram (it should look useless — one bar and a void), apply your domain rule + IQR clip + `log1p`, and plot again on a 1×2 `subplots` grid. If the second panel finally *shows a shape*, you've experienced why transforms beat deletions.
+
+</CodeItYourself>
+
+<Summary>
+
+- **The audit before the touch:** `shape`, `dtypes`, `isna().sum()`, `duplicated().sum()`, `describe()`, `sorted(unique())`. Official missingness understates the truth — **sentinels** (−999, `"unknown"`, dates-as-strings) hide inside valid dtypes; `describe()`'s impossible min/max/mean is the smoking gun.
+- **Order of operations:** dedup → sentinel sweep (`mask`, `to_datetime(errors="coerce")`) → normalize text → impute → encode. Every step *before* imputation exists so the imputation statistics aren't computed from garbage.
+- **Missingness has three species:** MCAR (drop is unbiased), MAR (predictable from other columns — impute with group medians via `transform`, plus a global fallback), MNAR (the gap is the signal — keep an **indicator column**). Never impute the target.
+- **Outliers:** domain rules convict errors instantly; **IQR fences** flag the rest (robust — unlike mean±3σ, where the outlier moves its own goalposts). Fences flag for *review*: clip to cap leverage or `log1p` the tail before you ever delete — in fraud, outliers *are* the signal.
+- **Duplicates:** exact rows → drop before any statistic; duplicate keys that disagree → investigate, don't coin-flip.
+- **Categories:** normalize (`.str.strip().str.lower()`), consolidate with explicit dicts, verify with `value_counts()`. Encode: one-hot for nominal (`drop_first=True` for linear models), explicit maps for true orders, frequency encoding for high cardinality — never arbitrary integer codes.
+- **Cleaning is code, not edits:** every fix is a recorded, greppable, re-runnable decision. That's what makes the resulting model defensible.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>A colleague loads a table where missing ages were entered as <code>-999</code> and immediately runs <code>df["age"].fillna(df["age"].median())</code>. Name both things wrong with this.</>,
+      hint: <>What does <code>isna()</code> see? And what number is that median computed from?</>,
+      answer: <>First, <strong>it does nothing</strong>: <code>-999</code> is a valid int, not NaN, so <code>fillna</code> finds nothing to fill. Second, even the median it computed is <strong>poisoned</strong> — the −999s participate in it, dragging it far below the true center. The fix is the order taught in this chapter: sentinel sweep first (<code>df["age"] = df["age"].mask(df["age"] &lt; 0)</code>), <em>then</em> impute — the median is now computed from real ages only, and ideally an <code>age_missing</code> indicator is added before the fill.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>You have two categorical columns: <code>education</code> (high school / bachelor / master / phd) and <code>city</code> (40 US cities). Which encoding does each get, and why is <code>pd.factorize</code> on <code>city</code> specifically dangerous for a linear model?</>,
+      hint: <>Which of the two has a true order? What arithmetic does an integer code permit?</>,
+      answer: <><code>education</code> has a <strong>genuine order</strong>, so an explicit ordinal map (<code>{"{"}"high school": 0, "bachelor": 1, "master": 2, "phd": 3{"}"}</code>) is appropriate. <code>city</code> is <strong>nominal</strong> — one-hot it (or frequency-encode if 40 columns is too many). <code>factorize</code> on city assigns arbitrary integers in order of appearance, which a linear model treats as a real quantity: it learns one coefficient multiplied by the city code, asserting that city 30 has 30× the effect of city 1 and that cities adjacent in code are adjacent in effect — pure fiction created by the encoding, not the data.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>In a survey table, <code>income</code> is missing for 30% of rows. You probe with <code>df.groupby(df["income"].isna())["age"].mean()</code> and get 24 for missing vs 51 for present. Classify the missingness, state what row-dropping would do, and give the defensible treatment.</>,
+      hint: <>Is the gap predictable from a column you have? What kind of rows would deletion remove?</>,
+      answer: <>This is <strong>MAR</strong> — missingness is strongly related to an <em>observed</em> column (age): young respondents skip the income question. Dropping incomplete rows would delete mostly young people, <strong>biasing the dataset old</strong> — every downstream statistic and model would describe a population you don&apos;t actually have. Defensible treatment: add an <code>income_missing</code> indicator (insurance in case there&apos;s an MNAR component — e.g., low earners specifically declining), then impute with <strong>group medians over age bands</strong> (<code>df.groupby(age_band)["income"].transform("median")</code>) with a global-median fallback, so imputed values respect the age–income relationship instead of assigning 24-year-olds the overall median.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>A pipeline runs: (1) fill missing <code>spend</code> with the mean, (2) <code>drop_duplicates()</code>, (3) compute per-plan averages. The table contains one power user duplicated 50 times. Explain specifically how the output is corrupted, then give the correct order.</>,
+      hint: <>Which statistic gets computed while the 50 copies are still present?</>,
+      answer: <>Step 1 computes the mean <strong>while the 50 duplicates are still in the table</strong> — the power user&apos;s spend is counted 50 times, dragging the mean toward their value. Every genuinely-missing row is then filled with that inflated number, planting corrupted values that <code>drop_duplicates()</code> can never remove (the filled rows aren&apos;t duplicates). Step 3&apos;s per-plan averages are now built partly from fabricated spend values. Correct order: <strong>dedup first, then impute, then aggregate</strong> — repairs must be computed from a table where each entity votes once. (Same logic as the chapter&apos;s rule that the sentinel sweep precedes imputation: fix the population before you compute statistics from it.)</>
+    },
+    {
+      difficulty: "hard",
+      q: <>For a fraud-detection model, a teammate proposes: &quot;clip every transaction amount at the 99th percentile and drop any row flagged by the IQR fence — outliers hurt models.&quot; Critique in detail: what&apos;s right, what&apos;s catastrophically wrong, and what would you do instead?</>,
+      hint: <>What does a fraudulent transaction look like, statistically? Who gets deleted by that policy?</>,
+      answer: <>What&apos;s right: extreme values genuinely can dominate scale-sensitive models, and clipping/robust transforms are legitimate tools. What&apos;s catastrophic: <strong>in fraud, the outliers are the positives</strong> — anomalous amounts are precisely the signal the model exists to find. Dropping IQR-flagged rows deletes a huge share of fraud cases from training; clipping at p99 erases the very feature (extremity) that separates fraud from normal spend. The model trains on a sanitized world and goes blind in production. Instead: apply <strong>domain rules only</strong> for true impossibilities (negative amounts, test transactions); use <code>log1p</code> to tame scale <em>while preserving order</em> (a $50,000 charge stays the largest); keep flagged rows and let fence-flags become <em>features</em> (e.g., <code>amount_above_fence</code>); and if scale still hurts, prefer robust models/scalers over data deletion. Rule of thumb: outlier <em>deletion</em> is for errors; outlier <em>signal</em> is often the product.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Design <code>clean(df)</code> for a churn CSV that re-arrives monthly, feeding a production model. List the five ordered steps it must perform and the three properties that make it production-safe rather than notebook-safe.</>,
+      hint: <>Think about what happens the month a plan disappears, a median shifts, or a schema changes silently.</>,
+      answer: <><strong>Steps, in order:</strong> (1) audit + <em>assert schema</em> — expected columns and dtypes, fail loudly if the export changed; (2) <code>drop_duplicates()</code>, logging how many were removed; (3) sentinel sweep via explicit domain rules (<code>mask</code>, <code>to_datetime(errors="coerce")</code>); (4) normalize categoricals (<code>strip/lower</code> + explicit replace dict), add <code>_missing</code> indicators, impute; (5) encode to the model&apos;s expected columns and dtypes. <strong>Production properties:</strong> (a) <strong>frozen statistics</strong> — medians and category mappings are <em>learned once from training data and stored</em>, not recomputed monthly, otherwise the same customer gets different features in March vs April (and future data leaks into the transform); (b) <strong>fixed output contract</strong> — the encoder must emit the same columns every month even if a plan is absent or novel (the flaw of raw <code>get_dummies</code>; the next chapter&apos;s ColumnTransformer solves this); (c) <strong>observability, not silence</strong> — log row counts in/out, conversion counts per rule, and assert invariants (row count, no NaNs post-clean), because upstream data <em>will</em> change without warning and the pipeline&apos;s job is to notice.</>
+    },
+  ]}
+/>
+
+<Quiz items={[
+  {
+    q: <>A dataset&apos;s <code>isna().sum()</code> returns 0 for every column. What can you conclude?</>,
+    choices: [
+      { text: <>The dataset has no missing data</> },
+      { text: <>Only that there are no literal NaN/NaT values — missingness may still hide as sentinels like −999, &quot;unknown&quot;, or unparseable date strings</>, correct: true },
+      { text: <>The dataset has already been cleaned</> },
+      { text: <><code>describe()</code> is now unnecessary</> },
+    ],
+    explanation: <><code>isna()</code> detects only genuine NaN/NaT. Sentinel values wear valid dtypes as camouflage — which is exactly why the audit includes <code>describe()</code> (impossible min/max/mean) and <code>sorted(unique())</code> on suspect columns.</>
+  },
+  {
+    q: <>Income is missing far more often for <em>young</em> users (an observed column). Which missingness pattern is this, and what&apos;s the risk of dropping those rows?</>,
+    choices: [
+      { text: <>MCAR — dropping is safe</> },
+      { text: <>MNAR — imputation fully fixes it</> },
+      { text: <>MAR — dropping systematically removes young users and biases the dataset</>, correct: true },
+      { text: <>It&apos;s not missingness, it&apos;s an outlier problem</> },
+    ],
+    explanation: <>Missing At Random means the gap is predictable from <em>other observed columns</em> (age here). Dropping incomplete rows deletes a biased slice — the young — so impute using the relationship (group medians by age band) and keep an indicator column.</>
+  },
+  {
+    q: <>Why are IQR fences preferred over mean ± 3·std for flagging outliers?</>,
+    choices: [
+      { text: <>They flag more points</> },
+      { text: <>Quartiles barely move when extreme values appear, while the outlier inflates the very mean and std used to judge it</>, correct: true },
+      { text: <>They&apos;re faster to compute</> },
+      { text: <>They work on categorical columns too</> },
+    ],
+    explanation: <>Mean and std are computed <em>from</em> the data including the outlier — one whale can drag the ±3σ fence from ~60 to ~900, hiding itself and everything else. Quartiles are robust: the IQR fence moves by pennies. Same reason the median beats the mean for imputation.</>
+  },
+  {
+    q: <>You find one exactly-duplicated row, and separately one <code>order_id</code> appearing twice with <em>different</em> amounts. The correct handling is…</>,
+    choices: [
+      { text: <>Drop both immediately with <code>drop_duplicates()</code></> },
+      { text: <>Keep both — more data is better</> },
+      { text: <>Drop the exact duplicate; <em>investigate</em> the disagreeing key — a blind drop picks a winner at random</>, correct: true },
+      { text: <>Average the disagreeing rows</> },
+    ],
+    explanation: <>Exact duplicates are mechanical (double export) and safe to drop — before any statistics are computed. Duplicate keys with conflicting data are a real inconsistency: one record is wrong, and only investigation (or the source system) can say which. Averaging or coin-flipping just launders the error.</>
+  },
+  {
+    q: <>When is an ordinal (integer) encoding of a categorical column the <em>right</em> choice?</>,
+    choices: [
+      { text: <>Whenever there are more than ~10 categories</> },
+      { text: <>When a true order exists among the values and you write the mapping explicitly (S &lt; M &lt; L &lt; XL)</>, correct: true },
+      { text: <>Whenever the model is linear</> },
+      { text: <>Always — integers are more memory-efficient than one-hot columns</> },
+    ],
+    explanation: <>Integer codes assert an order and meaningful distances. For genuinely ordered categories (sizes, education levels) that&apos;s a reasonable claim you make explicitly with <code>.map()</code>. For nominal data (cities, plans) it fabricates geometry — use one-hot, or frequency encoding at high cardinality.</>
+  }
+]} />
+
+<MarkDone slug="foundations/scientific-stack/eda-cleaning" title="EDA & data cleaning workflows" />
