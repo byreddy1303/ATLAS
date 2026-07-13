@@ -1,0 +1,659 @@
+---
+title: GroupBy, merges & pivots
+tier: 0
+phase: "0.2"
+---
+
+export const splitCode = `import pandas as pd
+
+df = pd.DataFrame({
+    "city":  ["Austin", "Dallas", "Austin", "Houston", "Dallas", "Austin"],
+    "sales": [120, 90, 150, 200, 110, 95],
+})
+
+# Step 1: SPLIT — groupby returns a *plan* for piles, not the piles themselves
+g = df.groupby("city")
+print(type(g).__name__)          # DataFrameGroupBy — a lazy object
+print()
+print(g.groups)                  # {'Austin': [0,2,5], 'Dallas': [1,4], 'Houston': [3]}
+print()                          # ^ just row positions per pile — no data moved yet
+
+# you can walk the piles yourself (rarely needed, great for intuition)
+for name, pile in g:
+    print(f"--- {name} ({len(pile)} rows) ---")
+    print(pile)
+
+# Steps 2+3: APPLY a reduction to each pile, COMBINE into one result
+print()
+print(g["sales"].mean())         # one number per city, indexed by city
+#
+# The whole pattern in one line:
+# df.groupby("city")["sales"].mean()
+#        SPLIT         APPLY+COMBINE`;
+
+export const verbsCode = `import pandas as pd
+
+df = pd.DataFrame({
+    "plan":  ["free", "pro", "free", "team", "pro", "free", "pro"],
+    "spend": [0.0, 29.99, 0.0, 99.0, 29.99, 0.0, 24.99],
+    "tickets": [3, 1, 0, 2, 0, 5, 1],
+})
+
+# ---- VERB 1: agg — one row PER GROUP (table shrinks) --------------------
+summary = df.groupby("plan").agg(
+    users=("plan", "size"),          # named aggregations:
+    spend_mean=("spend", "mean"),    #   new_col=(source_col, how)
+    spend_max=("spend", "max"),
+    tickets_total=("tickets", "sum"),
+)
+print(summary)
+print()
+
+# ---- VERB 2: transform — same shape as INPUT (broadcast back) -----------
+# each row gets ITS OWN group's statistic — perfect for features
+df["plan_avg_spend"] = df.groupby("plan")["spend"].transform("mean")
+df["spend_vs_plan"]  = df["spend"] - df["plan_avg_spend"]
+print(df)
+print()
+
+# ---- VERB 3: filter — keep or drop WHOLE groups --------------------------
+big_plans = df.groupby("plan").filter(lambda g: len(g) >= 3)
+print(big_plans["plan"].unique())    # only plans with 3+ rows survive
+#
+# VERB 4: apply — arbitrary Python per group. The escape hatch.
+# Slow (a real Python loop over groups). Reach for it LAST.`;
+
+export const mergeCode = `import pandas as pd
+
+users = pd.DataFrame({
+    "user_id": [1, 2, 3, 4],
+    "plan":    ["pro", "free", "team", "pro"],
+})
+orders = pd.DataFrame({
+    "user_id": [1, 1, 3, 5],          # user 5 has no users row; users 2,4 have no orders
+    "amount":  [50, 20, 300, 75],
+})
+
+# INNER: only keys present on BOTH sides survive
+print(pd.merge(users, orders, on="user_id", how="inner"))
+print()
+
+# LEFT: every users row survives; missing order data becomes NaN
+print(pd.merge(users, orders, on="user_id", how="left"))
+print()
+
+# OUTER + indicator: keep everything and LABEL where each row came from
+full = pd.merge(users, orders, on="user_id", how="outer", indicator=True)
+print(full)
+print()
+print(full["_merge"].value_counts())   # both / left_only / right_only — the audit trail`;
+
+export const validateCode = `import pandas as pd
+
+users = pd.DataFrame({"user_id": [1, 2, 3], "plan": ["pro", "free", "team"]})
+profile = pd.DataFrame({"user_id": [1, 2, 2, 3], "age": [30, 25, 26, 41]})
+#                                       ^ user 2 appears TWICE — dirty data
+
+# validate= states your assumption about key uniqueness. Wrong -> loud error.
+try:
+    pd.merge(users, profile, on="user_id", validate="one_to_one")
+except Exception as e:
+    print(type(e).__name__, "->", str(e)[:70], "...")
+print()
+
+# the m:m EXPLOSION — duplicate keys on BOTH sides multiply
+left  = pd.DataFrame({"k": ["a", "a", "a"], "x": [1, 2, 3]})
+right = pd.DataFrame({"k": ["a", "a"],      "y": [10, 20]})
+boom = pd.merge(left, right, on="k")
+print(f"3 rows x 2 rows -> {len(boom)} rows (every pairing!)")
+print(boom)
+print()
+
+# the row-count habit: assert what a join should preserve
+enriched = pd.merge(users, profile.drop_duplicates("user_id"),
+                    on="user_id", how="left", validate="one_to_one")
+assert len(enriched) == len(users), "left join must not change row count"
+print("row count preserved:", len(enriched) == len(users))
+print()
+
+# concat: the STACKER (same columns, more rows) — matching by position of columns
+jan = pd.DataFrame({"user_id": [1, 2], "amount": [10, 20]})
+feb = pd.DataFrame({"user_id": [3, 1], "amount": [30, 15]})
+both = pd.concat([jan, feb], ignore_index=True)   # fresh 0..n index!
+print(both)`;
+
+export const pivotCode = `import pandas as pd
+
+# LONG format: one row per observation — the shape computers love
+long = pd.DataFrame({
+    "city":  ["Austin", "Austin", "Dallas", "Dallas", "Austin", "Dallas"],
+    "month": ["Jan", "Feb", "Jan", "Feb", "Jan", "Jan"],
+    "sales": [100, 120, 90, 95, 40, 30],
+})
+print(long)
+print()
+
+# pivot_table: LONG -> WIDE. It is a groupby wearing a new layout:
+# rows = index groups, columns = column groups, cells = aggfunc of values
+wide = long.pivot_table(index="city", columns="month",
+                        values="sales", aggfunc="sum", fill_value=0)
+print(wide)
+print()
+# ^ note Austin/Jan had TWO rows (100 and 40) -> aggfunc summed them to 140.
+#   pivot_table never errors on duplicates — it AGGREGATES them. That's the
+#   difference from .pivot(), which raises on duplicate index/column pairs.
+
+# melt: WIDE -> LONG. The inverse move.
+back = wide.reset_index().melt(id_vars="city",
+                               var_name="month", value_name="sales")
+print(back.sort_values(["city", "month"]).reset_index(drop=True))`;
+
+export const rollingCode = `import pandas as pd
+import numpy as np
+
+# 30 days of daily revenue with a weekly rhythm + noise
+rng = np.random.default_rng(3)
+days = pd.date_range("2026-06-01", periods=30, freq="D")
+rev = 100 + 20*np.sin(np.arange(30) * 2*np.pi/7) + rng.normal(0, 8, 30)
+s = pd.Series(rev.round(1), index=days, name="revenue")
+
+# resample: groupby over TIME BUCKETS — calendar-aware
+print(s.resample("W").sum().round(1))     # weekly totals (weeks end on Sunday)
+print()
+
+# rolling: a sliding window ENDING at each row — trailing view of the past
+roll = s.rolling(window=7).mean()          # 7-day trailing average
+print(pd.DataFrame({"revenue": s, "roll7": roll.round(1)}).head(10))
+print()
+# ^ first 6 rows are NaN: a 7-wide window isn't full yet.
+#   min_periods=1 would emit partial averages instead:
+print(s.rolling(7, min_periods=1).mean().round(1).head(3))
+print()
+
+# WHY trailing windows matter for ML: at day t you may only use days <= t.
+# rolling() looks backwards by construction — leakage-safe by default.
+# resample answers "how did each week do?"; rolling answers
+# "as of TODAY, what was the recent trend?" — the feature-engineering question.`;
+
+export const handCode = `import pandas as pd
+
+df = pd.DataFrame({
+    "plan":  ["free", "pro", "free", "team", "pro", "free"],
+    "spend": [0, 30, 0, 99, 25, 10],
+})
+
+# By hand: three piles
+#   free -> [0, 0, 10]   sum=10, count=3, mean=3.33
+#   pro  -> [30, 25]     sum=55, count=2, mean=27.5
+#   team -> [99]         sum=99, count=1, mean=99.0
+result = df.groupby("plan")["spend"].agg(["count", "sum", "mean"]).round(2)
+print(result)
+print()
+print("index of the result:", list(result.index))   # the group labels
+print()
+print(result.reset_index())    # flatten back to ordinary columns when needed`;
+
+export const realWorldCode = `import pandas as pd
+import numpy as np
+
+# ---- Scenario: turn a raw EVENT LOG into per-user features, then join labels ----
+events = pd.DataFrame({
+    "user_id": [1,1,1, 2,2, 3, 4,4,4,4, 5,5],
+    "kind":    ["login","ticket","login", "login","ticket", "login",
+                "login","login","ticket","ticket", "login","login"],
+    "minutes": [12, 0, 30,  5, 0,  45,  8, 22, 0, 0,  60, 15],
+})
+users = pd.DataFrame({
+    "user_id": [1, 2, 3, 4, 5],
+    "plan":    ["pro", "free", "team", "free", "pro"],
+    "churned": [0, 1, 0, 1, 0],
+})
+
+# 1) SPLIT-APPLY-COMBINE: one feature row per user from the raw log
+feats = events.groupby("user_id").agg(
+    n_events=("kind", "size"),
+    n_tickets=("kind", lambda k: (k == "ticket").sum()),
+    total_minutes=("minutes", "sum"),
+)
+# a cleaner no-lambda version of n_tickets, built BEFORE grouping:
+feats["ticket_share"] = (
+    events.assign(is_ticket=events["kind"].eq("ticket"))
+          .groupby("user_id")["is_ticket"].mean()
+)
+print(feats)
+print()
+
+# 2) MERGE features onto the label table — stating every assumption
+model_df = pd.merge(
+    users, feats,
+    left_on="user_id", right_index=True,   # feats is indexed by user_id
+    how="left",                            # every labeled user must survive
+    validate="one_to_one",                 # 1 user = 1 feature row, or ERROR
+)
+assert len(model_df) == len(users)
+print(model_df)
+print()
+
+# 3) users with NO events would be NaN — make that an explicit zero
+count_cols = ["n_events", "n_tickets", "total_minutes", "ticket_share"]
+model_df[count_cols] = model_df[count_cols].fillna(0)
+
+# 4) the familiar handoff
+X = pd.get_dummies(model_df.drop(columns=["user_id", "churned"]),
+                   columns=["plan"], dtype="int64").to_numpy(dtype="float64")
+y = model_df["churned"].to_numpy()
+print("X:", X.shape, "| y:", y.shape, "| churn rate:", y.mean())`;
+
+<Prerequisites items={[
+  { href: "/learn/foundations/scientific-stack/pandas-dataframe-fundamentals", label: "Pandas · DataFrames & Series", blurb: "You need the index-as-identity idea, loc/masks, and the one-indexer write rule — groupby and merge are built on all three." },
+  { href: "/learn/foundations/scientific-stack/numpy-arrays-vectorization", label: "NumPy · vectorization", blurb: "Group aggregations are C-speed reductions per pile — the no-loops reflex still rules." },
+]} />
+
+<StudyDepth
+  intro={<>GroupBy and merge are the two highest-leverage verbs in all of data work — they are pandas&apos; version of SQL&apos;s GROUP BY and JOIN, and together they power nearly every feature you will ever feed a model. Drill the verbs and the join-safety habits; skim the reshaping and time-series machinery until a task demands them.</>}
+  drill={[
+    <>The pattern: <code>df.groupby(keys)[col].agg(...)</code> — and reading it as split → apply → combine</>,
+    <>Named aggregations: <code>.agg(out=("col", "how"))</code> — one call, readable columns</>,
+    <><code>transform</code> vs <code>agg</code>: same-shape broadcast back vs one-row-per-group shrink</>,
+    <>Merge safety kit: <code>how=</code>, <code>validate=</code>, <code>indicator=True</code>, and asserting row counts after joins</>,
+    <>Choosing the tool: merge = match on keys, concat = stack more rows</>,
+  ]}
+  skim={[
+    <><code>pivot_table</code>/<code>melt</code> details — know wide ↔ long exists; look up arguments when reshaping</>,
+    <><code>resample</code>/<code>rolling</code> options (window types, offsets, centering) until you own a time series</>,
+    <>MultiIndex results from multi-key groupbys — <code>reset_index()</code> gets you home; the deep API can wait</>,
+    <><code>groupby(...).apply</code> — the slow escape hatch; know it exists, avoid it by default</>,
+  ]}
+/>
+
+<Motivation title="Per-row answers are trivia — per-group answers are insight">
+
+Last chapter you learned to filter and transform *rows*: this user's tenure, that row's spend. Useful — but almost no real question is about one row. Real questions compare **groups**: Does the *free plan* churn more than *pro*? Which *signup month* produced the best customers? Is revenue *per region* growing? Every one of these has the same shape — split the rows into piles by some key, compute something per pile, report one line per pile. That shape has a name — **split-apply-combine** — and pandas compresses the entire pattern into one expression: `df.groupby("plan")["spend"].mean()`.
+
+Without it, you're back to the strike-three NumPy misery from last chapter's motivation: loop over unique keys, build a mask per key, collect results in a list, glue them together — a page of bookkeeping per question, and you'll have twenty questions before lunch.
+
+The second problem is sneakier. Real data doesn't arrive as one tidy table; it arrives as *several* — because the systems that produce it store each fact **once**. A `users` table (one row per user), an `events` log (one row per click), a `payments` table (one row per charge). Ask "do churners file more support tickets?" and the churn flag lives in one table while the tickets live in another. You need to **merge** — match rows across tables by a shared key, like `user_id`. And merging is where quiet catastrophes live: an inner join silently drops every user who never filed a ticket (survivors look great — you just deleted the unhappy customers from the analysis); a duplicated key silently *multiplies* rows and doubles revenue in the report. Nothing errors. The numbers are just wrong, confidently.
+
+So this chapter is really two skills braided together: the **groupby machine** (agg, transform, filter — plus its costumes: pivot tables for layout, resample/rolling for time) and **join discipline** (`how=`, `validate=`, `indicator=`, row-count asserts) — the habits that make merges loud instead of quietly wrong.
+
+If the previous chapter made you able to *hold* a dataset, this one makes you able to *interrogate* it. It's also — no coincidence — the pandas half of SQL: `groupby` is `GROUP BY`, `merge` is `JOIN`. Learn the moves here and you've pre-learned half of every database course you'll ever take. And when we build ML features two cells from now, you'll see the punchline: **a feature table is just a groupby merged onto a label table.** That one sentence is most of applied machine learning's first mile.
+
+</Motivation>
+
+<Intuition title="Sort the mail into piles; weigh each pile; staple the tables by key">
+
+**GroupBy is sorting mail.** Ten thousand envelopes (rows) land on your desk, each addressed to a city. You *split*: one pile per city — no envelope opened yet, you've only organized. You *apply*: weigh each pile (or count it, or average it — any reduction you like). You *combine*: write a little table, one line per city. That's the whole machine. Three steps, and pandas hides two of them: `df.groupby("city")` does the splitting (lazily — it just plans the piles), and `.mean()` does apply-and-combine in one breath.
+
+The subtle part is what comes back, and there are exactly two shapes:
+
+- **`agg` shrinks**: one row per pile — the report shape ("free: 3.33, pro: 27.50, team: 99.00").
+- **`transform` keeps the original shape**: every row receives *its own pile's* answer, broadcast back in place — the feature shape ("this row's spend vs. its plan's average"). Same piles, same math; the only difference is whether the answer replaces the piles or returns to the rows.
+
+**Merge is stapling two tables by a shared key.** The `users` table knows plans; the `orders` table knows amounts; `user_id` appears in both. For every row on the left, merge finds the rows on the right with a matching key and staples them side by side into one wider row. Three questions decide everything:
+
+1. **What counts as a match?** — the key (`on="user_id"`).
+2. **What happens to non-matches?** — `how=`: `inner` keeps only matched rows, `left` keeps every left row (padding the right side with NaN), `outer` keeps everything from both sides.
+3. **How many matches per key?** — the *cardinality*. One-to-one is a clean staple. One-to-many fans out (one user, three orders → three rows — legitimate!). Many-to-many *multiplies* — every left match pairs with every right match — and is almost always a dirty-key accident.
+
+Keep the two verbs distinct in your head: **merge matches by key; concat just stacks** (same columns, more rows — January's orders on top of February's, no matching logic at all). When you catch yourself about to merge two tables that have the same columns, you probably meant concat — and vice versa.
+
+</Intuition>
+
+<Recall term="DataFrame & index">
+
+From last chapter: a **DataFrame** is a team of typed column Series sharing one row **index** — labels that give rows identity through filtering and sorting. GroupBy leans on this hard: the result of `df.groupby("plan").mean()` is indexed *by the group keys* (the plan names become the row labels), and `transform` uses the index to deliver each group's answer back to exactly the right rows. Alignment is doing the bookkeeping underneath everything in this chapter.
+
+</Recall>
+
+<Recall term="Boolean mask">
+
+A comparison on a column (`df["kind"] == "ticket"`) returns a **Series of True/False**, one per row, computed in a single vectorized pass. Last chapter masks filtered rows; this chapter they feed aggregations — since `True` counts as 1 and `False` as 0, `mask.sum()` counts matches and `mask.mean()` is the *fraction* that match. "Ticket share per user" is just `groupby("user_id")["is_ticket"].mean()`. Count-by-condition via mask-mean is one of the most-typed idioms in data work.
+
+</Recall>
+
+<Recall term="NaN">
+
+**NaN** is pandas' missing-data marker (a float, remember — it promotes integer columns). It returns twice in this chapter with new teeth: a **left/outer merge manufactures NaN** wherever a key found no partner — every NaN in the merged frame is a row that didn't match, which makes `df.isna().sum()` after a join an audit tool, not just hygiene. And **NaN never equals NaN**, so rows whose *key* is missing can never match anything in a merge — and `groupby` silently drops NaN keys from the piles entirely (unless you pass `dropna=False`).
+
+</Recall>
+
+<Angles intro={<>Six lenses: the three-step machine in your head, the four verbs your fingers learn, the contract that keeps joins honest, the traps that silently corrupt tables, the wide-vs-long shape game, and the time-window patterns production feature pipelines run on.</>}>
+
+  <Angle type="mental-model" title="Split → apply → combine — one machine behind every group question">
+    <RunnableCode title="watch the piles form, then collapse to one line per group" code={splitCode} />
+
+    Run the cell top to bottom and you've seen the whole machine in slow motion. `df.groupby("city")` does **not** compute anything — it returns a `DataFrameGroupBy` object, a *lazy plan* for piles. Peek at `.groups` and you can see the plan: a dict from each key to the row positions belonging to it. No data has moved; pandas has only worked out *who goes where*.
+
+    The `for name, pile in g:` loop makes the piles tangible — each iteration hands you a group key and a miniature DataFrame of just that group's rows. You will almost never write this loop in real work (it's the slow path), but walking it once fixes the mental model permanently: *a groupby is piles, and everything you call on it happens once per pile.*
+
+    Then the payoff line: `g["sales"].mean()` — *apply* the reduction to each pile, *combine* the results into one Series. Read the output carefully: the **index of the result is the group keys** (Austin, Dallas, Houston). That's last chapter's index-as-identity principle resurfacing — the answer to "mean sales per city" is naturally *labeled by city*, so pandas puts the cities where labels live: in the index.
+
+    One sentence to keep: **`groupby` turns a column's *values* into the result's *labels*.** Once that clicks, multi-key groupbys (`df.groupby(["city", "month"])` → a two-level index), `reset_index()` (demote labels back to columns), and `transform` (deliver per-pile answers back to the original rows) all become obvious variations on the same machine.
+
+  </Angle>
+
+  <Angle type="workflow" title="agg, transform, filter — the three verbs (and the escape hatch you'll learn to distrust)">
+    <RunnableCode title="the daily groupby vocabulary on one small table" code={verbsCode} />
+
+    Four verbs ride on top of the piles. Two you'll type daily, one weekly, one almost never:
+
+    **`agg` — the report verb (shrinks).** One output row per group. The modern form is *named aggregation*: `.agg(spend_mean=("spend", "mean"), users=("plan", "size"))` — each keyword names an output column, each value is a `(source_column, how)` pair. One call produces a clean, readably-named summary table; no mystery columns, no stacked headers. Note `"size"` counts *rows* (NaN included) while `"count"` counts *non-null values* — a classic off-by-some.
+
+    **`transform` — the feature verb (same shape).** Runs the same per-pile computation, then *broadcasts each pile's answer back onto that pile's rows*, returning a Series exactly as long as the input. That's what makes `df["plan_avg_spend"] = df.groupby("plan")["spend"].transform("mean")` legal — the right-hand side aligns row-for-row with `df`. Follow with ordinary column math (`df["spend"] - df["plan_avg_spend"]`) and you've built "how does this row compare to its group?" — the single most useful feature template in tabular ML. Group z-scores, group shares, fill-missing-with-group-mean: all `transform`.
+
+    **`filter` — the bouncer (keeps or drops whole groups).** The lambda sees each pile and returns True (whole pile stays) or False (whole pile leaves). "Only plans with at least 3 users," "only products with 50+ reviews" — cohort-eligibility rules in one line.
+
+    **`apply` — the escape hatch.** Arbitrary Python per pile, any return shape. It will do anything — slowly, because it *is* a Python loop over groups, surrendering the C-speed reductions everything else uses. The discipline: reach for `apply` only after checking that no combination of `agg`/`transform`/mask-tricks expresses the idea. Nine times out of ten, one does.
+
+    Choosing in the wild is one question: **what shape is the answer?** One line per group → `agg`. One value per original row → `transform`. Fewer groups, same rows → `filter`.
+
+  </Angle>
+
+  <Angle type="contract" title="A merge is a promise — state it with how=, validate=, indicator=">
+    <RunnableCode title="inner, left, outer — and the audit trail" code={mergeCode} />
+
+    Every merge you write makes three claims, whether you state them or not: *these keys identify the same entity; this is what should happen to non-matches; keys repeat (or don't) like so.* Good pandas states all three in the call — so a false claim explodes at the merge, not three weeks later in a report.
+
+    Run the first cell and study what each `how=` does to users 2 and 4 (no orders) and to order-owner 5 (no user row). **`inner`** keeps only keys present on both sides — users 2, 4, 5 all vanish. **`left`** keeps every `users` row, padding order columns with NaN where nothing matched — the default posture when the left table is your population of record ("every labeled user must survive this join"). **`outer`** keeps everything and is mostly a *diagnostic* mode — especially with **`indicator=True`**, which appends a `_merge` column saying `both` / `left_only` / `right_only` per row. `full["_merge"].value_counts()` is a one-line reconciliation report between any two tables: how many matched, how many orphans on each side. Auditors literally do this for a living; you get it for free.
+
+    <RunnableCode title="validate= — turning silent corruption into a loud error" code={validateCode} />
+
+    The second cell is the important one. **`validate="one_to_one"`** (or `"one_to_many"` / `"many_to_one"`) declares the cardinality you believe, and pandas raises a `MergeError` the moment reality disagrees — as it does here, because user 2 has two profile rows. Without `validate`, that same merge *succeeds* and quietly duplicates user 2 everywhere downstream. With it, dirty keys are caught at the door. There is no reason to ever write an important join without it.
+
+    The m:m demo shows *why* the stakes are high: 3 rows × 2 rows sharing a key → 6 rows, every pairing materialized. On toy data it's a curiosity; on a million-row table with an accidentally-duplicated key it's an out-of-memory alarm at 2 a.m. — or worse, a revenue number that's silently doubled.
+
+    And the last block re-draws the merge/concat line: **`concat` stacks tables that share columns** (January's orders atop February's — more rows, no matching). Note `ignore_index=True`: without it the two frames' 0,1 indexes both survive, and you own duplicate labels — last chapter's duplicate-index trap, self-inflicted.
+
+  </Angle>
+
+  <Angle type="pitfall" title="The joins that lie — silent drops, silent multiplies, keys that never match">
+
+    Merge bugs are the worst kind: no exception, no warning, just *plausible wrong numbers*. The rogues' gallery:
+
+    - **Inner join as silent filter.** `how="inner"` is a *deletion* wearing a join's clothes: every left row without a match is gone. Ask "do churners file more tickets?" after inner-joining users to the tickets table and you've excluded every user with zero tickets — the calmest customers — from both sides of the comparison. The habit that catches it: **check `len()` before and after every join**, and when the left table is your population, write `how="left"` and let the NaNs *show you* who didn't match.
+
+    - **The m:m explosion.** Duplicate keys on both sides multiply (n×m pairings per key). Cause: keys you *believed* unique but weren't — a reloaded export, a user with two profile rows. `validate=` catches it; `df["key"].is_unique` before the merge is the manual check.
+
+    - **NaN keys match nothing.** NaN ≠ NaN, so rows with a missing join key can never pair — inner drops them, left NaN-pads them, and either way they exit the analysis unremarked. Related and nastier: last chapter's dtype gotcha comes back to bite *joins* — an int64 `user_id` on one side and an object/string `"101"` on the other match **nothing**, zero rows in common, no error. First debugging move when a join returns suspiciously few rows: print both sides' `df["key"].dtype`.
+
+    - **Column-name collisions get renamed behind your back.** Both tables have a `date` column? The merge output has `date_x` and `date_y`, and code referring to `date` breaks (or worse, you analyze the wrong one). Pass `suffixes=("", "_orders")` deliberately, or rename before merging.
+
+    - **`transform` where you meant `agg`** (or vice versa) — the shape error you *want*: assigning an agg result (3 rows) into a column of a 7-row frame fails loudly. The quiet version is subtler: using full-table statistics where per-group was intended. Re-ask the shape question: report → agg; feature-per-row → transform.
+
+    - **GroupBy silently drops NaN keys.** Rows whose group key is missing simply don't appear in any pile — your "sales by region" report omits the unlabeled region entirely, and totals won't reconcile with the raw table. `dropna=False` gives missing keys their own pile; better, audit `df["region"].isna().sum()` before grouping.
+
+  </Angle>
+
+  <Angle type="comparative" title="Wide vs long — same data, two shapes, two audiences">
+    <RunnableCode title="pivot_table (long → wide) and melt (wide → long)" code={pivotCode} />
+
+    The same six sales figures can live in two shapes. **Long** format — one row per observation, columns `city / month / sales` — is the shape *machines* love: groupby, merge, matplotlib, scikit-learn, and every database all want long. **Wide** format — cities down the side, months across the top, sales in the cells — is the shape *humans* love: it's a report, a spreadsheet, the thing your manager screenshots. Neither is "correct"; they're projections of the same data for different readers, and fluency means converting freely.
+
+    **`pivot_table` goes long → wide, and it is a groupby in a costume.** `index="city", columns="month", values="sales", aggfunc="sum"` means: *group by (city, month) pairs, sum the sales in each group, then lay the result out as a grid instead of a list.* Same split-apply-combine machine — only the combine step changed its furniture. Proof in the output: Austin/Jan had two rows (100 and 40) and the cell reads 140. That aggregation step is also the difference from plain `.pivot()`, which does no aggregation and *raises* on duplicate index/column pairs. `fill_value=0` decides what empty combinations show (a Dallas month with no sales), and `margins=True` would add row/column totals — instant report.
+
+    **`melt` goes wide → long — the inverse.** `id_vars="city"` says "this column stays as identity"; every *other* column collapses into `variable`/`value` pairs (renamed via `var_name=`/`value_name=`). You'll reach for melt most often on *arriving* data: spreadsheets from humans come wide (one column per month, per year, per product), and your first move is melting them long so the groupby/merge machinery applies.
+
+    The two functions are how you commute between audiences: **melt what humans hand you, compute in long, pivot_table what you hand back to humans.** (SQL people: `pivot_table` ≈ `GROUP BY` + crosstab layout; and pandas' `pd.crosstab` is the count-only shortcut.)
+
+  </Angle>
+
+  <Angle type="production" title="Time is a group — resample buckets, rolling windows, and leakage-free features">
+    <RunnableCode title="weekly buckets vs 7-day trailing windows on one revenue series" code={rollingCode} />
+
+    Once timestamps become a datetime index, two time-aware groupers unlock — and telling them apart is the production skill:
+
+    **`resample` is groupby over calendar buckets.** `s.resample("W").sum()` splits rows into Monday-to-Sunday piles and sums each — literally split-apply-combine where the "key" is *which week does this timestamp fall in*. It's calendar-aware (months of different lengths, quarters, business days all work: `"D"`, `"W"`, `"MS"`, `"QS"`), and it answers *report* questions: "how did each week do?" One row per bucket — the time version of `agg`.
+
+    **`rolling` is a sliding window ending at each row.** `s.rolling(7).mean()` computes, for *every* row, the average of that row and the 6 before it — same length as the input, one trailing answer per row: the time version of `transform`. The first 6 values are NaN because the window isn't full yet; `min_periods=1` emits partial-window answers instead (an honest choice you make explicitly). Windows can also be time-based — `rolling("7D")` — which handles irregular gaps by width-of-time instead of count-of-rows.
+
+    Why production feature pipelines run on `rolling`: **at prediction time you only possess the past.** A model scoring a user *today* can use their last-7-days activity — because a trailing window ending at today contains only days ≤ today. This is the first appearance of **leakage** — the cardinal sin of ML features, using information from the future to predict the past — and trailing windows are structurally immune: `rolling().mean()` at row *t* cannot see row *t+1* by construction. (Its evil twin `rolling(center=True)` *can* — fine for smoothing plots, forbidden for features.) A grouped-and-shifted variant — `df.groupby("user_id")["spend"].transform(lambda s: s.shift(1).rolling(7).mean())`, note the `shift(1)` excluding even *today* — is close to half of every fraud/churn/demand model's feature list. The full leakage discipline gets its own treatment in the ML tiers; the reflex starts here: **features look backwards.**
+
+  </Angle>
+
+</Angles>
+
+<Convergence>
+
+One machine, many costumes. **Split-apply-combine** is the machine: pile rows by key, reduce each pile, label the answers with the keys. `agg` returns the piles' answers as a report; `transform` mails each answer back to the pile's rows; `filter` bounces piles; `pivot_table` is the same machine printing its combine step as a grid; `resample` is the machine with calendar buckets for keys; `rolling` is the machine with a sliding window for a pile. Learn it once, recognize it everywhere.
+
+**Merge** is the other half: match rows across tables by key, with three declarations — what's the key (`on=`), what happens to non-matches (`how=`), what cardinality you promise (`validate=`). The discipline is making claims loud: `indicator=True` to audit, row-count asserts after, dtypes checked before. And the two halves compose into the sentence that runs most of applied ML: **groupby the log into features, merge the features onto the labels.** You ran exactly that pipeline in this chapter's RealWorldML — and you'll run it for years.
+
+</Convergence>
+
+<Derivation title="What actually happens inside df.groupby('plan')['spend'].mean()">
+
+Not math — machinery. One famous line, unfolded into the five steps pandas actually performs.
+
+<Step n={1} math={<code>df.groupby("plan")["spend"].mean()</code>}>
+  The line reads like English: &quot;mean spend per plan.&quot; Python evaluates it left to right as three chained calls — a groupby, a column selection, a reduction — and each does real, distinct work. Unfold them.
+</Step>
+
+<Step n={2} math={<span>{"factorize: keys → codes  ·  ['free','pro','free','team',…] → [0,1,0,2,…]"}</span>}>
+  <strong>Split, part 1.</strong> Pandas <em>factorizes</em> the key column: one pass assigns each unique key an integer code (free=0, pro=1, team=2) and rewrites the column as an int array of codes plus a small table of unique labels. All later machinery works on these integers — comparing ints is far cheaper than comparing strings, which is also exactly why the <code>category</code> dtype from last chapter makes groupbys faster: it <em>pre-pays</em> the factorization.
+</Step>
+
+<Step n={3} math={<code>["spend"]</code>}>
+  <strong>Narrow before you compute.</strong> Selecting the column on the <em>GroupBy object</em> tells pandas only <code>spend</code> participates — other columns are never touched, never aggregated, never allocated. On a 3-column toy frame this is politeness; on a 200-column production table, selecting before aggregating is the difference between one column of work and two hundred.
+</Step>
+
+<Step n={4} math={<span>{"grouped reduction: sums[code[i]] += spend[i]  ·  counts[code[i]] += 1"}</span>}>
+  <strong>Apply — with no Python loop over groups.</strong> For a built-in reduction like <code>mean</code>, pandas runs <em>one</em> compiled pass over the whole column: for each row, add <code>spend[i]</code> into <code>sums[code[i]]</code> and bump <code>counts[code[i]]</code> — the integer code indexes directly into per-group accumulator arrays. One C sweep computes every group&apos;s sum and count simultaneously; then <code>means = sums / counts</code> is one tiny vectorized divide. This is the NumPy lesson wearing a groupby costume — and it&apos;s why built-in aggregations (<code>"mean"</code>, <code>"sum"</code>, <code>"max"</code>) crush <code>.apply(lambda g: g.mean())</code>, which really does loop pile by pile in Python.
+</Step>
+
+<Step n={5} math={<span>{"combine: Series(means, index=['free','pro','team'])"}</span>}>
+  <strong>Combine.</strong> The accumulator arrays are stapled to the unique-labels table from step 2: values = the means, index = the group keys (sorted alphabetically, because <code>sort=True</code> is the default). The column&apos;s <em>values</em> became the result&apos;s <em>labels</em> — the index-as-identity principle, closing the loop. Want them back as an ordinary column? <code>reset_index()</code> or <code>groupby("plan", as_index=False)</code>.
+</Step>
+
+</Derivation>
+
+<Example title="One groupby, verified by hand">
+
+<RunnableCode title="three piles you can check on your fingers" code={handCode} />
+
+Six rows, small enough to run the machine mentally before the computer confirms. Split: free gets rows worth `[0, 0, 10]`, pro gets `[30, 25]`, team gets `[99]`. Apply `count`, `sum`, `mean` to each pile — free is 3 rows summing to 10, mean 3.33; pro is 2 rows summing to 55, mean 27.5; team's lone row is its own everything. Combine: one line per plan, plans in the index.
+
+Two habits worth stealing from the cell: passing a **list** to `.agg(["count", "sum", "mean"])` computes several statistics in one call (columns named after the functions); and `reset_index()` at the end flattens the labeled result back into an ordinary table — which you'll want any time the summary is *itself* about to be merged, plotted, or exported. Do the hand-check ritual whenever a groupby feels shaky: shrink to six rows, predict the piles, run, compare. Ten seconds, and it has caught a thousand wrong keys.
+
+</Example>
+
+<Nuance>
+
+The fine print that separates "it ran" from "it's right":
+
+- **`groupby` sorts keys by default** (`sort=True`, alphabetical) — your report's row order is *not* the data's order. `sort=False` preserves first-appearance order and is marginally faster; for a *meaningful* order (Jan, Feb, Mar…), make the key an *ordered categorical* and the sort follows category order.
+
+- **Grouping by a `category` column includes *unused* categories by default** — a plan that exists in the dtype but has zero rows shows up as a 0/NaN line. Modern pandas defaults to `observed=True` (only groups that occur), older code shipped `observed=False`; pass it explicitly when grouping categoricals and you're immune either way.
+
+- **`size` vs `count`:** `size` = rows in the pile (NaN included, always one number); `count` = *non-null values per column* (can differ column to column). Auditing missingness per group: `.agg(rows=("x","size"), filled=("x","count"))` — the gap is the NaN count.
+
+- **Multi-key groupbys return a MultiIndex** — `df.groupby(["city","month"]).sum()` labels rows with (city, month) *pairs*, and indexing into stacked labels is its own art. Beginner-safe escape: `as_index=False` in the groupby (or `reset_index()` after) to keep keys as ordinary columns. The deep MultiIndex API can wait until a real need drags you in.
+
+- **`transform` calls that return one value per group broadcast; per-row values pass through** — but the function must not reorder. With `"mean"`-style strings, pandas uses the fast path; with a lambda, you pay Python-per-group — prefer strings when they exist.
+
+- **After `concat`, indexes collide** (two row-0s, two row-1s — duplicate labels, last chapter's trap). `ignore_index=True` for a fresh 0..n, or `keys=["jan","feb"]` for a provenance MultiIndex. And `pd.concat(list_of_frames)` *once* beats appending in a loop — each append copies everything (the quadratic-append misery from the anatomy angle).
+
+- **`merge` on the index needs saying so:** `left_index=True`/`right_index=True` (as the RealWorldML cell does) — or `df.join(other)`, which is merge specialized to "left frame's index/column vs right frame's *index*." Same machine, terser spelling, common when features were built by a groupby (whose result is keyed by group labels).
+
+- **Groupby results can hide small-sample lies.** A plan with 2 users showing 99% retention isn't insight, it's noise. Always carry a `size` column alongside any per-group rate — you'll formalize *why* two tiers from now (variance of small samples); for now, the habit: **no rate without its n.**
+
+</Nuance>
+
+<RealWorldML title="Event log → per-user features → labeled training table: the first mile of every tabular model">
+
+<RunnableCode title="groupby the log, merge onto labels, validate, hand off" code={realWorldCode} />
+
+This cell is the canonical shape of applied ML data prep — the exact pipeline behind churn models, fraud detectors, and recommendation rankers, shrunk to twelve events and five users so every number is checkable by eye.
+
+The setting: **facts live at the wrong granularity.** The `events` log has one row per *action* (a login, a support ticket); the `users` table has one row per *user*, including the label we want to predict (`churned`). A model needs one row per user with numeric columns — so the log must be *summarized per user* (groupby) and *attached to the labels* (merge).
+
+**Line-by-line:**
+
+- `events.groupby("user_id").agg(n_events=("kind","size"), ...)` — split the log into per-user piles, reduce each pile to named features. `("kind", "size")` counts rows per pile; the lambda `(k == "ticket").sum()` builds a boolean mask *inside each pile* and sums the Trues — the mask-counting idiom from the Recall card, running once per group.
+- `events.assign(is_ticket=...).groupby(...)["is_ticket"].mean()` — the cleaner, faster version of the same idea: build the mask column *once* on the whole log (one vectorized pass), then let the built-in `"mean"` reduction compute the ticket *share* per pile. Pre-computing columns before grouping so built-ins apply is the standard performance move — it keeps you on the C-speed path from the Derivation.
+- Note what `feats` looks like: **indexed by `user_id`** — the group keys became the index (the machine's signature). Also note who's *missing*: every user in `feats` had at least one event, but a user with *zero* events has no rows in the log, hence no pile, hence **no feature row at all**. Silent absence — the merge step must handle it.
+- `pd.merge(users, feats, left_on="user_id", right_index=True, how="left", validate="one_to_one")` — every claim stated. Keys: users' *column* vs feats' *index*. `how="left"`: the labeled users are the population of record; a user with no events must **survive** the join (as NaNs), because "never did anything" is signal, not a reason for exclusion — an inner join here would quietly build a model that has never seen an inactive user, then face them constantly in production. `validate="one_to_one"`: if the log ever produced duplicate user rows, this line *raises* instead of duplicating labels. The `assert len(model_df) == len(users)` is the belt to validate's suspenders.
+- `model_df[count_cols].fillna(0)` — turn the join's NaNs ("no events found") into the *statement* they mean: zero events, zero tickets, zero minutes. Deliberate semantics, not reflex — for a feature like "average session length," 0 would be a lie (they don't have short sessions; they have *no* sessions), and you'd prefer a missing-indicator column. Every `fillna` is a modeling decision wearing a cleaning costume.
+- `pd.get_dummies(...).to_numpy(dtype="float64")` — last chapter's handoff, unchanged: one-hot the plan, drop the identifiers, exit label-world into the bare `(5, k)` float matrix scikit-learn wants, with `y` alongside.
+
+The punchline to carry forward: **`groupby` set the granularity, `merge` attached the truth, `validate` guarded the door.** Six lines of pandas, and they are — very nearly verbatim — the first six lines of every tabular ML project you will ever ship.
+
+</RealWorldML>
+
+<CodeItYourself title="Three drills — including the one you were promised">
+
+**Drill 1 — The debt from last chapter.** Rebuild your 8-book DataFrame (`title, author, year, pages, rating`), give at least two authors multiple books, and answer the question that stalled you then: **mean pages per author** — now a one-liner. Then level up: one `.agg` call producing `books` (count), `avg_rating`, and `page_range` (max minus min — you'll need a lambda or two named aggs and a subtraction). Sort the result by `avg_rating`, descending.
+
+**Drill 2 — Break a join, then armor it.** Build `authors` (author, country — one row per author) and merge it onto your books. First sabotage it: duplicate one author's row in `authors`, merge without safeguards, and *watch the book count silently grow*. Then armor the same merge: `validate="many_to_one"`, `indicator=True`, and an `assert len(merged) == len(books)`. Confirm the armored version *raises* on the duplicate and passes once you `drop_duplicates`. Read the error message out loud — you want to recognize it as a friend on sight.
+
+**Drill 3 — Commute between shapes.** Make a long table of daily study hours: columns `week` (1–3), `day` (mon–sun), `hours`. `pivot_table` it into a week × day grid with `margins=True` for totals; find your heaviest day at a glance. Then `melt` the grid (minus margins) back to long and verify the round trip with `sort_values` + `.equals()`. Bonus: `df.groupby("week")["hours"].transform("sum")` as a new column — what share of each week is each day? (`hours / week_total` — a transform-then-divide, the feature template.)
+
+</CodeItYourself>
+
+<LifeLesson title="Split, apply, combine — how unanswerable questions become answerable">
+
+Stare at "how is my life going?" and you'll get vertigo — ten thousand undifferentiated rows of experience, no aggregate function defined. The question isn't hard; it's *ungrouped*. Split it — health, work, people, money, learning — and each pile suddenly supports a small, honest reduction: sleep is trending down; the project shipped; I haven't called my brother in six weeks. Then — the step everyone skips — *combine*: bring the per-pile answers back into one view, because "work: thriving" means something different next to "health: declining" than it does alone. Weekly reviews, therapy, retrospectives, budgets — every reflection tool humans have built is split-apply-combine wearing different clothes.
+
+The groupby machine also teaches you to *distrust ungrouped answers*. "Average user spend is $14" is the mean of a lump — free riders and whales mashed into one number that describes nobody (a *mixture*, you'll learn to call it). Almost every honest answer is per-group: per plan, per cohort, per season of your own life. When a single number feels off, the first move is always the same — *what should I have grouped by?*
+
+And merges carry their own quiet lesson: **things connect only through shared keys, and the keys must actually match.** Two people can talk past each other for an hour because one's "success" means money and the other's means calm — an int64 joined against a string, zero rows in common, no error raised. The fix in pandas is checking dtypes before joining; the fix in life is making sure you're joining on the same key — *define the terms first*. And when parts of your life stubbornly won't match up — job and health, ambition and rest — remember `how="left"`: keep every row of the side you can't afford to lose, let the mismatches show as honest NaNs, and treat them as the to-do list they are. Loud missingness beats quiet wrongness — in tables, and in weeks.
+
+</LifeLesson>
+
+<MLConnection>
+
+GroupBy and merge aren't *adjacent* to ML — they are the substrate the tabular half of ML is made of:
+
+- **Feature engineering is groupby-transform.** Fraud: transaction amount vs. this card's 30-day `transform("mean")`. Recsys: item popularity, user activity percentiles. Churn: everything you built in the RealWorldML cell. Kaggle's tabular leaderboards are, to a first approximation, contests in creative groupby.
+- **The training table is always a merge** — features from N sources joined onto labels by entity key. The production twin ("feature store") exists because the *same* joins must run identically at serving time; key mismatches between training and serving (**train/serve skew**) are among the most common real-world model failures. `validate=` habits here are literally the junior version of that infrastructure.
+- **Leakage is a groupby/window sin.** A `transform("mean")` over *all* data injects the future (and the target's neighborhood) into every row; the trailing `shift(1).rolling(...)` pattern from the production angle is the antidote. Time-based `resample` splits also underlie honest temporal train/test splits — never random-shuffle a time series.
+- **Evaluation lives in pivot tables.** Every model comparison you'll ever read — rows = models, columns = datasets/metrics, cells = scores — is a `pivot_table` over a long results log. LLM eval harnesses (model × prompt × seed → score) are exactly this, at scale.
+- **The pattern scales past pandas unchanged.** SQL `GROUP BY`/`JOIN`, Spark, Polars, DuckDB, even the shuffle in MapReduce — all split-apply-combine and keyed joins. Learn the semantics here; the syntax elsewhere is a weekend.
+- **Even deep learning keeps the shape:** batching by sequence length is grouping; attention is a soft, learned lookup between keys and queries — the join, differentiable. (A tease for Tier 4 — but the mental model you built today is the one you'll reuse there.)
+
+</MLConnection>
+
+<Summary>
+
+- **Split-apply-combine** is the machine: pile rows by key, reduce each pile, label answers with the keys. `groupby(...)` builds a *lazy* plan; the values of the key column become the *index* of the result.
+- **The verbs by output shape:** `agg` → one row per group (reports; use *named aggregation*); `transform` → same shape as input (features: group means, z-scores, shares); `filter` → whole groups in or out; `apply` → anything, slowly — last resort.
+- **Merge = match by key, with three loud declarations:** `on=` (the key), `how=` (inner drops non-matches, left keeps the population of record, outer + `indicator=True` audits), `validate=` (cardinality, or a MergeError). Assert row counts after; check key dtypes before; `concat` merely *stacks* (with `ignore_index=True`).
+- **The m:m explosion multiplies rows on duplicate keys; inner joins silently delete.** NaN keys match nothing; groupby drops NaN keys from piles. These fail *quietly* — the safety kit exists because no error will save you.
+- **Wide ↔ long:** `pivot_table` (a groupby printed as a grid — aggregates duplicates, unlike `.pivot()`) for humans; `melt` back to long for machines. Compute long, present wide.
+- **Time:** `resample` = groupby over calendar buckets (reports); `rolling` = trailing window per row (features) — backwards-looking by construction, which is why leakage-safe ML features are built on it (with a `shift(1)` for full hygiene).
+- **The sentence that runs applied ML:** groupby the log into features, merge them onto labels with `how="left", validate="one_to_one"`, fill the NaNs *deliberately*, hand `X, y` to the model.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>Name the three steps of split-apply-combine, and state which pandas expression performs each in <code>df.groupby("city")["sales"].mean()</code>.</>,
+      hint: <>One step is lazy, one is a per-pile reduction, one assembles labeled results.</>,
+      answer: <><strong>Split</strong>: <code>df.groupby("city")</code> — plan the piles (lazily; nothing computed yet, just key → row-positions). <strong>Apply</strong>: <code>.mean()</code> runs the reduction on each pile&apos;s <code>sales</code> values. <strong>Combine</strong>: the same call assembles one result per pile into a Series whose <em>index is the city labels</em>. (The <code>["sales"]</code> in the middle just narrows which column participates.)</>
+    },
+    {
+      difficulty: "easy",
+      q: <>You need each row to gain a column holding <em>its own group&apos;s</em> average spend. <code>agg</code> or <code>transform</code> — which, and why?</>,
+      hint: <>Ask the shape question: how many values must come back?</>,
+      answer: <><code>transform</code>: <code>df["plan_avg"] = df.groupby("plan")["spend"].transform("mean")</code>. It returns a Series <em>the same length as the input</em>, with each group&apos;s mean broadcast back onto that group&apos;s rows — so it aligns row-for-row and can be assigned as a column. <code>agg</code> returns one row <em>per group</em> (a shrunken report), which doesn&apos;t fit back into the original frame without a merge.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>In one sentence each: what do <code>how="inner"</code>, <code>how="left"</code>, and <code>how="outer"</code> keep?</>,
+      hint: <>Think about which side&apos;s non-matching rows survive.</>,
+      answer: <><strong>inner</strong>: only rows whose key appears on <em>both</em> sides (non-matches from both sides are dropped). <strong>left</strong>: every left row, with right-side columns NaN-padded where no match exists (the right&apos;s non-matches are dropped). <strong>outer</strong>: every row from both sides, NaN-padding whichever side is missing — the diagnostic mode, best with <code>indicator=True</code>.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Write one <code>.agg</code> call on <code>df.groupby("plan")</code> producing columns <code>users</code> (row count), <code>avg_spend</code>, and <code>worst_ticket_day</code> (max of <code>tickets</code>).</>,
+      hint: <>Named aggregation: <code>new_name=("source_col", "how")</code>. Row count has a special how.</>,
+      answer: <><code>df.groupby("plan").agg(users=("plan", "size"), avg_spend=("spend", "mean"), worst_ticket_day=("tickets", "max"))</code>. Each keyword becomes an output column; each value is a (source column, function) pair. <code>"size"</code> counts <em>rows</em> per pile regardless of NaNs — <code>"count"</code> would count non-null values of a specific column instead.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>A left join from a 10,000-row orders table to a customers lookup returns 10,180 rows. No error appeared. What happened, how do you confirm it, and what prevents it next time?</>,
+      hint: <>A left join can&apos;t <em>lose</em> rows — so where did 180 extra come from?</>,
+      answer: <>The lookup has <strong>duplicate keys</strong>: some customer ids appear more than once, so each matching order row was <em>fanned out</em> once per duplicate (one-to-many where you assumed many-to-one). Confirm: <code>customers["customer_id"].is_unique</code> → False, or <code>customers["customer_id"].value_counts().head()</code> to see the offenders. Prevent: <code>validate="many_to_one"</code> in the merge (raises MergeError on duplicated right keys), plus the habit of asserting <code>len(merged) == len(orders)</code> after any left join. Fix the data with <code>drop_duplicates("customer_id")</code> — after investigating <em>why</em> duplicates exist.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Your &quot;revenue by region&quot; groupby report totals 4.1M, but <code>df["revenue"].sum()</code> says 4.4M. The table has no duplicates. Where did 300k go?</>,
+      hint: <>Which rows can never join a pile?</>,
+      answer: <>Rows with a <strong>missing region</strong>. <code>groupby</code> silently drops NaN keys by default (<code>dropna=True</code>) — every row whose <code>region</code> is NaN belongs to no pile and vanishes from the report, while the raw column sum still includes its revenue. Confirm: <code>df.loc[df["region"].isna(), "revenue"].sum()</code> ≈ 300k. Fixes: <code>groupby("region", dropna=False)</code> to give missing keys their own line, or repair/impute region upstream. The meta-habit: reconcile any per-group report against the ungrouped total.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>You receive a spreadsheet with columns <code>store, jan_sales, feb_sales, mar_sales</code>. Reshape it for groupby/plotting work, and name the operation and its inverse.</>,
+      hint: <>Machines want one row per observation.</>,
+      answer: <><code>long = df.melt(id_vars="store", var_name="month", value_name="sales")</code> — <strong>melt</strong> (wide → long) keeps <code>store</code> as identity and collapses the three month columns into <code>month</code>/<code>sales</code> pairs: one row per (store, month) observation, ready for <code>groupby("month")</code>, merges, and matplotlib. The inverse is <strong><code>pivot_table</code></strong> (long → wide): <code>long.pivot_table(index="store", columns="month", values="sales")</code> — the human-readable grid again. Compute long, present wide.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Left has 4 rows with key <code>"a"</code>; right has 3 rows with key <code>"a"</code> and 2 with <code>"b"</code>. How many rows does an inner merge on the key return, and why is the general rule multiplicative? What one argument would have flagged this?</>,
+      hint: <>Every left match pairs with every right match, key by key.</>,
+      answer: <><strong>12 rows.</strong> Key <code>"a"</code>: every one of the 4 left rows pairs with every one of the 3 right rows → 4 × 3 = 12. Key <code>"b"</code>: 0 left rows × 2 right rows → 0 (inner drops right-only keys). The rule is multiplicative because a join emits the <em>Cartesian product of matches within each key</em> — there is no way to know which of the 4 lefts &quot;belongs&quot; to which of the 3 rights, so all pairings materialize. On real tables this is the m:m explosion (dup keys both sides → row counts and sums inflate silently, or memory dies). <code>validate="one_to_one"</code> / <code>"one_to_many"</code> / <code>"many_to_one"</code> would each have raised a MergeError here — any of them beats silence.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Design a leakage-free feature for a churn model scored daily: &quot;each user&apos;s average spend over the 7 days <em>before</em> (not including) the scoring day.&quot; Sketch the pandas and defend each piece.</>,
+      hint: <>Per-user piles, a trailing window, and one shift. Why the shift?</>,
+      answer: <>With a per-user, per-day <code>spend</code> table sorted by date: <code>df["feat"] = df.groupby("user_id")["spend"].transform(lambda s: s.shift(1).rolling(7, min_periods=1).mean())</code>. Defense: <strong><code>groupby("user_id")</code></strong> — windows must never mix users&apos; histories, so each pile is one user&apos;s timeline. <strong><code>shift(1)</code></strong> — moves the series one day forward so the window at day <em>t</em> ends at <em>t−1</em>: the scoring day&apos;s own spend is excluded (at serve time, today isn&apos;t finished — training must match). <strong><code>rolling(7)</code></strong> — a trailing window is backwards-looking by construction: no future data can enter. <strong><code>min_periods=1</code></strong> — a 3-day-old user gets an honest 3-day average instead of NaN (an explicit modeling choice). <strong><code>transform</code></strong> — same-shape return, aligned back to every row. This shift-then-roll inside a group is the canonical anti-leakage feature template.</>
+    },
+  ]}
+/>
+
+<Quiz items={[
+  {
+    q: <>What does <code>df.groupby("city")</code> return, before any aggregation is called?</>,
+    choices: [
+      { text: <>A dict of small DataFrames, one per city</> },
+      { text: <>A lazy GroupBy object — a plan mapping each key to its row positions</>, correct: true },
+      { text: <>A sorted copy of <code>df</code></> },
+      { text: <>A Series of group sizes</> },
+    ],
+    explanation: <>Grouping is lazy: the GroupBy object only works out which rows belong to which key (visible via <code>.groups</code>). No data moves and nothing is computed until a verb — <code>agg</code>, <code>transform</code>, <code>filter</code>, <code>apply</code> — is applied to the piles.</>
+  },
+  {
+    q: <>A DataFrame has 100 rows and 4 plans. What lengths do <code>groupby("plan")["x"].agg("mean")</code> and <code>...transform("mean")</code> return?</>,
+    choices: [
+      { text: <>4 and 4</> },
+      { text: <>100 and 100</> },
+      { text: <>4 and 100</>, correct: true },
+      { text: <>100 and 4</> },
+    ],
+    explanation: <><code>agg</code> shrinks to one row per group (4 — the report shape). <code>transform</code> broadcasts each group&apos;s answer back onto that group&apos;s rows, returning the input&apos;s length (100 — the feature shape, assignable as a new column).</>
+  },
+  {
+    q: <>You merge a labeled user table (population of record) with an activity table. Which call keeps inactive users <em>and</em> guards against duplicated activity keys?</>,
+    choices: [
+      { text: <><code>pd.merge(users, activity, on="user_id", how="inner")</code></> },
+      { text: <><code>pd.merge(users, activity, on="user_id", how="left", validate="one_to_one")</code></>, correct: true },
+      { text: <><code>pd.concat([users, activity], ignore_index=True)</code></> },
+      { text: <><code>pd.merge(activity, users, on="user_id", how="right")</code></> },
+    ],
+    explanation: <><code>how="left"</code> keeps every user (inactive ones get NaN activity — signal, not garbage), and <code>validate="one_to_one"</code> raises a MergeError if any user id is duplicated instead of silently multiplying rows. Inner would delete inactive users; concat doesn&apos;t match keys at all.</>
+  },
+  {
+    q: <>Two rows share the same (index, column) pair when you reshape long → wide. What does <code>pivot_table</code> do that <code>.pivot()</code> doesn&apos;t?</>,
+    choices: [
+      { text: <>It raises a clearer error</> },
+      { text: <>It keeps only the first row</> },
+      { text: <>It aggregates the duplicates with <code>aggfunc</code> (it&apos;s a groupby in grid layout)</>, correct: true },
+      { text: <>It creates a duplicate column</> },
+    ],
+    explanation: <><code>pivot_table</code> is split-apply-combine wearing a grid: duplicate (index, column) cells are reduced by <code>aggfunc</code> (mean by default — pass <code>"sum"</code> etc. deliberately). Plain <code>.pivot()</code> performs no aggregation and raises on duplicates.</>
+  },
+  {
+    q: <>For ML features &quot;as of each day,&quot; why is <code>rolling()</code> preferred over statistics computed on the whole column?</>,
+    choices: [
+      { text: <>Rolling is faster to compute</> },
+      { text: <>A trailing window at row <em>t</em> contains only data ≤ <em>t</em> — it can&apos;t leak the future, unlike a whole-column statistic</>, correct: true },
+      { text: <>Whole-column statistics can&apos;t handle NaN</> },
+      { text: <>Rolling automatically groups by user</> },
+    ],
+    explanation: <>A whole-column mean computed once includes <em>future</em> rows relative to any given day — training features the serving system could never have (leakage). A trailing <code>rolling</code> window ends at each row by construction, so day <em>t</em>&apos;s feature sees only days ≤ <em>t</em> (add <code>shift(1)</code> to exclude <em>t</em> itself). Grouping by user is still your job — and so is resisting <code>center=True</code> for features.</>
+  }
+]} />
+
+<MarkDone slug="foundations/scientific-stack/pandas-groupby-merges" title="GroupBy, merges & pivots" />

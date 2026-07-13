@@ -1,0 +1,726 @@
+---
+title: Pandas — DataFrames & Series
+tier: 0
+phase: "0.2"
+---
+
+export const introCode = `import pandas as pd
+import numpy as np
+
+# A Series = a 1-D ndarray + an index (labels that travel with the data)
+s = pd.Series([4.5, 7.2, -5.3, 3.6], index=["d", "b", "a", "c"])
+print(s)
+print()
+print("values :", s.to_numpy())      # the ndarray inside
+print("index  :", list(s.index))     # the labels
+print("dtype  :", s.dtype)           # float64 — one dtype per Series, like NumPy
+
+# label lookup — you ask by NAME, not by position
+print()
+print("s['b']       :", s["b"])              # 7.2
+print("s[['a','c']] :", s[["a", "c"]].tolist())
+
+# A DataFrame = a dict of Series that SHARE one row index
+df = pd.DataFrame({
+    "city":  ["Austin", "Dallas", "Austin", "Houston"],
+    "temp":  [31.5, 33.2, 30.1, 29.8],
+    "humid": [45, 38, 52, 71],
+})
+print()
+print(df)
+print()
+print("shape   :", df.shape)         # (4, 3) — 4 rows, 3 columns
+print("columns :", list(df.columns))
+print("index   :", list(df.index))   # [0,1,2,3] — auto RangeIndex
+print()
+print(df.dtypes)                     # one dtype PER COLUMN — the key difference from NumPy`;
+
+export const alignCode = `import pandas as pd
+
+# THE signature pandas behavior: operations align on labels, not positions.
+q1 = pd.Series({"apples": 10, "bananas": 4, "cherries": 7})
+q2 = pd.Series({"bananas": 5, "apples": 12, "dates": 3})   # different order, different keys!
+
+total = q1 + q2
+print(total)
+# apples   22.0   <- 10+12, matched BY LABEL even though positions differ
+# bananas   9.0   <- 4+5
+# cherries  NaN   <- only in q1 -> missing partner -> NaN
+# dates     NaN   <- only in q2
+
+# NumPy would have added position 0 to position 0 — silently wrong.
+# pandas refuses to lie: unmatched labels become NaN, and you decide.
+print()
+print(q1.add(q2, fill_value=0))   # treat missing as 0 instead
+#
+# Alignment also happens between a DataFrame and a Series, and
+# between two DataFrames — on both rows AND columns.`;
+
+export const locIlocCode = `import pandas as pd
+
+df = pd.DataFrame(
+    {"temp": [31.5, 33.2, 30.1, 29.8, 35.0],
+     "humid": [45, 38, 52, 71, 30]},
+    index=["mon", "tue", "wed", "thu", "fri"],
+)
+print(df)
+print()
+
+# .loc = LABEL world.  .iloc = POSITION world.  Never mix them up.
+print("loc['wed','temp']  :", df.loc["wed", "temp"])     # by name
+print("iloc[2, 0]         :", df.iloc[2, 0])             # by position — same cell
+print()
+
+# slicing — the trap: label slices are INCLUSIVE on both ends
+print(df.loc["mon":"wed"])       # mon, tue, AND wed  (3 rows)
+print()
+print(df.iloc[0:2])              # positions 0,1 only (Python half-open, 2 rows)
+print()
+
+# boolean masks — the workhorse of all data filtering
+hot = df["temp"] > 31
+print(hot)                       # a bool Series aligned to df's index
+print()
+print(df.loc[hot])                          # rows where mask is True
+print()
+print(df.loc[df["temp"] > 31, "humid"])     # filter rows AND pick a column, one loc
+print()
+
+# combining conditions: & | ~ with parentheses (not 'and'/'or'!)
+print(df.loc[(df["temp"] > 30) & (df["humid"] < 50)])`;
+
+export const pitfallCode = `import pandas as pd
+
+df = pd.DataFrame({
+    "city":  ["Austin", "Dallas", "Austin", "Houston"],
+    "temp":  [31.5, 33.2, 30.1, 29.8],
+})
+
+# THE classic bug: chained indexing.  Two operations back-to-back:
+#   step 1: df[df.city == "Austin"]   -> may return a COPY
+#   step 2: ...["temp"] = 0           -> writes into that copy, which is thrown away
+try:
+    df[df["city"] == "Austin"]["temp"] = 0     # looks fine. does nothing (or warns).
+except Exception as e:
+    print("raised:", type(e).__name__)
+
+print(df)          # temp is UNCHANGED for Austin rows on modern pandas
+print()
+
+# The fix: ONE indexer, row selector and column selector together.
+df.loc[df["city"] == "Austin", "temp"] = 0
+print(df)          # now it actually changed
+print()
+
+# Same rule for creating columns from a filtered frame:
+sub = df[df["temp"] > 0]           # a filtered sub-frame
+sub = sub.copy()                   # make ownership EXPLICIT
+sub["flag"] = "warm"               # now safe — you own sub
+print(sub)`;
+
+export const dtypesCode = `import pandas as pd
+import numpy as np
+
+n = 100_000
+rng = np.random.default_rng(0)
+df = pd.DataFrame({
+    "city":   rng.choice(["Austin", "Dallas", "Houston"], size=n),   # strings
+    "signup": pd.to_datetime("2024-01-01") + pd.to_timedelta(rng.integers(0, 365, n), unit="D"),
+    "clicks": rng.integers(0, 50, size=n),
+})
+
+before = df.memory_usage(deep=True).sum() / 1e6
+print(f"object-dtype memory : {before:6.2f} MB")
+print(df.dtypes)
+print()
+
+# 'object' dtype = a column of Python string objects — slow and fat.
+# 3 unique values repeated 100k times? That's what CATEGORY is for:
+df["city"] = df["city"].astype("category")
+
+after = df.memory_usage(deep=True).sum() / 1e6
+print(f"category memory     : {after:6.2f} MB   ({before/after:.1f}x smaller)")
+print()
+
+# datetime64 unlocks the .dt accessor — real date arithmetic
+print(df["signup"].dt.month.value_counts().head(3))
+print()
+
+# nullable integers: np.nan is a FLOAT, so ints with missing values
+# classically got promoted to float64. 'Int64' (capital I) keeps them ints.
+s = pd.Series([1, 2, None], dtype="Int64")
+print(s)           # 1, 2, <NA> — still an integer column
+print(s.dtype)`;
+
+export const csvCode = `import pandas as pd
+import io
+
+# A typical "real world" CSV: junk header, weird missing markers,
+# dates as strings, numbers with units, inconsistent caps.
+raw = """# exported 2026-07-01 by legacy system v2
+user_id,signup_date,plan,monthly_spend,active
+101,2024-03-15,pro,29.99,yes
+102,2024-05-02,free,0,-
+103,not_available,PRO,49.99,yes
+104,2024-08-19,Free,N/A,no
+105,2024-11-30,pro ,29.99,yes
+"""
+
+df = pd.read_csv(
+    io.StringIO(raw),
+    comment="#",                          # skip the junk header line
+    na_values=["N/A", "not_available", "-"],   # what 'missing' looks like HERE
+    parse_dates=["signup_date"],          # parse to datetime64 at read time
+    dtype={"user_id": "int64"},           # pin dtypes you know
+)
+print(df.dtypes)
+print()
+
+# normalize the messy plan column: strip spaces, lowercase, THEN category
+df["plan"] = df["plan"].str.strip().str.lower().astype("category")
+df["active"] = df["active"].map({"yes": True, "no": False}).astype("boolean")
+
+print(df)
+print()
+
+# the after-load checklist — run it EVERY time, no exceptions
+print("shape     :", df.shape)
+print("missing   :"); print(df.isna().sum())
+print("duplicates:", df.duplicated("user_id").sum())`;
+
+export const firstLookCode = `import pandas as pd
+import numpy as np
+
+# Build a fake-but-realistic dataset to practice the first-look ritual
+rng = np.random.default_rng(42)
+n = 1_000
+df = pd.DataFrame({
+    "user_id": np.arange(n),
+    "plan": rng.choice(["free", "pro", "team"], size=n, p=[0.6, 0.3, 0.1]),
+    "monthly_spend": np.where(rng.random(n) < 0.05, np.nan,
+                              rng.gamma(2.0, 15.0, size=n).round(2)),
+    "sessions_30d": rng.poisson(12, size=n),
+})
+
+# The four-command ritual you will type for the rest of your life:
+print(df.shape)                # 1. how big?
+print()
+print(df.head(3))              # 2. what does it look like?
+print()
+df.info()                      # 3. dtypes + non-null counts, one screen
+print()
+print(df.describe().round(2))  # 4. distributions at a glance`;
+
+export const realWorldCode = `import pandas as pd
+import numpy as np
+import io
+
+# ---- Scenario: prep a churn dataset for its first scikit-learn model ----
+raw = """user_id,plan,signup_date,monthly_spend,support_tickets,churned
+1,pro,2024-01-10,29.99,0,no
+2,free,2024-02-03,0,3,yes
+3,pro,2024-01-28,29.99,1,no
+4,team,2023-12-15,99.00,0,no
+5,free,2024-03-22,0,5,yes
+6,free,2024-02-14,0,0,no
+7,pro,2023-11-05,29.99,4,yes
+8,team,2024-04-01,99.00,1,no
+9,free,2024-03-30,0,2,yes
+10,pro,2024-02-20,29.99,0,no
+"""
+df = pd.read_csv(io.StringIO(raw), parse_dates=["signup_date"])
+
+# 1) target column: strings -> 0/1 integers (models need numbers)
+df["churned"] = (df["churned"] == "yes").astype("int64")
+
+# 2) feature engineering with vectorized column math (no loops!)
+snapshot = pd.Timestamp("2024-06-01")
+df["tenure_days"] = (snapshot - df["signup_date"]).dt.days
+df["tickets_per_month"] = df["support_tickets"] / (df["tenure_days"] / 30.44)
+
+# 3) categorical -> one-hot columns (numbers again)
+df = pd.get_dummies(df, columns=["plan"], dtype="int64")
+
+# 4) assemble the model matrices — pandas hands ndarrays to sklearn
+feature_cols = ["monthly_spend", "tenure_days", "tickets_per_month",
+                "plan_free", "plan_pro", "plan_team"]
+X = df[feature_cols].to_numpy(dtype="float64")
+y = df["churned"].to_numpy()
+
+print(df[["user_id", "tenure_days", "tickets_per_month", "churned"]].round(2))
+print()
+print("X shape:", X.shape, "| y shape:", y.shape)
+print("X dtype:", X.dtype, "| churn rate:", y.mean())
+
+# a real model would now be: LogisticRegression().fit(X, y)
+# pandas' whole job was: messy CSV in -> clean numeric (X, y) out`;
+
+<Prerequisites items={[
+  { href: "/learn/foundations/scientific-stack/numpy-arrays-vectorization", label: "NumPy · arrays & vectorization", blurb: "A Series is an ndarray wearing labels — shape, dtype, and the no-loops reflex all carry over." },
+  { href: "/learn/foundations/scientific-stack/numpy-broadcasting-slicing", label: "Broadcasting, slicing & views", blurb: "Boolean masks and the view-vs-copy question return here with higher stakes." },
+]} />
+
+<StudyDepth
+  intro={<>Pandas is where you will spend most of your hours as a data person — every dataset you ever feed a model passes through a DataFrame first. Drill the selection grammar and the after-load checklist until they are reflexes; skim the internals until a bug drags you in.</>}
+  drill={[
+    <>The first-look ritual: <code>df.shape</code> → <code>df.head()</code> → <code>df.info()</code> → <code>df.describe()</code></>,
+    <>Selection grammar: <code>df.loc[rows, cols]</code> by label, <code>df.iloc[rows, cols]</code> by position — one indexer, never chained</>,
+    <>Boolean masks with <code>&amp;</code> <code>|</code> <code>~</code> and parentheses</>,
+    <>Writing filtered cells the safe way: <code>df.loc[mask, "col"] = value</code></>,
+    <><code>read_csv</code> survival kit: <code>na_values=</code>, <code>parse_dates=</code>, <code>dtype=</code>, <code>usecols=</code></>,
+    <>dtype fixes: <code>.astype("category")</code>, <code>pd.to_datetime</code>, nullable <code>"Int64"</code></>,
+  ]}
+  skim={[
+    <>Block-manager internals (how pandas stores columns in 2-D blocks under the hood)</>,
+    <>Copy-on-Write mechanics — know the rule (&quot;one indexer, own your copies&quot;), look up the internals later</>,
+    <>MultiIndex / hierarchical indexing — deferred until the groupby chapter needs it</>,
+    <>The full nullable-dtype zoo (<code>Float64</code>, <code>boolean</code>, Arrow-backed strings) — recognize them, adopt gradually</>,
+  ]}
+/>
+
+<Motivation title="NumPy answers 'what number?' — pandas answers 'which row?'">
+
+The last two chapters gave you the ndarray: a slab of identical-dtype numbers you can crunch at C speed. Now try to hold a *real* dataset in one.
+
+Say you're handed 50,000 customer records: a user id, a signup date, a plan name, a monthly spend, a churn flag. Five columns, five *different* types — integer, datetime, string, float, boolean. An ndarray physically cannot hold that without degrading everything to `object` dtype, which throws away every speed advantage NumPy has. Strike one.
+
+Now delete the twelve rows with corrupt spend values. In NumPy, every row silently *renumbers*: the customer who was row 40,001 is now row 39,989. Any parallel array you kept — labels, predictions, notes — is now misaligned by twelve positions, and nothing will warn you. You'll just get quietly wrong answers. Strike two.
+
+Now compute average spend *per plan*. In pure NumPy that's a loop over `np.unique`, boolean masks, and a growing list of results — a page of fiddly index bookkeeping for a one-sentence question. Strike three.
+
+Pandas exists because *tables* — the shape of essentially all business, science, and ML data — need three things ndarrays don't have: **one dtype per column** (not per array), **labels that travel with the data** (so rows keep their identity through filters, sorts, and joins), and **a vocabulary of table verbs** (filter, group, join, pivot) that turn paragraph-long index gymnastics into single readable lines.
+
+It is not a replacement for NumPy — it's a layer *on top*. Each column of a DataFrame literally contains an ndarray, and every trick from the last two chapters (vectorization, ufuncs, boolean masks, no-loops) still applies. Pandas adds the bookkeeping: which row is which customer, which column is which measurement, what happens when two tables meet.
+
+Here's the career math: surveys of working data scientists put *data preparation* at 45–80% of the job. Model code is the visible 20 line tip; the iceberg underneath is pandas. Every scikit-learn tutorial starts from a clean `X` matrix — this chapter is about the tool that *makes* the clean `X` matrix. Master the DataFrame and the daily reality of ML work stops being mysterious; skip it and every project stalls at hour one, on line one: `pd.read_csv(...)`.
+
+</Motivation>
+
+<Intuition title="A Series is an ndarray with name tags; a DataFrame is a team of them">
+
+Two objects. That's the whole library.
+
+A **Series** is a 1-D ndarray plus an **index** — a sequence of labels, one per element. Think of the ndarray as people standing in a line, and the index as name tags pinned to each of them. Positions can change (sort the line, remove someone) but the tags stay pinned. When you ask `s["alice"]`, you're asking by *tag*; when you ask `s.iloc[3]`, you're asking by *position in line*. Two different questions that only coincidentally agree on a freshly-made Series.
+
+A **DataFrame** is a dictionary of Series that all **share the same row index** — several columns of name-tagged data standing in the same order, one tag list for all of them. Each column keeps its own dtype (`temp` can be float64 while `city` is category), which is exactly what an ndarray can't do. Ask for one column — `df["temp"]` — and you get the Series back, ndarray and all.
+
+The index is what makes pandas *pandas*. It buys you three superpowers:
+
+1. **Identity through chaos.** Filter out rows, sort by another column, sample randomly — every surviving row keeps its label. Row `103` is customer 103 *forever*, not "whoever happens to be 103rd right now."
+2. **Alignment.** Add two Series and pandas matches elements *by label*, not by position. Data from two differently-ordered sources combines correctly without you writing a single line of matching logic. Where labels don't match, you get `NaN` — a loud "no partner found" instead of a silent wrong answer.
+3. **Fast lookup.** Under the hood the index is (lazily) a hash table — label→position in O(1), like a dict. Label access isn't a slow scan.
+
+And one demotion to keep things honest: rows are cheap, columns are structure. You'll filter rows by the thousands without a thought, but adding or retyping a *column* is a deliberate act. A DataFrame is column-oriented at heart — each column is the contiguous ndarray, and rows are just aligned slices across them.
+
+</Intuition>
+
+<Recall term="ndarray">
+
+From the NumPy chapter: an **ndarray** is a shape, a dtype, and one contiguous buffer of raw memory (plus strides for viewing it). Every element shares the same dtype — that uniformity is what lets C loops replace Python loops. Every pandas column *is* one of these; `df["temp"].to_numpy()` hands it to you. Pandas never abandoned NumPy — it hired it.
+
+</Recall>
+
+<Recall term="Boolean mask">
+
+From the broadcasting chapter: comparing an array to a value (`arr > 31`) doesn't return one answer — it returns an **array of booleans**, one per element, computed in a single C pass. Indexing with that bool array keeps exactly the `True` positions. Pandas reuses this move everywhere: `df["temp"] > 31` is a boolean *Series* (mask + index), and `df.loc[mask]` keeps the `True`-labeled rows. Filtering in pandas is NumPy masking with name tags on.
+
+</Recall>
+
+<Recall term="View vs copy">
+
+From the broadcasting chapter: a **view** shares the original's memory (writing to it writes to the original); a **copy** is independent. NumPy has firm rules about which you get. Pandas historically did *not* — a filtered selection might be either, which is exactly why chained writes like `df[mask]["col"] = 0` were a famous bug factory. Modern pandas (Copy-on-Write) resolves the ambiguity: selections behave like copies, and the one-indexer `.loc[mask, "col"]` form is the only way to write through a filter.
+
+</Recall>
+
+<Recall term="NaN">
+
+From the NumPy chapter: **NaN** ("not a number") is the IEEE-754 float value that poisons everything it touches — `nan + x = nan`, `arr.mean()` with one NaN returns NaN. Pandas uses NaN as its default *missing data* marker, which has a sneaky consequence: since NaN is a float, an integer column with even one missing value gets promoted to float64. The nullable `Int64` dtype (capital I) exists to fix exactly this.
+
+</Recall>
+
+<Angles intro={<>Six lenses on the DataFrame. Where it came from, the object in your head, the machine underneath, the grammar your fingers learn, the classic trap, and the dtype discipline that keeps 100 MB from becoming 2 GB.</>}>
+
+  <Angle type="historical" title="From spreadsheets and R to `import pandas as pd`">
+
+    Tables are the oldest data structure in computing that normal humans actually use. By 2008 there were two great table tools — and Python had neither. **Spreadssheets** (VisiCalc 1979 → Excel) made tables *visual and manual*: brilliant for a hundred rows, hopeless for ten million, and unautomatable. **R's data.frame** (1990s, inherited from S) made tables *programmable* for statisticians — filter, model, plot in a few lines — but locked inside a language built only for statistics.
+
+    Meanwhile Python had NumPy (2006): spectacular at homogeneous numeric arrays, mute on the questions real datasets ask — mixed column types, missing values, labels, joins. Wes McKinney, then a quant at AQR Capital, needed to wrangle financial panel data in Python and couldn't. So starting in 2008 he built **pan**el **da**ta **s**tructures — pandas — an unapologetic port of R's data.frame idea onto NumPy's engine, with an index bolted on for time-series alignment (finance runs on aligning two tickers by date).
+
+    The bet paid off historically: pandas + scikit-learn + Jupyter is roughly *why* Python beat R as the language of data science in the 2010s. R had better statistics; Python had a real general-purpose language wrapped around a good-enough data.frame — and one language that does everything beats two specialized ones.
+
+    Since then the pressure has come from **performance**: pandas is single-threaded and memory-hungry, so a generation of challengers arose — Polars (Rust, multi-threaded, 5–50× faster on big jobs), DuckDB (SQL on files), Spark (clusters). Pandas answered by rebuilding its foundations: pandas 2.0 (2023) added Apache Arrow-backed columns, and pandas 3.0 made **Copy-on-Write** the law, killing the decade-old SettingWithCopyWarning bug class. Know why the challengers exist — and also that every one of them copies pandas' *API shape*. Learn the grammar here and you've learned theirs too.
+
+  </Angle>
+
+  <Angle type="mental-model" title="Name tags on an array — the index changes what data *means*">
+    <RunnableCode title="Series and DataFrame — the two objects, opened up" code={introCode} />
+
+    Hold one picture: **a Series is a column of values with a name tag pinned to each value.** Run the cell and read the printed Series — left column is tags (`d b a c`), right column is values. Both travel together, always.
+
+    The tags redefine what "getting an element" means. `s["b"]` asks *by identity* — "the value tagged b" — and keeps working no matter how the Series is sorted, filtered, or extended. Position-based access still exists (`s.iloc[1]`), but it now answers a different, more fragile question: "whatever currently stands second in line."
+
+    The DataFrame extends the picture: **several columns pinned to one shared tag list.** The dict-of-lists you pass to `pd.DataFrame({...})` is literally the mental model — keys become column names, lists become columns, and pandas staples one `RangeIndex` (0,1,2,3) down the side because you didn't provide tags. Note what `df.dtypes` shows: *per-column* types. `city` is `object` (strings), `temp` is `float64`, `humid` is `int64` — three dtypes living in one table, each column internally as uniform and fast as any ndarray.
+
+    <RunnableCode title="alignment — the index at work" code={alignCode} />
+
+    The second cell is the model's payoff, and the single most surprising behavior for NumPy-trained eyes: `q1 + q2` **matches by tag, not by position**. The two Series list fruits in different orders — pandas doesn't care. `apples` finds `apples`, `bananas` finds `bananas`, and the fruits without a partner get `NaN` rather than being silently paired with a stranger.
+
+    That NaN is a feature, not a failure. It is pandas telling you *"these labels had no match — decide what that means."* Maybe fill with 0 (`q1.add(q2, fill_value=0)`), maybe drop, maybe investigate. The one thing that can never happen is the NumPy failure mode: position 0 added to position 0 with no questions asked, producing a confident, wrong number. In data work, loud missingness beats quiet wrongness every single time.
+
+  </Angle>
+
+  <Angle type="anatomy" title="Columns are the real objects — rows are a convenient fiction">
+
+    Crack the DataFrame open and the layout matters for everything you'll do at speed:
+
+    - **Column-major storage.** Each column's values live together (as ndarrays or Arrow arrays), managed by an internal "block manager." Column operations — `df["temp"].mean()`, `df["spend"] * 12` — are single C sweeps over contiguous memory, exactly as fast as NumPy. Row operations — "give me row 3 as an object" — must *gather one element from every column* and stitch them together. This is why `df.iterrows()` is famously slow and why the no-loops reflex from NumPy carries over: **think in columns, not rows.**
+    - **The index is a real object**, not just decoration: `df.index` (row labels) and `df.columns` (column labels — also an Index!). It builds a hash table lazily on first label lookup, giving dict-speed access. Indexes can hold duplicates — `df.loc["x"]` on a duplicated label returns *multiple rows*, a classic surprise.
+    - **One dtype per column**, visible in `df.dtypes`. The dtypes are the *first thing* you inspect on any new dataset, because they encode what operations are even possible: `.dt.month` needs datetime64, `.str.lower()` implies object/string, math on an `object` column of accidental strings gives nonsense or errors.
+    - **`.to_numpy()` is the exit hatch.** One numeric dtype across selected columns → a clean 2-D ndarray, often zero-copy. Mixed dtypes → everything degrades to `object`, the worst of all worlds. This is why model prep always ends with *numeric-only* columns before `X = df[cols].to_numpy()`.
+
+    A useful anatomy fact for later chapters: because columns are independent objects sharing an index, adding a column is cheap (staple another Series to the same tags), while adding *rows* one at a time is quadratic misery (every append rebuilds blocks). Build row-wise data as a list of dicts, then construct the DataFrame once.
+
+  </Angle>
+
+  <Angle type="workflow" title="The selection grammar — loc, iloc, and masks are 80% of daily pandas">
+    <RunnableCode title="loc vs iloc vs boolean masks — the complete vocabulary" code={locIlocCode} />
+
+    Two accessors, one sentence each, memorized forever:
+
+    - **`df.loc[rows, cols]` — the label world.** Rows and columns named by their tags. `df.loc["wed", "temp"]` is "the temp of wednesday."
+    - **`df.iloc[rows, cols]` — the position world.** Pure integers, exactly like NumPy indexing. `df.iloc[2, 0]` is "third row, first column, whatever they're called."
+
+    Both take the same four kinds of selectors in each slot: a single item, a list, a slice, or a boolean mask. The grammar is completely regular — `df.loc[mask, ["temp", "humid"]]`, `df.iloc[:3, 1:]`, `df.loc["tue":"thu", "humid"]` are all the same sentence with different words.
+
+    One deliberate inconsistency to burn in now: **`.loc` slices are inclusive on both ends** — `df.loc["mon":"wed"]` returns three rows, wed included — while `.iloc` keeps Python's half-open convention (`df.iloc[0:2]` is two rows). The reasoning: with labels you usually *can't name* "the label after wed" (labels aren't necessarily ordered or numeric), so exclusive endpoints would be unusable. It still bites everyone once. Let it bite you here, in a practice cell, not in production.
+
+    Boolean masks are where the grammar earns its keep — reread the cell's second half. `df["temp"] > 31` builds a bool Series in one vectorized pass (that's the NumPy ufunc underneath). Feed it to `.loc` and rows filter by condition; add a column selector in the same bracket and you've filtered *and* projected in one readable line. Combining conditions uses `&`, `|`, `~` **with parentheses around each comparison** — Python's `and`/`or` try to collapse the whole mask to a single truth value and raise the famous "truth value of a Series is ambiguous" error. The parenthesized `&` habit is non-negotiable muscle memory.
+
+    Bare `df[...]` (no accessor) is best treated as shorthand for exactly two things: a column by name (`df["temp"]`) or rows by mask (`df[mask]`). For anything fancier, reach for `.loc`/`.iloc` — explicit worlds, no guessing.
+
+  </Angle>
+
+  <Angle type="pitfall" title="Chained indexing — the bug pandas finally outlawed">
+    <RunnableCode title="the write that vanishes — and the one-indexer fix" code={pitfallCode} />
+
+    The most infamous bug in pandas history looks completely innocent:
+
+    ```python
+    df[df["city"] == "Austin"]["temp"] = 0
+    ```
+
+    Read it as Python actually executes it and the crime appears. This is **two** separate operations chained: first `df[mask]` runs and returns a *new object* — historically sometimes a view of `df`, sometimes a copy, depending on internal layout you can't see. Then `["temp"] = 0` assigns into *that intermediate object*. If it was a copy, your write lands on a temporary that is garbage-collected a microsecond later. `df` never changes. No error. The bug surfaces three notebook cells downstream as "why is Austin still 31.5?"
+
+    For a decade pandas could only shrug and emit the dreaded `SettingWithCopyWarning` — "your write *may* not have stuck" — a warning so confusing it generated more StackOverflow traffic than any other pandas topic. **Copy-on-Write** (default since pandas 3.0) ends the ambiguity with a clean law: *any* selection behaves as a copy; chained assignment therefore **never** works, and pandas raises/warns consistently instead of sometimes-silently failing.
+
+    The fix was always the same and is now the only way — **one indexer, doing both jobs at once**:
+
+    ```python
+    df.loc[df["city"] == "Austin", "temp"] = 0
+    ```
+
+    A single `.loc[rows, cols] = value` call sees the whole sentence — *these rows, that column, this value* — and writes directly into `df`. Nothing intermediate to write into by mistake.
+
+    Second habit from the same family: when you filter a frame and plan to *keep working on it* (`sub = df[mask]`), immediately make ownership explicit with `sub = df[mask].copy()`. Under CoW the copy is lazy — no memory is actually duplicated until one side mutates — so the `.copy()` costs almost nothing and documents intent: *sub is mine now, df is safe from me.*
+
+  </Angle>
+
+  <Angle type="performance" title="dtype discipline — category, datetime64, and nullable Int64">
+    <RunnableCode title="the 10× memory cut hiding in one astype call" code={dtypesCode} />
+
+    Pandas will *never* pick your dtypes optimally — `read_csv` guesses conservatively, and the guesses cost real memory and speed. Three upgrades cover 90% of what matters:
+
+    **`category` — for low-cardinality strings.** An `object` column stores a full Python string object per row: 100,000 rows of `"Austin"` is 100,000 separate ~60-byte string objects. `category` stores each *unique* value once plus a tiny integer code per row — run the cell and watch the memory drop roughly 10×. Comparisons and groupbys get faster too (integer compares instead of string compares). Rule of thumb: unique values ≪ rows → categorize. Plan names, states, product types: yes. Free-text comments: no (every value unique — categorizing *adds* overhead).
+
+    **`datetime64` — for anything time-shaped.** Dates that stay strings can do nothing but compare alphabetically. Parsed (`parse_dates=` at read time, or `pd.to_datetime` after), a date column becomes int64 nanosecond timestamps underneath and unlocks the `.dt` accessor — `.dt.month`, `.dt.dayofweek`, `.dt.days` on differences — plus date arithmetic, resampling, and time-window joins later. Feature engineering on dates ("days since signup", "is weekend") is bread-and-butter ML work, and it all starts at datetime64.
+
+    **Nullable `Int64` — for integer columns with holes.** The classic gotcha chain: NaN is a *float* → an int column that gains one missing value silently becomes float64 → your user IDs print as `101.0` and joins start failing. Capital-`I` `Int64` (and friends `Float64`, `boolean`) use a separate missing-mask instead of NaN, so integers with missing values *stay integers*, displaying missing as `<NA>`.
+
+    The meta-habit: after every load, `df.info(memory_usage="deep")` — dtypes and true memory in one screen. Thirty seconds of `astype` after `read_csv` routinely turns "this dataset doesn't fit on my laptop" into "yes it does."
+
+  </Angle>
+
+  <Angle type="production" title="read_csv is an argument, not a default — the messy-file survival kit">
+    <RunnableCode title="one messy CSV, tamed at the boundary" code={csvCode} />
+
+    Real files are hostile: comment lines from an export tool, missingness spelled four different ways (`N/A`, `-`, `not_available`, empty), dates as strings, trailing spaces in `"pro "`, booleans as `yes`/`no`. The unprofessional move is `pd.read_csv("file.csv")` bare, then whack-a-mole for an hour. The professional move is to *push the mess to the boundary* — declare what you know at read time:
+
+    - **`na_values=[...]`** — teach pandas what missing looks like *in this file*. Otherwise `"N/A"` becomes a literal 3-character string and the whole column silently turns `object`.
+    - **`parse_dates=[...]`** — parse at the door; the column is born datetime64 and every later step can trust it.
+    - **`dtype={...}`** — pin what you know (`user_id` is int64, `zipcode` is a *string* — leading zeros die if it's ever read as int).
+    - **`comment="#"`, `usecols=[...]`, `encoding=`** — skip junk lines, load only needed columns (big files shrink at the source), and never trust the default encoding on files from Windows-land (`encoding="latin-1"` has rescued many afternoons).
+
+    After the load, the mop-up ritual for what read-time arguments can't fix: `.str.strip().str.lower()` to normalize string chaos (`"PRO"`, `"pro "` → `"pro"`), `.map({"yes": True, "no": False})` for pseudo-booleans, `.astype("category")` for the finished label columns.
+
+    Then — every time, no exceptions — the **after-load checklist**: `df.shape` (did I get the rows I expected?), `df.isna().sum()` (where are the holes, are there suspiciously many?), `df.duplicated(key).sum()` (is the primary key actually unique?). Three lines, ten seconds, and it catches the class of bug that otherwise surfaces as a mysteriously wrong model metric two weeks later. Garbage that enters silently exits as confident-looking nonsense; the checklist is the door guard.
+
+  </Angle>
+
+</Angles>
+
+<Convergence>
+
+Every lens lands on the same core: **a DataFrame is a team of typed ndarray columns sharing one label index — NumPy for the number-crunching, labels for the bookkeeping.** The index gives rows identity that survives filtering and sorting, alignment that matches data by meaning instead of by accident of position, and dict-speed lookup. The grammar is small and regular: `loc` for the label world, `iloc` for the position world, boolean masks to filter, **one indexer per write**. The discipline is dtypes: category for repeated strings, datetime64 for time, nullable Int64 for holey integers, checked with `df.info()` the moment data lands.
+
+NumPy asked you to stop writing loops. Pandas asks you to stop writing *bookkeeping* — the index does it for you, correctly, at C speed. Everything else in the library (groupby, merge, pivot — next chapter) is this same machine viewed from new angles.
+
+</Convergence>
+
+<Derivation title="Why `df[mask]['temp'] = 0` silently does nothing — desugared step by step">
+
+Not math — Python mechanics. The most famous pandas bug, unfolded one interpreter step at a time so you can *see* the write vanish.
+
+<Step n={1} math={<code>df[df["city"] == "Austin"]["temp"] = 0</code>}>
+  The line you wrote. It reads like one sentence — "set temp to 0 where city is Austin" — but Python has no idea about your sentence; it sees two bracket operations and desugars them mechanically, left to right.
+</Step>
+
+<Step n={2} math={<code>mask = df.__getitem__(df["city"] == "Austin")</code>}>
+  First brackets: a <em>read</em>. <code>df[mask]</code> calls <code>__getitem__</code>, which builds a <strong>new DataFrame object</strong> containing only the Austin rows. Call it <code>tmp</code>. Under Copy-on-Write semantics, <code>tmp</code> behaves as a copy — an independent table that merely started life with Austin's values. Crucially, this intermediate has <em>no variable name</em>; nothing in your code holds onto it.
+</Step>
+
+<Step n={3} math={<code>tmp.__setitem__("temp", 0)</code>}>
+  Second brackets, with <code>= 0</code> attached: a <em>write</em> — but aimed at <code>tmp</code>, not <code>df</code>. Python dispatches <code>__setitem__</code> on whatever the first operation returned. The Austin rows <em>inside tmp</em> dutifully get temp = 0. <code>df</code> hasn't been touched by anything in this step.
+</Step>
+
+<Step n={4} math={<span>{"refcount(tmp) → 0 — the write is garbage-collected"}</span>}>
+  The statement ends. <code>tmp</code> was never assigned to a name, so its reference count hits zero and Python frees it — along with your freshly-written zeros. Net effect on <code>df</code>: <strong>none</strong>. Modern pandas raises a <code>ChainedAssignmentError</code> warning at step 3 because it can detect a write into an unnamed intermediate; old pandas could only guess (was <code>tmp</code> a view or a copy?) and emitted the vague <code>SettingWithCopyWarning</code>.
+</Step>
+
+<Step n={5} math={<code>df.loc[df["city"] == "Austin", "temp"] = 0</code>}>
+  The fix, desugared: <code>df.loc.__setitem__((mask, "temp"), 0)</code> — <strong>one</strong> call, on an accessor bound to <code>df</code> itself, receiving rows <em>and</em> column <em>and</em> value together. No intermediate object exists, so there is nothing wrong to write into. This is the whole rule: <em>reads may chain freely; a write must be a single indexer on the frame you mean to change.</em>
+</Step>
+
+</Derivation>
+
+<Example title="The first-look ritual — four commands before any analysis">
+
+<RunnableCode title="shape, head, info, describe — run on every dataset, forever" code={firstLookCode} />
+
+This is the opening move you'll make on every dataset for the rest of your career — before any cleaning, any plotting, any modeling. Four commands, one screen each:
+
+- **`df.shape`** — scale check. 1,000 rows is instant-everything; 100 million changes your plans. Also the first sanity check: *did the load get the row count you expected?*
+- **`df.head(3)`** — eyeball the actual values. Columns that are secretly strings (`"29.99"` with quotes), dates in day-first format, junk columns — most reveal themselves in three rows.
+- **`df.info()`** — the dtype-and-missingness x-ray: every column, its dtype, its non-null count, total memory. The `monthly_spend  950 non-null` line instantly tells you 50 values are missing.
+- **`df.describe()`** — distribution sniff test: mean, std, min, max, quartiles per numeric column. A `min` of −1 in an "age" column, a `max` of 40 in a percentage — data bugs announce themselves in this table before they poison a model.
+
+Notice the ritual is *read-only* — you've changed nothing, risked nothing, and already know the dataset's size, types, holes, and ranges. Analysis that skips this start is guesswork with extra steps.
+
+</Example>
+
+<Nuance>
+
+Six traps, each of which catches every pandas beginner exactly once:
+
+- **`.loc` slices include both endpoints; `.iloc` slices don't.** `df.loc["mon":"wed"]` → 3 rows; `df.iloc[0:2]` → 2 rows. Label-world can't name "one past wed," so inclusivity is the only usable convention. Positional world stays faithful to Python. Two worlds, two rules.
+
+- **`and`/`or` explode on masks — use `&`/`|` with parentheses.** `df[(df.a > 0) & (df.b < 5)]`. Python's `and` tries to reduce each Series to one truth value and raises "truth value of a Series is ambiguous." And because `&` binds *tighter* than `>`, dropping the parentheses gives a different, wronger error. Parenthesize every comparison, always.
+
+- **An integer column with one NaN silently becomes float64.** NaN is a float; classic int64 has no missing marker. Your user IDs suddenly print `101.0`, and `df["id"] == 101` still works but merges on mixed int/float keys get flaky. Fix: nullable `Int64` dtype, or fill the holes before casting back.
+
+- **`df["col"]` vs `df[["col"]]` — Series vs DataFrame.** Single brackets return a 1-D Series; double brackets (a *list* of one column) return a 1-column DataFrame. Methods differ, displays differ, and scikit-learn cares: `X` should be 2-D (`df[["a", "b"]]`), `y` should be 1-D (`df["target"]`).
+
+- **Duplicate index labels are legal and quietly weird.** `df.loc["x"]` returns *all* rows tagged `x` — one row if unique, a DataFrame if not. After `pd.concat`, indexes often collide (two row-0s, two row-1s...). Habit: `df.reset_index(drop=True)` after concat, and `df.index.is_unique` when suspicious.
+
+- **`inplace=True` is a trap, not an optimization.** It rarely saves memory, breaks method chaining, fights Copy-on-Write, and is scheduled for deprecation. Write `df = df.drop(columns=["junk"])`, not `df.drop(columns=["junk"], inplace=True)`.
+
+Two deeper ones for the road:
+
+- **`object` dtype is a junk drawer.** It means "arbitrary Python objects" — often a mix of strings *and* floats *and* None from a messy load. Every operation on it drops to Python speed (the very thing NumPy saved you from). Treat any unexpected `object` column in `df.info()` as a bug to investigate, not a fact to accept.
+
+- **Chained *reads* are fine.** `df[df.a > 0]["b"].mean()` — read, read, reduce — is perfectly safe. The chained-indexing rule only outlaws chained *writes*. Don't cargo-cult "never chain brackets"; the law is "never *assign* through chained brackets."
+
+</Nuance>
+
+<RealWorldML title="From messy CSV to model-ready X, y — the pipeline every ML project starts with">
+
+<RunnableCode title="churn dataset → features → matrices for scikit-learn" code={realWorldCode} />
+
+Every supervised-learning project you will ever do has the same first mile: a raw table of *business facts* goes in; two numeric arrays — `X` (features) and `y` (target) — come out. Models don't eat plans and dates; they eat floats. This cell is that first mile, end to end, on a churn-prediction scenario (predict which subscription users will cancel — one of the most economically important ML problems in industry).
+
+**Line-by-line:**
+
+- `pd.read_csv(io.StringIO(raw), parse_dates=["signup_date"])` — the boundary. `io.StringIO` wraps our inline string so `read_csv` treats it exactly like a file on disk; `parse_dates` makes `signup_date` a real datetime64 at birth, so date arithmetic works two lines later.
+- `df["churned"] = (df["churned"] == "yes").astype("int64")` — target encoding. The comparison is a vectorized ufunc producing a boolean Series (True/False per row); `.astype("int64")` turns it into the 1/0 integers scikit-learn expects. One line, no loop — the NumPy reflex, applied through pandas.
+- `df["tenure_days"] = (snapshot - df["signup_date"]).dt.days` — **feature engineering**, the craft of turning raw facts into signals a model can use. Subtracting a datetime column from a fixed timestamp gives a *timedelta* column; `.dt.days` extracts plain integers. "How long has this user been around" is classic churn signal — new users churn differently than veterans.
+- `df["tickets_per_month"] = df["support_tickets"] / (df["tenure_days"] / 30.44)` — a *rate* feature. Raw ticket counts mislead (old users accumulate more tickets simply by existing); dividing by tenure-in-months (30.44 = average month length) makes users comparable. Column-by-column division is elementwise and aligned by index — pandas inherits NumPy's arithmetic, tags included.
+- `pd.get_dummies(df, columns=["plan"], dtype="int64")` — **one-hot encoding**. Models can't multiply the string `"pro"` by a weight, so the single `plan` column explodes into `plan_free` / `plan_pro` / `plan_team` columns of 0s and 1s — each row has exactly one 1. This is *the* standard trick for feeding categories to linear models, and you'll meet its industrial version (`OneHotEncoder`) in the scikit-learn chapter.
+- `X = df[feature_cols].to_numpy(dtype="float64")` — the handoff. Select *only* the numeric feature columns (double brackets → DataFrame), then `.to_numpy()` drops the labels and hands scikit-learn the bare 2-D ndarray it wants. The index did its job — kept every row aligned through five transformations — and now retires gracefully.
+- `y = df["churned"].to_numpy()` — the 1-D target vector, same move.
+
+Final shapes: `X` is `(10, 6)` — 10 users × 6 features — and `y` is `(10,)`. The very next line in a real project is `LogisticRegression().fit(X, y)`. Notice the division of labor: **pandas owns everything with labels, types, and mess; NumPy owns the final matrices; the model never sees the chaos.** That handoff — DataFrame world to ndarray world at the last possible moment — is the shape of essentially all production ML preprocessing.
+
+</RealWorldML>
+
+<CodeItYourself title="Three drills on a table of your own">
+
+**Drill 1 — Build and interrogate.** Create a DataFrame of 8 fictional books: `title`, `author`, `year`, `pages`, `rating`. Run the first-look ritual (`shape` / `head` / `info` / `describe`). Then answer with one line each: the highest-rated book's title (`.loc[df["rating"].idxmax(), "title"]` — work out why that works), all books after 2000 with rating ≥ 4, and the mean pages per author... wait, that last one needs groupby — *feel* the missing tool. It arrives next chapter.
+
+**Drill 2 — Break it, then fix it.** On your books frame, deliberately write the chained-indexing bug: `df[df["year"] > 2000]["rating"] = 5`. Print the frame and confirm nothing changed (and read the warning). Now fix it with one `.loc`. Then create `modern = df[df["year"] > 2000]` *without* `.copy()`, add a column to `modern`, and see what pandas says. Add the `.copy()`. This ten-minute exercise inoculates you for life.
+
+**Drill 3 — Tame a messy CSV.** Paste this into `io.StringIO` and load it clean — every column the right dtype, missing values as real NaN/NA, `dept` as category, `hired` as datetime64:
+
+```
+emp_id,dept,hired,salary
+1, sales ,2021-04-01,55000
+2,ENG,2022-11-15,N/A
+3,eng,unknown,72000
+4,Sales,2020-01-20,61000
+```
+
+Target: `df.info()` shows `int64, category, datetime64[ns], Int64` — and exactly two `<NA>`/`NaT` holes, both intentional.
+
+</CodeItYourself>
+
+<LifeLesson title="Label things by what they are, not where they sit">
+
+The deep design choice in pandas is that every row carries a *name*, and operations match names — not positions. Position says "third in line"; a label says "customer 103." Filter the table, sort it, shuffle it — position is instantly a lie, but the label stays true. And when two datasets meet, pandas aligns by label, refusing to pair strangers just because they happen to stand in the same spot.
+
+People run on positional indexing more than we admit. "The tall guy from the Tuesday meeting." "My 3pm." "The third file in the downloads folder." Positional references are cheap to make and they *feel* precise — right up until the world reorders itself: the meeting moves, the folder re-sorts, and your reference now points at the wrong thing with total confidence. That's the chained-indexing bug, in life: the write lands on the wrong object, silently.
+
+The label habit costs a little more upfront — you have to learn the actual name, define the actual term, write the actual date. "Deploy after the tests pass," not "deploy after that thing Dave mentioned." Files named `2026-07-invoice-acme.pdf`, not `final_v3 (2).pdf`. Notes that say *who* and *when*, not "them, recently." Identity-based references survive reordering; position-based ones rot the moment anything moves.
+
+And notice what pandas does when labels *don't* match: it doesn't guess — it surfaces a loud, honest `NaN` and lets you decide. When your references don't quite line up — two calendars, two to-do lists, two versions of the plan — the pandas move is to make the mismatch visible and resolve it deliberately, not to silently pair things by position and hope. Loud missingness beats quiet wrongness, in DataFrames and in weeks.
+
+</LifeLesson>
+
+<MLConnection>
+
+Pandas is the front door of every ML system you will build:
+
+- **scikit-learn** (three chapters from now) consumes exactly what this chapter produced: numeric `X` matrices and `y` vectors, born as DataFrames and exported via `.to_numpy()`. Modern scikit-learn also accepts DataFrames directly and preserves column names through pipelines (`set_output(transform="pandas")`) — the two libraries are a matched pair.
+- **Feature engineering lives here.** The `tenure_days` / `tickets_per_month` moves from the RealWorldML cell are the daily craft of applied ML — most real-world model improvements come from better features (pandas work), not fancier models. Kaggle grandmasters are, to a first approximation, pandas virtuosos.
+- **EDA (next chapters)** is pandas + matplotlib: `describe`, `value_counts`, `isna().sum()`, groupby summaries — understanding data *before* modeling it is the discipline that separates analysis from alchemy.
+- **The LLM stack still runs on tables.** Fine-tuning datasets are prompt/completion tables cleaned in pandas before becoming JSONL; evaluation results (model × prompt × score) land in DataFrames for aggregation; RAG document metadata (source, chunk, embedding-id) is tabular. HuggingFace `datasets` objects convert both ways with `.to_pandas()` / `Dataset.from_pandas()`.
+- **Experiment tracking** — every MLflow/W&B run comparison you'll ever download is a DataFrame; every ablation table in every paper started as one.
+- **The dtype discipline scales up.** `category` → embedding-friendly integer codes; `datetime64` → time-based train/test splits (the *only* honest split for time-series); nullable dtypes → explicit missingness that imputation steps can reason about. Sloppy dtypes at the pandas layer surface as silent quality bugs at the model layer.
+
+The blunt version: models are 20 lines; data is the other 2,000. This chapter and the next are where those 2,000 lines get short, correct, and fast.
+
+</MLConnection>
+
+<Summary>
+
+- **Series = ndarray + index** (values with name tags). **DataFrame = dict of Series sharing one row index** — one dtype *per column*, which is exactly what NumPy couldn't give you.
+- **The index is identity.** Labels survive filtering and sorting; operations align by label and surface mismatches as NaN — loud missingness over quiet wrongness.
+- **Selection grammar:** `df.loc[rows, cols]` = label world (slices *inclusive*); `df.iloc[rows, cols]` = position world (half-open); boolean masks with `&` `|` `~` + parentheses do the filtering.
+- **Writes take ONE indexer:** `df.loc[mask, "col"] = value`. Chained `df[mask]["col"] = value` writes into a doomed temporary — the desugared Derivation shows the write being garbage-collected. Own your sub-frames with `.copy()`.
+- **dtype discipline:** `category` for repeated strings (~10× memory), `datetime64` + `.dt` for time, nullable `Int64` for integers with holes, and treat `object` columns as bugs to investigate. `df.info(memory_usage="deep")` is the x-ray.
+- **read_csv is an argument list:** `na_values=`, `parse_dates=`, `dtype=`, `usecols=` push the mess to the boundary; the after-load checklist (`shape`, `isna().sum()`, `duplicated().sum()`) guards the door.
+- **First-look ritual, always:** `shape` → `head` → `info` → `describe` before touching anything.
+- **The ML handoff:** pandas owns labels, types, and mess → `df[cols].to_numpy()` → NumPy matrices → model. Labels do the bookkeeping, then retire.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>In one sentence each: what is a Series, and what is a DataFrame?</>,
+      hint: <>Both definitions mention the index. One is 1-D, one is a collection.</>,
+      answer: <>A <strong>Series</strong> is a 1-D ndarray of values plus an <em>index</em> of labels, one per value (values with name tags). A <strong>DataFrame</strong> is a dictionary of Series that all share one row index — several typed columns pinned to the same labels. Each column keeps its own dtype, which is the key capability a single ndarray lacks.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>Given <code>df</code> with index <code>["a","b","c","d"]</code>, how many rows do <code>df.loc["a":"c"]</code> and <code>df.iloc[0:2]</code> each return?</>,
+      hint: <>One accessor is inclusive on both ends; the other keeps Python&apos;s half-open convention.</>,
+      answer: <><code>df.loc["a":"c"]</code> returns <strong>3</strong> rows (a, b, c — label slices are inclusive on both ends, because &quot;one past c&quot; isn&apos;t nameable in label-world). <code>df.iloc[0:2]</code> returns <strong>2</strong> rows (positions 0 and 1 — standard Python half-open slicing).</>
+    },
+    {
+      difficulty: "easy",
+      q: <>Write one line that selects the <code>salary</code> column for all rows of <code>df</code> where <code>dept</code> equals <code>"eng"</code>.</>,
+      hint: <>Boolean mask in the row slot of <code>.loc</code>, column name in the column slot.</>,
+      answer: <><code>df.loc[df["dept"] == "eng", "salary"]</code>. The comparison builds a boolean Series (one vectorized pass); <code>.loc</code> takes the mask as the row selector and the column label as the column selector — filter and project in a single indexer.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Adding two Series, <code>pd.Series({"{"}"a": 1, "b": 2{"}"}) + pd.Series({"{"}"b": 10, "c": 20{"}"})</code> — what exactly comes back?</>,
+      hint: <>Alignment happens by label; unmatched labels get a specific value. Watch the dtype too.</>,
+      answer: <>A Series with index <code>["a", "b", "c"]</code> and values <code>[NaN, 12.0, NaN]</code>. <code>b</code> is the only label present in both (2 + 10 = 12); <code>a</code> and <code>c</code> have no partner, so alignment produces NaN for them. And because NaN is a float, the whole result is <strong>float64</strong> even though the inputs were integers. <code>s1.add(s2, fill_value=0)</code> would give <code>[1.0, 12.0, 20.0]</code> instead.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Why does <code>df[df["x"] &gt; 0 &amp; df["y"] &lt; 5]</code> fail even though the logic looks right, and what is the correct form?</>,
+      hint: <>There are two separate problems: an operator that can&apos;t handle Series, and operator precedence.</>,
+      answer: <>Two bugs. First, <code>&amp;</code> binds <em>tighter</em> than <code>&gt;</code> and <code>&lt;</code>, so Python parses it as <code>df["x"] &gt; (0 &amp; df["y"]) &lt; 5</code> — nonsense. Second, even fixed, Python&apos;s chained comparison and any use of <code>and</code>/<code>or</code> try to collapse a whole Series to one boolean, raising &quot;truth value of a Series is ambiguous.&quot; Correct form: <code>df[(df["x"] &gt; 0) &amp; (df["y"] &lt; 5)]</code> — parentheses around each comparison, <code>&amp;</code> between them.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>A CSV loads and <code>user_id</code> shows dtype <code>float64</code> with values like <code>101.0</code>. What happened, why, and what are two fixes?</>,
+      hint: <>Something in that column is missing, and the classic missing-marker has a dtype of its own.</>,
+      answer: <>The column has at least one missing value. Pandas&apos; default missing marker, NaN, is a <em>float</em> — and int64 has no way to represent it — so the entire column got promoted to float64. Fixes: (1) load or convert with the nullable integer dtype — <code>df["user_id"] = df["user_id"].astype("Int64")</code> (capital I), which stores missingness in a separate mask and keeps values integer, or (2) resolve the missing values first (drop or fill the affected rows) then <code>.astype("int64")</code>. Bonus prevention: investigate <em>why</em> IDs are missing — that usually indicates a load bug.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Your 2 GB DataFrame has a <code>country</code> column: 50 million rows, 195 unique values, dtype <code>object</code>. What one line cuts its memory ~10×, and why does it work?</>,
+      hint: <>Very few uniques repeated many times — store each unique once.</>,
+      answer: <><code>df["country"] = df["country"].astype("category")</code>. Object dtype stores a full Python string object per row (50M string objects); category stores the 195 unique strings <em>once</em> plus a small integer code per row (int8/int16 — 1–2 bytes each). Memory collapses and comparisons/groupbys speed up too, since they operate on integer codes. The rule: unique values ≪ rows → categorize; near-unique free text → don&apos;t (the dictionary overhead would exceed the savings).</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Desugar <code>df[df["a"] &gt; 0]["b"] = 99</code> into the two method calls Python actually makes, and explain precisely where the written values end up.</>,
+      hint: <>Bracket one is a read returning a new object; bracket two is a write — on what?</>,
+      answer: <>Step 1: <code>tmp = df.__getitem__(df["a"] &gt; 0)</code> — a <em>read</em> that constructs a new DataFrame of the passing rows (a copy under Copy-on-Write). Step 2: <code>tmp.__setitem__("b", 99)</code> — a <em>write</em>, but into <code>tmp</code>, the unnamed intermediate. The 99s land in <code>tmp</code>&apos;s column <code>b</code>; the statement ends, <code>tmp</code>&apos;s refcount hits zero, and it is garbage-collected — 99s and all. <code>df</code> is unchanged. Modern pandas detects the write-into-a-doomed-temporary and raises a ChainedAssignmentError warning. Correct form: <code>df.loc[df["a"] &gt; 0, "b"] = 99</code> — one <code>__setitem__</code> on an accessor bound to <code>df</code> itself.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>You must load a 12 GB CSV on a laptop with 16 GB of RAM, but you only need 6 of its 40 columns, one of which is a low-cardinality string and one a date. Design the <code>read_csv</code> call and defend each argument.</>,
+      hint: <>Shrink at the source: which arguments reduce data <em>before</em> it lands in memory?</>,
+      answer: <><code>pd.read_csv("big.csv", usecols=["u", "v", "w", "x", "cat_col", "date_col"], dtype={"{"}"cat_col": "category", "u": "int32", ...{"}"}, parse_dates=["date_col"], na_values=["N/A", ""])</code>. Defense: <strong><code>usecols</code></strong> is the big lever — 6/40 columns means ~85% of the file never materializes. <strong><code>dtype={"{"}"cat_col": "category"{"}"}</code></strong> stores repeated strings as integer codes <em>during</em> the load (waiting to convert after would need the object-dtype peak memory you don&apos;t have). Narrower numerics (<code>int32</code>/<code>float32</code>) halve those columns if ranges allow. <strong><code>parse_dates</code></strong> lands the date as 8-byte datetime64 instead of a ~60-byte string object per row. <strong><code>na_values</code></strong> keeps dirty missing-markers from forcing numeric columns to object. If it still doesn&apos;t fit, the escape hatches are <code>chunksize=</code> (stream and aggregate) or a columnar engine (Parquet/Polars/DuckDB) — but the argument list above rescues most 12 GB files.</>
+    },
+  ]}
+/>
+
+<Quiz items={[
+  {
+    q: <>What is the defining difference between a DataFrame and a 2-D ndarray?</>,
+    choices: [
+      { text: <>DataFrames are faster at numeric computation</> },
+      { text: <>DataFrames allow a different dtype per column and carry label indexes on rows and columns</>, correct: true },
+      { text: <>ndarrays cannot hold floating-point data</> },
+      { text: <>DataFrames store data row-by-row for faster row access</> },
+    ],
+    explanation: <>A DataFrame is a collection of typed columns (each internally an ndarray) sharing a row index. Per-column dtypes + labels are the additions; the numeric speed <em>inside</em> each column is NumPy&apos;s, unchanged. Storage is column-oriented, and row access is actually the slow direction.</>
+  },
+  {
+    q: <>With index <code>["a","b","c","d","e"]</code>, how many rows does <code>df.loc["b":"d"]</code> return?</>,
+    choices: [
+      { text: <>2</> },
+      { text: <>3</>, correct: true },
+      { text: <>4</> },
+      { text: <>It raises an error — slices need integers</> },
+    ],
+    explanation: <>Label slices are inclusive on <em>both</em> ends: b, c, and d — 3 rows. The half-open convention lives only in the positional world (<code>.iloc</code>), where <code>df.iloc[1:4]</code> would also give 3 rows but exclude position 4.</>
+  },
+  {
+    q: <>Which statement actually sets <code>score</code> to 0 for all rows where <code>flag</code> is True?</>,
+    choices: [
+      { text: <><code>df[df["flag"]]["score"] = 0</code></> },
+      { text: <><code>df["score"][df["flag"]] = 0</code></> },
+      { text: <><code>df.loc[df["flag"], "score"] = 0</code></>, correct: true },
+      { text: <><code>df.iloc[df["flag"], "score"] = 0</code></> },
+    ],
+    explanation: <>A write must be a <em>single indexer</em> on the frame itself: <code>.loc[rows, cols] = value</code>. The first two are chained assignments — they write into a temporary that is immediately discarded. The last fails because <code>.iloc</code> is the position world and doesn&apos;t take a column <em>label</em>.</>
+  },
+  {
+    q: <>An integer column gains one missing value during a load. Under default (non-nullable) dtypes, what happens?</>,
+    choices: [
+      { text: <>Pandas raises an error and refuses to load</> },
+      { text: <>The missing value becomes 0</> },
+      { text: <>The whole column is promoted to float64, because NaN is a float</>, correct: true },
+      { text: <>Only the missing cell becomes float; other values stay int</> },
+    ],
+    explanation: <>Classic int64 has no missing marker, and a column has exactly one dtype — so one NaN (a float value) forces the entire column to float64. That&apos;s why IDs print as <code>101.0</code>. The nullable <code>Int64</code> dtype solves it by keeping missingness in a separate mask.</>
+  },
+  {
+    q: <>When is converting a string column to <code>category</code> dtype a clear win?</>,
+    choices: [
+      { text: <>Always — category is strictly better than object</> },
+      { text: <>When the column has few unique values repeated across many rows</>, correct: true },
+      { text: <>Only for columns that will be sorted</> },
+      { text: <>When every value in the column is unique</> },
+    ],
+    explanation: <>Category stores each unique value once plus a small integer code per row — a huge win when uniques ≪ rows (plans, states, product types). With mostly-unique values (free text, IDs) the dictionary overhead exceeds the savings and object/string dtype is the right call.</>
+  }
+]} />
+
+<MarkDone slug="foundations/scientific-stack/pandas-dataframe-fundamentals" title="Pandas — DataFrames & Series" />

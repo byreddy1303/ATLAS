@@ -222,7 +222,7 @@ const tier0: Tier = {
             "Reading messy CSVs without crying",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "pandas-groupby-merges",
@@ -236,7 +236,7 @@ const tier0: Tier = {
             "rolling windows and time-based aggregation",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "matplotlib-figures",
