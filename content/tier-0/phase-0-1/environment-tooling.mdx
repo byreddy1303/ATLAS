@@ -108,342 +108,159 @@ uv run pytest          # your tests pass on their laptop too
 uv run python -m my_atlas_lab   # your code runs — no manual pip, no activate, no drift`;
 
 <Prerequisites>
-None. This is chapter zero — your workstation. Everything else in the Atlas assumes what you build here. Bring: a terminal, git installed, and one hour of patience. Leave with: a workstation that will still make sense in three years.
+None. This is chapter zero — your workstation. Bring a terminal, git installed, and one hour of patience; leave with a setup that will still make sense in three years.
 </Prerequisites>
-
-<StudyDepth
-  intro={<>Not every corner of this chapter earns the same real estate in your working memory. Drill the daily-loop commands and the <code>pyproject.toml</code> shape; skim the archaeology and the lock-file internals until they matter.</>}
-  drill={[
-    <><code>uv add</code> / <code>uv sync</code> / <code>uv run</code> — the daily loop</>,
-    <><code>pyproject.toml</code> shape: <code>[project]</code>, dependencies, <code>[tool.ruff]</code></>,
-    <>Ruff format + check as a commit-time reflex</>,
-    <>The two-file reproducibility guarantee: <code>pyproject.toml</code> + <code>uv.lock</code></>,
-  ]}
-  skim={[
-    <>The full history of pip → virtualenv → conda → Poetry — know the story, don&apos;t memorize the players</>,
-    <>Precise <code>uv.lock</code> internals (hash format, marker syntax)</>,
-    <>Every <code>[tool.*]</code> table in <code>pyproject.toml</code></>,
-    <>Non-uv managers (Poetry, PDM) unless you inherit a repo using them</>,
-  ]}
-/>
 
 <Motivation title="The boring hour that saves the next six months">
 
-Every guide to Python starts the same way. *"Install Python 3, open a REPL, print hello world."* Fifteen minutes in you're writing loops, ignoring the environment. Six months later you have four Python installs on your Mac — the system Python (never touch it), the one Homebrew put there, the one that came with Anaconda that a course made you install, and the one you can't remember installing but suspect was pyenv. Your `site-packages` is a museum: `numpy 1.19` for one course, `numpy 1.26` because a tutorial said so, `numpy 2.1` for the newest project. Nothing works. Every fresh clone of a repo takes forty minutes of dependency Tetris before anything runs.
+The default outcome of "just start coding" Python is a machine with four Python installs, a `site-packages` museum of conflicting numpy versions, and repos that take forty minutes of dependency Tetris before anything runs. It compounds brutally in ML: PyTorch pinned to a CUDA version, numpy pinned because 2.0 broke things, scikit-learn pinned to whatever pickled your model six months ago. One careless `pip install` bricks a working project; papers you try to reproduce won't even start.
 
-This is not a rare tragedy; it's the default outcome of the "just start coding" philosophy. And it *compounds* in ML. ML projects have big, heavy dependencies with strict version ties: PyTorch pinned to CUDA 12.4, NumPy pinned to 1.26 (2.0 broke things), scikit-learn pinned to whatever the pickle format was when you saved that model six months ago. One bad `pip install` and a working project is bricked. Papers you're trying to reproduce won't even *start*. This is what people mean by "the Python packaging crisis" — it's real, it costs weeks per year, and until 2024 there was no clean fix.
-
-Then in 2024, Astral shipped **`uv`** — a Rust-native, ten-to-a-hundred-times-faster replacement for pip, virtualenv, pipenv, poetry, and pyenv, all in one binary. Combined with **Ruff** (their all-in-one formatter/linter, also Rust), **pytest** (the testing standard), and **git** (version control since forever), you now have the modern Python workstation: five tools, one config file, no ceremony. Every serious ML team in 2026 either has adopted this stack or is migrating to it. Set it up correctly *once* today and you will never have another "why does this only work on Sarah's machine" week. That is the trade this chapter offers you.
+In 2024 Astral shipped **uv** — one Rust binary that replaces pip, virtualenv, pyenv, pip-tools, and poetry, 10–100× faster than any of them — and **Ruff**, one binary replacing black, isort, flake8, pyupgrade, and most of pylint. With **pytest** and **git**, that's the whole modern workstation: five tools, one config file, no ceremony. Every serious ML team has adopted this stack or is migrating to it. Set it up once today; never have another "why does this only work on Sarah's machine" week.
 
 </Motivation>
 
-<Intuition title="What a Python 'environment' actually is">
+<Intuition title="A venv is just a folder, and uv is the thing that builds and runs it">
 
-Strip away the mystique: a **virtual environment** (venv) is just a folder. It contains a Python interpreter (usually a symlink into a real one), a `site-packages/` directory holding the libraries this specific project uses, and a tiny config file. When your shell "uses" that venv, it means the very first `python` in your `PATH` points at that folder's Python. That is the *entire* mechanism. There is no daemon, no server, no registry — just a folder and a `PATH` trick.
+Strip the mystique: a **virtual environment** is a folder containing a Python interpreter (usually a symlink to a real one) and a `site-packages/` directory holding *this project's* libraries. Nothing else — no daemon, no registry. "Activating" one is a `PATH` trick: `PATH` is the ordered list of folders your shell searches for executables, and activation just prepends the venv's `bin/` so `python` resolves to the venv's Python. `uv run` skips the trick entirely and invokes the venv's Python directly — same effect, zero ceremony, works from any shell.
 
-Every project you build gets its own venv. That way `numpy 1.26` for the class you're taking and `numpy 2.1` for the tutorial you're following can coexist without ever seeing each other. The venv is the sandbox. **`uv`** is the tool that builds, populates, and runs commands inside that sandbox for you, without you having to remember activation dances.
+Every project gets its own venv, so `numpy 1.26` for one course and `numpy 2.1` for another coexist without ever meeting. **uv** builds the sandbox, fills it, and runs commands inside it; `pyproject.toml` declares what you want, `uv.lock` records exactly what you got. That one sentence — *uv reads `pyproject.toml`, writes `uv.lock`, populates `.venv/`, and `uv run` executes inside it* — is the entire mental model.
 
 </Intuition>
 
-<Recall term="The PATH environment variable">
+## The workstation in seven commands
 
-`PATH` is an ordered list of folders your shell searches to find executables. When you type `python`, the shell looks in each folder of `PATH`, top to bottom, and runs the first `python` it finds. That's how "activating" a venv works: it prepends the venv's `bin/` folder to `PATH`, so `python` now resolves to *the venv's* Python instead of the system one. `uv run` skips this dance entirely — it invokes the venv's Python directly without touching your shell's `PATH`. Same effect, zero ceremony.
+<CodeBlock language="bash" title="from empty terminal to running ML project" code={setupCode} />
 
-</Recall>
+Notice what's *missing*: no `activate`, no `pip install --upgrade pip`, no `python -m venv`, no `deactivate`. `uv add` writes the dependency into `pyproject.toml` **and** installs it in one step — so the config file and reality can't drift apart. `uv run` finds the venv adjacent to `pyproject.toml`, executes inside it, and exits cleanly. And `uv python install 3.12` gives uv its own private interpreter downloads — your system Python (which the OS itself uses) is never touched.
 
-<Recall term="Package vs module">
+When old tutorials tell you to `pip install`, `python -m venv`, `pyenv install`, or `poetry add` — mentally translate: it's all `uv` now. Same for `black`/`isort`/`flake8` → `ruff`.
 
-A **module** is a single `.py` file. A **package** is a folder containing modules, marked either by an `__init__.py` file (the classic marker) or by simply being importable (implicit namespace packages, added in Python 3.3). When you `import numpy` you're importing the package; `import numpy.linalg` reaches into a sub-package inside it. Your own project should be structured the same way — one top-level package folder inside `src/`, with sub-modules for logically-separate pieces. That's what `uv init` scaffolds for you.
+## What's on disk — the anatomy
 
-</Recall>
+<CodeBlock language="text" title="the project's file tree" code={treeExample} />
 
-<Recall term="Lockfile">
+`uv init` did nothing magical — it created the folder, wrote a stub `pyproject.toml`, picked (or downloaded) an interpreter matching `.python-version`, created `.venv/` with a symlinked Python and empty `site-packages/`, and scaffolded `src/my_atlas_lab/` with an `__init__.py`. All filesystem operations, under a second.
 
-A lockfile is a machine-generated file that records the *exact resolved version* of every package your project uses, including every transitive dependency (the packages your packages depend on). It answers the question *"if I install this on another machine tomorrow, exactly which bytes of code will end up on disk?"* `uv.lock` is uv's lockfile. Commit it. Without it, "works on my machine" is guaranteed.
+The things worth naming: **`.venv/` is disposable** — delete it any time; `uv sync` rebuilds it from the two committed files. Never commit it (gigabytes, machine-specific binaries). **The `src/` layout** keeps your package (a folder of modules — single `.py` files — marked importable by `__init__.py`) *inside* `src/` rather than at repo root, which prevents "works because the current directory happens to be importable" bugs that only surface in CI. And after `uv sync`, your own package is installed in **editable mode**: edits to `src/.../math.py` take effect immediately, no reinstall — which is why `uv run pytest` just works after every edit.
 
-</Recall>
+## pyproject.toml — the contract
 
-<Angles intro={<>Five ways to look at your Python workstation. Each angle changes what you see; together they give you the mental toolkit to reason about anything the setup throws at you.</>}>
+<CodeBlock language="toml" title="the complete contract, one file" code={pyprojectExample} />
 
-  <Angle type="historical" title="A short history — why so many tools existed">
+Everything about the project lives in **one file** — not scattered across `requirements.txt`, `setup.py`, `.flake8`, and a Makefile like the old days. **`[project]`** is identity: name, version, minimum Python, and dependencies at their *loosest acceptable* bounds (`numpy>=1.26` — the lockfile handles exactness). **`[project.optional-dependencies]`** holds what users don't need but developers do (pytest, ruff) — added via `uv add --dev`. **`[tool.ruff]`** — every modern tool reads its config from a `[tool.<name>]` table here, so formatter, linter, and eventually pytest/mypy settings all live in this single file. Every modern Python repo you will ever clone has this file at its root; being able to read one top-to-bottom *is* the skill.
 
-  For fifteen years, Python packaging looked like this: **pip** installs packages, **virtualenv** creates sandboxes, **pyenv** manages Python versions, **pip-tools** locks dependencies, **poetry** (or **pipenv**) tries to unify the previous four, and **conda** does all of the above *but only for its own separate universe of packages*. Each tool solved a real problem in its era. Each shipped with its own configuration format. Learning Python meant learning six tools' quirks, plus the failure modes of moving between them.
+## The two-file reproducibility guarantee
 
-  **`uv`** (Astral, 2024) is the consolidation. One Rust binary does the job of pip + virtualenv + pyenv + pip-tools + poetry, and does it faster than any of them individually. It reads `pyproject.toml` — the modern official standard — as its single source of truth, and produces `uv.lock` as its lockfile. There is nothing to configure separately. If you started Python in 2020, this feels like the future arriving early; if you're starting today, this is simply *how it works* and none of the earlier tools need to enter your daily life.
+<CodeBlock language="bash" title="the entire onboarding ritual, from scratch" code={reproExample} />
 
-  The other consolidation is **Ruff** (also Astral, also Rust). It replaces `black` (formatting), `isort` (import sorting), `flake8` (linting), `pyupgrade` (Python-version modernization suggestions), and most of `pylint`. One binary, one config section in `pyproject.toml`, one hundredfold speedup over the tools it replaces. In modern Python, "run the formatter" and "run the linter" are one command each: `ruff format` and `ruff check`.
+The pair does different jobs: `pyproject.toml` states your *intent* (`numpy>=1.26`); **`uv.lock`** records the *exact resolved outcome* — every package, every transitive dependency, precise versions and hashes. Without the lockfile committed, two teammates running `uv sync` on Tuesday and Friday can get different versions (a patch released Wednesday), and "works on my machine" is back. With it, `uv sync` reproduces the same bytes on any machine — upgrades become explicit events (`uv lock --upgrade numpy`, commit the diff), never accidents.
 
-  </Angle>
+This is not team hygiene alone — it's how ML survives time. A pickled model saved eight months ago can fail to unpickle under a newer scikit-learn; with `uv.lock` committed alongside the checkpoint, `uv sync` returns you to *exactly* the environment that produced it. Same story in CI: every serious ML pipeline starts with `uv sync` (often `--frozen`, which fails loudly if lock and config disagree) before running tests or training.
 
-  <Angle type="workflow" title="A workstation in seven commands">
+## Ruff and pytest — the quality loop
 
-  <CodeBlock language="bash" title="from empty terminal to running ML project" code={setupCode} />
+<CodeBlock language="python" title="tests/test_math.py — tests as executable documentation" code={pytestExample} />
 
-  Notice what is missing: no `activate` step. No `pip install --upgrade pip`. No `python -m venv`. No `deactivate`. `uv run` transparently uses the project's venv every time — it looks up the venv adjacent to `pyproject.toml`, executes the command inside it, exits cleanly. This is the biggest ergonomic upgrade over the 2020-era stack. Combined with the fact that `uv add` writes both to your config file *and* installs the package in one step, you save dozens of keystrokes per day and never accidentally install something into the wrong environment.
+**Ruff** is two reflexes: `uv run ruff format .` (canonical layout — replaces black + isort) and `uv run ruff check .` (catches bugs-in-waiting: unused imports, undefined names, outdated idioms — replaces flake8 + pyupgrade + most of pylint). Run both before every commit until it's muscle memory.
 
-  </Angle>
+**pytest** discovers any `tests/test_*.py` file and runs every `test_*` function; a bare `assert` that's False is a failure, with pytest printing the offending values. `@pytest.mark.parametrize` turns one test body into a table of cases — three inputs, three independent tests, one function. `uv run pytest -q` is the whole invocation. Tests earn their keep the first time you "improve" something and a red test catches what you broke.
 
-  <Angle type="anatomy" title="Anatomy — what's actually on disk">
+## The rules that keep it clean
 
-  Once you've run through the setup, look at your project directory. It literally looks like this:
-
-  <CodeBlock language="text" title="the project's file tree" code={treeExample} />
-
-  A few things worth naming out loud. **`.venv/` is disposable** — you can delete it any time, and `uv sync` rebuilds it byte-for-byte from `pyproject.toml` + `uv.lock`. That's exactly why the lockfile matters: it captures the resolved state so the sandbox can be reconstructed at will. Do **not** commit `.venv/` to git; it's easily gigabytes and machine-specific. Do commit `pyproject.toml`, `uv.lock`, `.python-version`, `src/`, and `tests/`. The `src/` layout (as opposed to putting your package directly at repo root) is a small but real quality-of-life win: it prevents accidental "works because the current directory happens to be on PATH" bugs, which are a classic source of "runs in dev, fails in CI" mysteries.
-
-  </Angle>
-
-  <Angle type="contract" title="pyproject.toml — the constitution of your project">
-
-  Everything about your project — its identity, the Python version it requires, its runtime and dev dependencies, its formatter settings, its linter settings, its test configuration — lives in **one file**. Not six. Not scattered across `requirements.txt`, `setup.py`, `setup.cfg`, `.flake8`, `pyrightconfig.json`, and `Makefile` (the way it used to be).
-
-  <CodeBlock language="toml" title="pyproject.toml — the complete contract" code={pyprojectExample} />
-
-  Read it top to bottom. **`[project]`** is the package identity block — name, version, the minimum Python you're willing to run on, and the dependencies at their *loosest acceptable* version bounds. **`[project.optional-dependencies]`** is for anything you don't ship to end users (test tools, formatters) — you install them locally with `uv sync --group dev` (or `uv add --dev`). **`[tool.ruff]`** configures Ruff's rules; every tool that supports the standard reads its config from `[tool.<toolname>]`, so eventually `[tool.pytest.ini_options]`, `[tool.mypy]`, etc, all live in this single file. This is not a Python convention any longer; it is an *industry* convention. Every modern Python project you'll ever fork will have a `pyproject.toml` at its root.
-
-  </Angle>
-
-  <Angle type="production" title="Reproducibility — the two-file guarantee">
-
-  Here is the trick that makes modern Python worth the setup effort. Once you have `pyproject.toml` and `uv.lock` committed, any teammate — or your future self on a new laptop, or a CI machine spinning up for the fiftieth time today — can reproduce your environment with **one command**:
-
-  <CodeBlock language="bash" title="the entire onboarding ritual, from scratch" code={reproExample} />
-
-  This is a huge deal. Before uv, "clone the repo, install deps" was a page-long README with escape hatches for every OS. Now it is a single command that either succeeds or fails loudly and immediately — no silent version drift. That "one command onboarding" is what makes teamwork on ML projects tractable, and it is what makes reproducing a paper's code from GitHub something an undergraduate can do in an afternoon instead of a week.
-
-  </Angle>
-
-</Angles>
-
-<Convergence>
-
-The mental model, condensed: **`uv` reads `pyproject.toml`, writes `uv.lock`, populates `.venv/`, and `uv run` executes commands inside that venv.** Ruff formats and lints. Pytest tests. Git tracks changes. Five tools, one config file, no activation, no environment surprises. Every command in every future chapter of this Atlas is going to be prefixed by `uv run`. Get this reflex in your fingers today.
-
-</Convergence>
-
-<Derivation title="What actually happens when you type `uv init my-atlas-lab`">
-
-The setup command feels like magic, but each step is a small, understandable filesystem operation. Trace them once and the whole tool stops being mysterious.
-
-<Step n={1} math={<span>uv checks that the folder <code>my-atlas-lab/</code> does not already exist, then creates it.</span>}>
-Fail-early check: uv refuses to overwrite an existing folder. This prevents the "oops, I just erased my previous project" class of bug. If the folder is there, uv exits with a clear error and does nothing. Good tools have short, loud failure modes.
-</Step>
-
-<Step n={2} math={<span>Writes a fresh <code>pyproject.toml</code> with default <code>[project]</code> and <code>[build-system]</code> tables.</span>}>
-The default file is intentionally sparse — name, version, requires-python, an empty dependencies list. This is your project's constitution as a stub; you will edit it (or let `uv add` edit it) as the project grows. Everything downstream — sync, run, build — reads from this file.
-</Step>
-
-<Step n={3} math={<span>Reads <code>.python-version</code> (creating one at <code>3.12</code> if absent) and resolves an interpreter that satisfies it.</span>}>
-If uv has already installed Python 3.12 (via `uv python install 3.12`), it uses that. If not, it downloads a self-contained Python build from the Python Build Standalone project and stashes it in `~/.local/share/uv/`. Notice: your system Python is not touched. Your Homebrew Python is not touched. uv has its own private Pythons — one less thing that can silently drift.
-</Step>
-
-<Step n={4} math={<span>Creates <code>.venv/</code> — a folder with a Python symlink and an empty <code>site-packages/</code>.</span>}>
-Concretely: `.venv/bin/python` becomes a symlink to the interpreter chosen in step 3, and `.venv/lib/python3.12/site-packages/` is created empty. From now on any package installed into this project lands *here*, not in your system Python. Delete `.venv/` and step 4 reruns cleanly; the sandbox is disposable by design.
-</Step>
-
-<Step n={5} math={<span>Scaffolds a <code>src/my_atlas_lab/</code> package and an <code>__init__.py</code>.</span>}>
-The `src/` layout is a convention: your code lives *inside* `src/`, not at the repo root. This is what makes `import my_atlas_lab` work only after installation — surfacing packaging bugs that would otherwise hide until you deploy. `__init__.py` marks the folder as an importable package.
-</Step>
-
-<Step n={6} math={<span>Writes a placeholder <code>uv.lock</code> and initializes a fresh <code>git init</code> (unless <code>--no-vcs</code>).</span>}>
-The lockfile is empty at scaffold time because you have no dependencies yet. The moment you `uv add numpy`, uv resolves numpy + all its transitive dependencies against your Python version, records the exact versions and hashes in `uv.lock`, and writes a `[dependencies]` entry to `pyproject.toml`. Two files, always in sync, always describing the truth.
-</Step>
-
-<Step n={7} math={<span>Prints a friendly banner telling you what happened.</span>}>
-That is it. The whole ceremony took under a second because uv is native code, no Python startup, no per-package HTTP round-trip. What used to be a five-command ritual (`mkdir`, `cd`, `python -m venv .venv`, `source .venv/bin/activate`, `pip install --upgrade pip`) is now one command, and the resulting state is *strictly better* — reproducible, testable, version-pinned.
-</Step>
-
-</Derivation>
-
-<Example title="A worked scaffold — from zero to running tests">
-
-Suppose you want to start a small numerical experimentation project called `atlas-lab`. Here is the *entire* keystroke sequence, from "empty desktop" to "green tests":
-
-<CodeBlock language="bash" title="the full scaffold" code={`# 0. install uv once (skip if you already did)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# 1. scaffold and enter the project
-uv init atlas-lab && cd atlas-lab
-
-# 2. add dependencies (writes to pyproject.toml AND installs in one shot)
-uv add numpy scipy matplotlib
-uv add --dev pytest ruff
-
-# 3. write a tiny module
-mkdir -p src/atlas_lab
-cat > src/atlas_lab/math.py <<'PY'
-def add(a, b):
-    """Sum of two numbers. Trivial, but ours."""
-    return a + b
-PY
-
-# 4. write a test
-mkdir -p tests
-cat > tests/test_math.py <<'PY'
-from atlas_lab.math import add
-
-def test_add():
-    assert add(2, 3) == 5
-PY
-
-# 5. install our package in editable mode + run the tests
-uv sync
-uv run pytest -q            # should print '1 passed'
-
-# 6. lint + format
-uv run ruff format .
-uv run ruff check .
-
-# 7. commit the state
-git add . && git commit -m "scaffold + trivial math + green test"`} />
-
-Notice the arc. In seven minutes you have a project with pinned Python, pinned deps, a package under `src/`, a passing test, a formatted and linted codebase, and a git commit. Every subsequent piece of ML work you do — regression, classification, deep learning experiments — starts from *exactly this same scaffold*. The muscle memory pays back forever.
-
-</Example>
-
-<Nuance>
-
-**Never `pip install` into your system Python.** On macOS the system Python is used by parts of the OS; on Linux the same. Random `pip install` into it can break tools you didn't know existed. If you've already done this once or twice, it's fine — but from today forward, every install goes through `uv add` inside a project.
-
-**Notebooks (`.ipynb`) are exploration, not production.** They hide execution order (cell 3 might depend on cell 7 that you already deleted), make git diffs unreadable, and can't be tested. Rule of thumb: prototype in a notebook, then move the working code into `src/<your-package>/*.py` modules and import back into a small driver notebook. This is how professional ML teams keep their notebooks tidy — the notebook is a thin driver, the logic lives in tested modules.
-
-**Ruff replaces many tools at once.** You may see old tutorials reference `black`, `isort`, `flake8`, `pyupgrade`, `pylint`. In 2026 you install exactly one of them: `ruff`. Its `format` subcommand replaces `black` + `isort`; its `check` subcommand replaces `flake8` + `pyupgrade` + most of `pylint`. Configuration lives in `[tool.ruff]` and `[tool.ruff.lint]` inside `pyproject.toml`.
-
-**Lockfiles matter more than you think.** Without `uv.lock`, `uv sync` picks whatever version of each dependency satisfies your loose bounds *at the moment of running*. Two teammates who run `uv sync` on Tuesday and Friday can end up with different versions if a package released a new one on Wednesday. Commit the lockfile.
-
-**Editable installs.** After `uv sync`, your own package is installed in *editable mode* into the venv — meaning changes to `src/my_atlas_lab/math.py` are picked up immediately without reinstall. This is the reason `uv run pytest` works right after you edit a file. If someone tells you "you have to reinstall your package after edits", they're using a stack from ten years ago.
-
-**Notebook kernels.** If you use Jupyter, install it as a dev dep (`uv add --dev jupyter`) and run with `uv run jupyter lab`. The kernel it launches automatically picks up the project venv. Never `pip install jupyter` globally — same reason as never installing into system Python.
-
-**Conda's remaining niche.** Conda still owns one legitimate corner: research environments where you need non-Python native libraries (CUDA-specific PyTorch builds sometimes, specialized numerical stacks) *and* you can't get them via wheels. If you're just doing normal ML work in 2026, uv covers 99% of cases. If you're doing GPU-heavy research on institutional clusters, you'll sometimes still meet Conda; know it exists, don't mix stacks in one project.
-
-</Nuance>
+- **Never `pip install` into system Python.** The OS uses it; breaking it breaks tools you didn't know existed. Every install goes through `uv add` inside a project.
+- **Notebooks are exploration, not production.** They hide execution order (cell 3 depending on a deleted cell 7), diff terribly, and can't be tested. Prototype in a notebook, then move working code into `src/<package>/*.py` and import it back — the notebook stays a thin driver over tested modules. Jupyter itself is a dev dep: `uv add --dev jupyter`, `uv run jupyter lab` (the kernel picks up the project venv automatically).
+- **Conda's one remaining niche** is research clusters needing non-Python native builds you can't get as wheels. Know it exists; don't mix it with uv in one project.
 
 <RealWorldML title="A real scikit-learn project, scaffolded in under two minutes">
 
-Take everything above and put it to work. The cell below is what a working scikit-learn "first model" project looks like once the workstation is right. Read it top to bottom — this is exactly the shape of every classical-ML pipeline: **load data → split → fit → predict → evaluate**.
+The payoff cell: what a working "first model" looks like once the workstation is right — the exact shape of every classical-ML pipeline: **load → split → fit → predict → evaluate**.
 
 <RunnableCode title="an iris classifier — the 'hello world' of ML" code={irisCode} packages={["scikit-learn"]} />
 
-**What just happened, line by line, connected back to the setup:**
+Line by line, connected back to the setup:
 
-1. `load_iris(return_X_y=True)` returns the classic 150-flower dataset — 4 features (petal/sepal length/width), 3 species. This works only because `sklearn` is in your venv, installed via `uv add scikit-learn`. In a clean Python without setup, `import sklearn` would fail immediately.
-2. `train_test_split(..., random_state=42)` deterministically partitions rows into a training set (75%) and a test set (25%). The `random_state` is a seed — with it fixed, you get the same split every time you run. Reproducibility is not just a setup story; it lives inside every training script too.
-3. `LogisticRegression(...).fit(Xtr, ytr)` is where the model actually learns. Under the hood this is thousands of dot products (foreshadowing Tier I) and gradient steps (Tier I again). We're using it as a black box here; the whole rest of the Atlas will unpack what's inside.
-4. `clf.predict(Xte)` returns a species guess for each of the 37 held-out flowers.
-5. `accuracy_score` and `confusion_matrix` are the two most-run diagnostics in every ML shop. Accuracy is the top-line "how often were we right"; confusion matrix breaks it out by class so you can see which species get confused.
+1. `load_iris(return_X_y=True)` — the classic 150-flower dataset (4 measurements, 3 species). The import works only because `uv add scikit-learn` put it in *this project's* venv.
+2. `train_test_split(..., random_state=42)` — deterministic 75/25 partition. The fixed seed means the same split every run: reproducibility lives inside training scripts, not just around them.
+3. `LogisticRegression(...).fit(Xtr, ytr)` — the learning step, used as a black box today; Tier 1 opens it (it's dot products and gradient steps all the way down).
+4. `clf.predict(Xte)` — a species guess for each of the 38 held-out flowers the model never saw.
+5. `accuracy_score` + `confusion_matrix` — the two most-run diagnostics in ML: the top-line "how often right," and the per-class breakdown showing *which* species get confused.
 
-**Why this needed the setup chapter first:** if any dependency were mispinned — `sklearn` moved a decimal in its API, `numpy` broke ABI compatibility — this cell would either error or, worse, silently produce a different result. That is the *reproducibility crisis* in ML research in miniature. `pyproject.toml` + `uv.lock` are the two-page prophylactic. This is why every serious lab commits both.
+Why this chapter had to come first: if any dependency were mispinned — sklearn changed an API, numpy broke compatibility — this cell would error or, worse, silently produce different numbers. That's the ML reproducibility crisis in miniature, and `pyproject.toml` + `uv.lock` are the two-file vaccine.
 
 </RealWorldML>
 
-<CodeItYourself
-  title="Scaffold your own tiny ML project"
-  spec={<>Create a fresh project called <code>tiny-lab</code>. It should: (1) require Python 3.12+, (2) depend on <code>numpy</code> and <code>scikit-learn</code>, (3) have a dev dep on <code>pytest</code>, (4) contain a module <code>src/tiny_lab/model.py</code> with a function <code>train_and_score(seed=0) -&gt; float</code> that trains a LogisticRegression on Iris and returns test accuracy, and (5) a test that asserts the accuracy is above 0.9. Then run <code>uv run pytest</code> and confirm green.</>}
-  hints={[
-    "Start with `uv init tiny-lab && cd tiny-lab`. Don't fight the scaffold — accept the defaults.",
-    "Use `uv add` for numpy/scikit-learn and `uv add --dev` for pytest. Never edit pyproject.toml by hand for deps.",
-    "Iris is small; LogisticRegression usually scores ~0.95 on it. If your test is flaky, set random_state=seed in both train_test_split and the model.",
-    "Remember `src/` layout: the file lives at src/tiny_lab/model.py and imports as `from tiny_lab.model import train_and_score`."
+<StudyDepth
+  intro={<>Drill the daily-loop commands and the <code>pyproject.toml</code> shape until they&apos;re reflexes; skim the archaeology and internals until a repo forces them on you.</>}
+  drill={[
+    <><code>uv add</code> / <code>uv sync</code> / <code>uv run</code> — the daily loop</>,
+    <><code>pyproject.toml</code> shape: <code>[project]</code>, dependencies, <code>[tool.ruff]</code></>,
+    <>Ruff format + check as a commit-time reflex; <code>uv run pytest -q</code> after every change</>,
+    <>The two-file guarantee: commit <code>pyproject.toml</code> + <code>uv.lock</code>, never <code>.venv/</code></>,
   ]}
-  solution={<CodeBlock language="python" title="src/tiny_lab/model.py + tests/test_model.py" code={`# src/tiny_lab/model.py
-from sklearn.datasets import load_iris
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score
-from sklearn.model_selection import train_test_split
-
-def train_and_score(seed: int = 0) -> float:
-    X, y = load_iris(return_X_y=True)
-    Xtr, Xte, ytr, yte = train_test_split(
-        X, y, test_size=0.25, random_state=seed
-    )
-    clf = LogisticRegression(max_iter=1000, random_state=seed).fit(Xtr, ytr)
-    return accuracy_score(yte, clf.predict(Xte))
-
-# tests/test_model.py
-from tiny_lab.model import train_and_score
-
-def test_baseline_accuracy():
-    assert train_and_score(seed=0) > 0.9`} />}
+  skim={[
+    <>The pip → virtualenv → conda → poetry history — know the story, skip the players&apos; quirks</>,
+    <><code>uv.lock</code> internals (hash formats, marker syntax)</>,
+    <>Every <code>[tool.*]</code> table — learn them as tools arrive</>,
+    <>Poetry/PDM/conda workflows unless you inherit a repo using them</>,
+  ]}
 />
 
-<LifeLesson title="Setup discipline: a small tax that compounds into freedom">
+<CodeItYourself title="Scaffold your own tiny ML project">
 
-There is a temptation — every time — to skip the boring hour. *"I'll just get something running first, I'll structure it later."* The trouble is that "later" is a promise made by a version of you with more time, and that person doesn't exist. Every messy start becomes a debt whose interest is paid in one-off bugs, weird import errors, and lost work.
+**The drill (on your real machine, not in the browser):** create a project `tiny-lab` that (1) requires Python 3.12+, (2) depends on `numpy` and `scikit-learn`, (3) has a dev dep on `pytest`, (4) contains `src/tiny_lab/model.py` with `train_and_score(seed=0) -> float` that trains a LogisticRegression on Iris and returns test accuracy, and (5) has a test asserting accuracy above 0.9. Finish with `uv run pytest` showing green, then `uv run ruff format . && uv run ruff check .`, then a git commit.
 
-The uv/Ruff/pytest/git ritual is a small **investment** that pays back every time you touch the project: another dependency added is one command; another test is one function; another machine set up is one `uv sync`. Compare this to the alternative — hand-editing `requirements.txt`, guessing why `pip install` fails on Sarah's laptop, discovering that your notebook only works if cells are run in a particular non-obvious order — and the trade is not close.
+Hints: start `uv init tiny-lab && cd tiny-lab`; use `uv add` / `uv add --dev` (never edit dependencies by hand); pass `random_state=seed` to both the split and the model so the test can't flake; the `src/` layout means the import is `from tiny_lab.model import train_and_score`. If `pytest` can't find your module, you skipped `uv sync`.
 
-The pattern generalizes far outside coding. **A well-set-up workstation, a well-set-up morning routine, a well-set-up shared calendar** — these are all small taxes now that convert big future costs into no cost. The people who look like they get twice as much done in the same day usually just paid the setup tax where you didn't. Pay it here. Then forget you paid it, because you'll never think about your Python environment again.
+</CodeItYourself>
 
-</LifeLesson>
+<Summary>
 
-<MLConnection>
+- **One project = one folder**: `pyproject.toml` (intent) + `uv.lock` (exact truth) + `src/` layout + disposable `.venv/`.
+- **The daily loop**: `uv init` scaffolds; `uv add` records *and* installs; `uv run` executes inside the venv with no activation; `uv sync` rebuilds everything from the two files.
+- **A venv is just a folder + a PATH trick** — per-project `site-packages` so versions never collide; uv keeps private interpreters so system Python stays untouched.
+- **Ruff** = format (`black`+`isort`) + check (`flake8`+`pyupgrade`+most `pylint`), one binary, config in `[tool.ruff]`. **pytest** = `test_*` functions with bare asserts; `parametrize` scales one test into many.
+- **Commit the recipe, not the sandwich**: `pyproject.toml` + `uv.lock` + `.python-version` + `src/` + `tests/`; never `.venv/`. Lockfile committed = teammates, CI, and future-you get identical bytes — checkpoints stay unpicklable-proof, papers stay reproducible.
+- **Hygiene**: never `pip install` into system Python; notebooks are thin drivers over tested `src/` modules; onboarding forever = `git clone && uv sync && uv run pytest`.
 
-Environment discipline is where research reproducibility comes from — and reproducibility is the difference between science and folklore.
-
-- **Every ML paper you read from 2024 forward** likely ships a `pyproject.toml` (or a `pyproject.toml` + a Conda `environment.yml`) *and a `uv.lock`*. That is why you can now sometimes clone a paper's repo and reproduce its results on your laptop in an afternoon; five years ago this was unheard of.
-- **Model checkpoints have a shelf life** proportional to how tightly you've pinned the code that saved them. Save a scikit-learn model as pickle without a lockfile, come back in a year, and unpickling can fail because internal object layouts changed between versions. With `uv.lock` committed, `uv sync` returns you to *exactly* the environment that produced the checkpoint. This is career-saving.
-- **CI/CD** in every serious ML shop starts with `uv sync` (or `docker build` which internally runs `uv sync`). Then the CI runs tests and, often, the training run itself. If it doesn't reproduce, the CI job fails loudly, and someone finds out on a Monday morning instead of at a Friday-afternoon demo.
-- **Dockerized deployments** copy your `pyproject.toml` + `uv.lock`, run `uv sync`, and ship. Ruff runs in CI as the linter step. Pytest runs in CI as the correctness step. This is not a per-team invention; it is the industry template.
-- **Research groups** with tight versioning practices publish their pinned envs alongside the paper (`uv.lock` in the paper's GitHub) so referees can rerun. Groups without them are getting harder to publish in top venues, because reviewers now genuinely test "does this compile?" before accepting.
-
-Learn the workstation once; every ML project you touch — school, research, industry — will use variations of this same stack.
-
-</MLConnection>
-
-<Summary bullets={[
-  "One project = one folder with `pyproject.toml` + `uv.lock` + `src/` layout + `.venv/` (disposable).",
-  "`uv init` scaffolds; `uv add <pkg>` installs and records; `uv run <cmd>` executes inside the env; `uv sync` reproduces from lockfile.",
-  "`pyproject.toml` is the single source of truth for identity, deps, and tool config. `uv.lock` records exact resolved versions.",
-  "Ruff replaces black + isort + flake8 + pyupgrade + most of pylint. One tool, two subcommands: `ruff format` and `ruff check`.",
-  "pytest is executable documentation. `test_*` functions become assertions. `parametrize` scales one test into many.",
-  "Never `pip install` into system Python. Notebooks are exploration; production code lives in `src/`. Commit lockfiles.",
-  "Payoff: 'clone repo → uv sync → uv run pytest' becomes the entire onboarding ritual, forever."
-]} />
+</Summary>
 
 <ProblemSet
   problems={[
     {
       difficulty: "easy",
-      q: <>You have a fresh laptop with nothing installed and a colleague sends you a link to their <code>my-atlas-lab</code> repo with <code>pyproject.toml</code> and <code>uv.lock</code> committed. What is the shortest sequence of commands that gets you running their tests?</>,
+      q: <>Fresh laptop, nothing installed. A colleague sends their repo containing <code>pyproject.toml</code> and <code>uv.lock</code>. What's the shortest command sequence to run their tests?</>,
       hint: <>Three steps: install uv, clone, sync + run.</>,
-      answer: <>1. Install uv: <code>curl -LsSf https://astral.sh/uv/install.sh | sh</code>. 2. Clone: <code>git clone &lt;url&gt; && cd my-atlas-lab</code>. 3. Sync + test: <code>uv sync && uv run pytest</code>. That is it. No pip, no activate, no Python-version dance.</>
+      answer: <>1. Install uv: <code>curl -LsSf https://astral.sh/uv/install.sh | sh</code>. 2. <code>git clone &lt;url&gt; && cd &lt;repo&gt;</code>. 3. <code>uv sync && uv run pytest</code>. No pip, no activate, no Python-version dance — the lockfile guarantees the same versions the colleague has.</>
     },
     {
       difficulty: "easy",
-      q: <>You want to add a dev-only dependency on <code>mypy</code> (a type checker) to your project. Which command edits the right section of <code>pyproject.toml</code> and installs it?</>,
+      q: <>You want a dev-only dependency on <code>mypy</code>. Which command edits the right section of <code>pyproject.toml</code> and installs it — and how do you then run it?</>,
       hint: <><code>--dev</code> selects the dev group.</>,
-      answer: <><code>uv add --dev mypy</code>. This appends to <code>[project.optional-dependencies]</code> under <code>dev = [...]</code> and installs mypy into <code>.venv/</code>. You then run it with <code>uv run mypy src/</code>.</>
-    },
-    {
-      difficulty: "easy",
-      q: <>Someone recommends you commit <code>.venv/</code> to git so teammates don't have to install anything. Should you? Why not?</>,
-      hint: <>Think about size and portability.</>,
-      answer: <>No. <code>.venv/</code> can be hundreds of MB (numpy alone is ~50 MB), it contains compiled binaries specific to your OS and CPU, and it's fully reproducible from <code>pyproject.toml</code> + <code>uv.lock</code> in seconds. Commit the two-file recipe, not the giant sandwich.</>
+      answer: <><code>uv add --dev mypy</code> — appends to the dev group under <code>[project.optional-dependencies]</code> and installs into <code>.venv/</code> in one step. Run it with <code>uv run mypy src/</code>. Runtime deps ship to users; dev deps (tests, linters, type checkers) stay local — the split keeps installs lean for anyone consuming your package.</>
     },
     {
       difficulty: "medium",
-      q: <>A CI job on GitHub Actions fails with "ModuleNotFoundError: No module named 'my_atlas_lab'" during pytest, but the same test passes locally. What is the most likely cause and how do you fix it?</>,
-      hint: <>What is different between your local shell state and a fresh CI runner?</>,
-      answer: <>Locally, <code>uv sync</code> installs your own package in editable mode into <code>.venv/</code>, so <code>import my_atlas_lab</code> works. In CI, the runner is fresh: it also needs <code>uv sync</code> before <code>uv run pytest</code>. Fix: make sure the workflow runs <code>uv sync</code> (or <code>uv sync --frozen</code> for extra safety) as a step before the test step. This is by far the most common Python CI failure and the fix is one line of YAML.</>
+      q: <>CI fails with <em>ModuleNotFoundError: No module named 'my_atlas_lab'</em> during pytest, but the same tests pass locally. Most likely cause and fix?</>,
+      hint: <>What's different between your local shell state and a fresh CI runner?</>,
+      answer: <>Locally, <code>uv sync</code> installed your own package (editable mode) into <code>.venv/</code>, so the import resolves. The CI runner is fresh — nothing is installed until the workflow says so. Fix: run <code>uv sync</code> (or <code>uv sync --frozen</code>, which additionally fails if the lockfile is stale) as a step <em>before</em> <code>uv run pytest</code>. This is the single most common Python CI failure, and the fix is one line of YAML.</>
     },
     {
       difficulty: "medium",
-      q: <>You start a project on Monday with <code>uv add numpy</code>. On Friday your teammate clones your repo. During the week, numpy released a new patch version. Will your teammate get the exact same numpy version you did? Explain.</>,
-      hint: <>Depends on whether you committed the lockfile.</>,
-      answer: <>Yes, if you committed <code>uv.lock</code>. The lockfile pins the exact resolved version (e.g. <code>1.26.4</code>), not the loose bound you wrote (<code>numpy&gt;=1.26</code>). On Friday, <code>uv sync</code> reads the lockfile and installs 1.26.4, not the newer patch. If you did <em>not</em> commit the lockfile, <code>uv sync</code> would re-resolve against the loose bound and could pick up a newer patch — silent drift that ruins reproducibility.</>
-    },
-    {
-      difficulty: "medium",
-      q: <>Explain the difference between <code>uv run pytest</code> and <code>pytest</code> from an activated venv. Are they equivalent?</>,
-      hint: <>What resolves the executable and the interpreter in each case?</>,
-      answer: <>They resolve to the same code path in the end (both run the venv's pytest against the venv's Python), but the mechanisms differ. Activated venv: your shell has prepended <code>.venv/bin</code> to <code>PATH</code>, so <code>pytest</code> resolves to <code>.venv/bin/pytest</code>. <code>uv run pytest</code>: uv skips <code>PATH</code> entirely and directly invokes <code>.venv/bin/pytest</code>, additionally checking that the lockfile is up to date (unless <code>--no-sync</code>). Result is the same; <code>uv run</code> is safer because it works from any subshell and refuses to run against a stale environment.</>
+      q: <>Monday: you <code>uv add numpy</code> and commit. During the week numpy releases a patch. Friday: a teammate clones and runs <code>uv sync</code>. Do they get your exact numpy version? Explain both scenarios.</>,
+      hint: <>The answer depends entirely on one file being committed.</>,
+      answer: <>If <code>uv.lock</code> is committed: yes — the lockfile pins the exact resolved version (say 1.26.4), not the loose bound (<code>numpy&gt;=1.26</code>), so Friday&apos;s sync installs precisely what Monday resolved. If the lockfile was <em>not</em> committed: <code>uv sync</code> re-resolves against the loose bound at Friday&apos;s PyPI state and can pick up the new patch — silent drift, and the two machines now legitimately differ. That&apos;s the entire argument for committing lockfiles.</>
     },
     {
       difficulty: "hard",
-      q: <>Two teammates have <code>pyproject.toml</code> saying <code>numpy&gt;=1.26,&lt;2</code>. Teammate A ran <code>uv sync</code> when numpy 1.26.0 was newest and got 1.26.0. Teammate B ran <code>uv sync</code> after numpy 1.26.4 was released and got 1.26.4. Their code behaves differently. Diagnose: what went wrong, and what is the fix so this cannot happen again?</>,
-      hint: <>Two-file guarantee only works if both files are committed.</>,
-      answer: <>The bound was loose (<code>&gt;=1.26,&lt;2</code>) and there was no <code>uv.lock</code> committed, so each teammate's <code>uv sync</code> resolved independently against PyPI at different points in time and picked different patch versions of numpy. Fix: <b>always commit <code>uv.lock</code></b>. With it, both teammates get exactly the version recorded when the lockfile was last regenerated — same bytes on both laptops. If you deliberately want to bump, run <code>uv lock --upgrade numpy</code> and commit the new lockfile. This makes upgrades explicit events, not accidents. Bonus: enforce it in CI with <code>uv sync --frozen</code>, which errors if the lockfile is out of sync with <code>pyproject.toml</code>.</>
+      q: <>Two teammates both have <code>numpy&gt;=1.26,&lt;2</code> in <code>pyproject.toml</code>. A synced when 1.26.0 was newest; B synced after 1.26.4 shipped. Their results differ. Diagnose the root cause, give the immediate fix, and the workflow that makes recurrence impossible.</>,
+      hint: <>The two-file guarantee only works if both files are committed.</>,
+      answer: <><strong>Root cause:</strong> the bound is deliberately loose and no <code>uv.lock</code> was committed, so each <code>uv sync</code> resolved independently against PyPI at different times — different patch versions, legitimately different floating-point behavior or bug fixes. <strong>Immediate fix:</strong> one person runs <code>uv lock</code>, commits <code>uv.lock</code>; everyone else runs <code>uv sync</code> — now both machines hold identical bytes. <strong>Workflow:</strong> lockfile always committed; upgrades are explicit events (<code>uv lock --upgrade numpy</code> + commit + review the diff); CI uses <code>uv sync --frozen</code> so a stale or missing lockfile fails the build instead of silently re-resolving.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Eight months ago you trained and pickled a model. Today <code>joblib.load</code> raises an unpickling error under your current environment. Explain what happened, how this chapter&apos;s discipline saves you, and write the recovery steps.</>,
+      hint: <>Pickles encode the internal object layout of the library version that saved them. What restores that version?</>,
+      answer: <><strong>What happened:</strong> a pickle stores object internals, not a stable format — scikit-learn&apos;s classes changed layout across versions, so a newer sklearn can&apos;t reconstruct objects saved by an older one. <strong>The save:</strong> the training repo committed <code>pyproject.toml</code> + <code>uv.lock</code> at the commit that produced the checkpoint — a byte-exact record of the environment that wrote the pickle. <strong>Recovery:</strong> (1) <code>git checkout</code> the commit (or tag) that trained the model; (2) <code>uv sync --frozen</code> — rebuilds that exact environment in seconds; (3) <code>uv run python</code> to load the model there; (4) either re-export to a portable format or re-train under current versions, and going forward store the lockfile (or its git ref) alongside every checkpoint. Without the lockfile, step 2 becomes archaeology — guessing versions from release dates.</>
     },
   ]}
 />
@@ -500,3 +317,5 @@ Learn the workstation once; every ML project you touch — school, research, ind
     explanation: <>Packages like numpy contain platform-specific compiled binaries. A venv is not portable across OS/architecture. Commit the two-file recipe (<code>pyproject.toml</code> + <code>uv.lock</code>) instead; a fresh <code>uv sync</code> on their machine builds the right sandbox for their platform in seconds.</>
   }
 ]} />
+
+<MarkDone slug="foundations/python-craft/environment-tooling" title="Environment · uv, Ruff, and the modern Python setup" />
