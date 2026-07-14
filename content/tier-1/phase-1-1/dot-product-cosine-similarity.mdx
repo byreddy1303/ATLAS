@@ -122,15 +122,11 @@ def most_similar_cities(home, cities, k=5):
 
 <Motivation title="Why the dot product had to be invented">
 
-Imagine you run a movie-streaming service. A user has just finished watching *Arrival* and stayed up until 2am rewatching a slow philosophical scene. Your job — a job you must do about ten-thousand times per second across all the users on your platform — is to answer a single question: **out of the ten thousand movies in the catalog, which are most similar to what this person just enjoyed?**
+A user just finished *Arrival*. Out of ten thousand movies, which are most similar to what they enjoyed? Every movie is five numbers — `[sci-fi, romance, action, philosophy, pace]` — and the user's taste is five numbers too. "Similar" has to become arithmetic.
 
-Here is the shape of the problem. Every movie is described by a handful of numbers: how much sci-fi it contains, how romantic it is, how much action, how philosophical, how slow-paced. Five numbers per movie. Ten thousand movies. That's a five-dimensional cloud of 10,000 points. The user's taste — inferred from *Arrival* — is *also* a five-dimensional point. And "how similar to your taste is movie X" is really the question **how close, in some sense, is X to the taste point?**
+Here's the observation that shapes everything. Taste = `(9, 3, 2, 9, 3)`. Movie B = `(90, 30, 20, 90, 30)` — the same *proportions*, ten times the magnitude. Movie C = `(3, 9, 9, 3, 9)` — smaller numbers, but the wrong *shape*. B is a great match and C is a bad one, even though C's raw numbers are "closer" in size. **What matters is direction, not magnitude.**
 
-But *how close* means what, exactly? Suppose the user's taste is described as `(9, 3, 2, 9, 3)` — heavy on sci-fi and philosophy, light on romance and action, moderate pace. Movie A is `(9, 3, 2, 9, 3)`, the same as the taste. Movie B is `(90, 30, 20, 90, 30)` — the same *proportions*, but every axis multiplied by 10 (perhaps because the movie is much longer, so total minutes-of-each-genre are higher). Are these two movies equally good matches? Almost certainly yes — the *shape* of what B offers is identical to what the user wants. Movie C is `(3, 9, 9, 3, 9)` — an action romance with fast pace. Even though the *raw magnitudes* of C and B are pretty different (C sums to 33; B sums to 260), C is clearly a *worse* match than B, because it points in the wrong direction.
-
-This is the deep observation: **what matters is direction, not magnitude.** The vectors `(9, 3, 2, 9, 3)` and `(90, 30, 20, 90, 30)` point exactly the same way in five-dimensional space — one is just a longer arrow. And two vectors that point the same way share the same *ratio* of one axis to another, which is precisely what "same taste, different scale" means.
-
-The **dot product** is the arithmetic operation that computes a single number capturing "how aligned are these two arrows?" Divide it by the two vectors' lengths and every trace of magnitude vanishes; what remains is a pure measure of angular similarity we call **cosine similarity**. This one identity — a number, an angle, and a shared direction — powers every semantic search engine, every retrieval-augmented generation (RAG) pipeline, every recommender system, every attention head in every transformer. Get this chapter and you will *recognize* half of modern AI when you read its source code.
+The **dot product** is the operation that measures alignment between two arrows; divide it by the two lengths and magnitude vanishes entirely, leaving **cosine similarity** — a pure measure of direction. This one identity powers every semantic search engine, every RAG pipeline, every recommender, and every attention head in every transformer. Get this chapter and you will recognize half of modern AI when you read its source code.
 
 </Motivation>
 
@@ -146,117 +142,71 @@ That's the whole chapter. Everything else — the algebraic formula, the project
 
 <Recall term="Vector length (norm)">
 
-For a 2-D vector `v = (v₁, v₂)`, the length is `‖v‖ = √(v₁² + v₂²)` — Pythagoras' theorem, unchanged since ancient Greece. For any dimension, `‖v‖ = √(v₁² + v₂² + ... + vₙ²) = √(v · v)`. Length is always non-negative. It's zero only for the zero vector `(0, 0, ..., 0)`. You will use `‖v‖` constantly for the rest of your ML life — today we already need it.
+For a 2-D vector `v = (v₁, v₂)`, the length is `‖v‖ = √(v₁² + v₂²)` — Pythagoras' theorem. For any dimension, `‖v‖ = √(v₁² + v₂² + ... + vₙ²) = √(v · v)`. Length is always non-negative, and zero only for the zero vector.
 
 </Recall>
 
 <Recall term="Angle between vectors">
 
-Two arrows shot from the origin form an angle between them — call it θ (theta). By convention, θ is measured as the *smallest* positive rotation from one to the other, so it always lives in the interval [0°, 180°]. Two identical arrows: θ = 0°. Perpendicular: θ = 90°. Opposite: θ = 180°. The cosine function `cos θ` is +1 at 0°, 0 at 90°, and −1 at 180° — which is exactly the "agree → perpendicular → contradict" scale we described.
+Two arrows shot from the origin form an angle θ, measured as the smallest rotation from one to the other, so θ ∈ [0°, 180°]. Identical direction: θ = 0°. Perpendicular: θ = 90°. Opposite: θ = 180°. And `cos θ` is +1 at 0°, 0 at 90°, −1 at 180° — exactly the agree → perpendicular → contradict scale.
 
 </Recall>
 
-<Angles intro={<>The dot product is the same object described in three fundamentally different ways. Each way tells you something the others hide. Read all four passes; internalize all four pictures.</>}>
+## The geometric definition — projection × length
 
-  <Angle type="geometric" title="Projection × length — the geometric heart">
+Take vectors `a` and `b`, both drawn from the origin. Shine a lamp perpendicular to `b`: the **shadow** of `a` on the line containing `b` is the **scalar projection** of `a` onto `b` — how far along `b` does `a` reach when squashed onto `b`'s direction? Same direction: the shadow is the full length of `a`. Perpendicular: the shadow is zero. Opposite: the shadow is negative, falling on the wrong side of the origin.
 
-  Take vector `a` and vector `b`, both drawn from the origin. Now imagine a lamp shining directly perpendicular to `b` from above — the **shadow** of `a` on the line containing `b` is called the **scalar projection** of `a` onto `b`. It's a single real number: how far along `b` does `a` reach when squashed onto `b`'s direction?
+The geometric definition of the dot product is the shadow times the length of `b`:
 
-  If `a` points in exactly the same direction as `b`, the shadow is the full length of `a`. If `a` is perpendicular to `b`, the shadow is zero (the lamp shines *along* `a`, so its shadow is a single point). If `a` points opposite to `b`, the shadow is negative — it falls on the "wrong side" of the origin along `b`.
+$$
+\mathbf{a} \cdot \mathbf{b} = \|\mathbf{a}\| \, \|\mathbf{b}\| \cos\theta
+$$
 
-  The **geometric definition** of the dot product is: **the scalar projection of `a` onto `b`, multiplied by the length of `b`.** In symbols:
+Read it out loud: length of `a`, times length of `b`, times the cosine of the angle between them. Doubling either length doubles the dot product. Making the angle 90° zeros it. Making it 180° flips the sign.
 
-  $$
-  \mathbf{a} \cdot \mathbf{b} = \|\mathbf{a}\| \, \|\mathbf{b}\| \cos\theta
-  $$
+Why multiply by `‖b‖` instead of reporting the shadow directly? Symmetry. The shadow of `a` on `b` is not the shadow of `b` on `a` — but `‖a‖ ‖b‖ cos θ` reads equally as "length of `a` × projection of `b` onto `a`" or "length of `b` × projection of `a` onto `b`", so `a · b = b · a`.
 
-  Read that formula out loud. It says: "the dot product equals the length of `a`, times the length of `b`, times the cosine of the angle between them." Every one of these three factors matters. Doubling the length of `a` doubles the dot product. Doubling the length of `b` doubles the dot product. Making the angle 90° zeros it out. Making the angle 180° flips its sign.
+Physics got here first: work done by a constant force is `W = F · d` — the component of force *along the motion*, times the distance moved. Force perpendicular to motion does zero work. Every appearance of the dot product answers the same question: *how much of one vector points along another?*
 
-  Why multiply by `‖b‖` and not just report the shadow directly? Because the dot product wants to be *symmetric* — `a · b = b · a`. The shadow of `a` on `b` is not the same as the shadow of `b` on `a` (they can be different lengths). But `‖a‖ ‖b‖ cos θ` is obviously the same whether you write it as `‖a‖ (‖b‖ cos θ)` — "length of `a` times projection of `b` onto `a`" — or `‖b‖ (‖a‖ cos θ)` — "length of `b` times projection of `a` onto `b`". Symmetry preserved.
+**Mental picture to build:** two arrows, an angle, a light source. Every time you see `a · b`, imagine that scene.
 
-  **Mental picture to build:** two arrows, an angle, a light source. Every time you see `a · b`, imagine that scene.
+## The algebraic definition — and why it agrees
 
-  </Angle>
+The definition you likely met first in school looks nothing like the geometry:
 
-  <Angle type="algebraic" title="Sum of pairwise products — the arithmetic identity">
+$$
+\mathbf{a} \cdot \mathbf{b} = a_1 b_1 + a_2 b_2 + \dots + a_n b_n = \sum_{i=1}^n a_i b_i
+$$
 
-  When you learn linear algebra in school, this is often the *first* definition you see:
+Multiply matching components; sum them up. For `a = (2, 1)` and `b = (1, 2)`: `2·1 + 1·2 = 4`. No lengths, no angles — yet it produces the same number as the geometric formula. Here's the proof that glues them together. The triangle formed by `a`, `b`, and `a − b` obeys the *law of cosines*:
 
-  $$
-  \mathbf{a} \cdot \mathbf{b} = a_1 b_1 + a_2 b_2 + \dots + a_n b_n = \sum_{i=1}^n a_i b_i
-  $$
+$$
+\|\mathbf{a} - \mathbf{b}\|^2 = \|\mathbf{a}\|^2 + \|\mathbf{b}\|^2 - 2\|\mathbf{a}\|\|\mathbf{b}\|\cos\theta
+$$
 
-  It says: *multiply matching components; sum them up.* For `a = (2, 1)` and `b = (1, 2)`: `2·1 + 1·2 = 4`. Done. It looks nothing like the geometric formula — no lengths, no angles, no projections — yet it produces the same number. That's the small miracle of the dot product: two very different-looking computations agree.
+Expand the left side in coordinates: `‖a − b‖² = Σ(aᵢ − bᵢ)² = Σaᵢ² − 2Σaᵢbᵢ + Σbᵢ²`. Equate the two sides — the `Σaᵢ²` cancels with `‖a‖²`, the `Σbᵢ²` cancels with `‖b‖²`, leaving:
 
-  Why should we believe them? Consider a right triangle formed by three vectors — `a`, `b`, and `a − b`. The *law of cosines* from trigonometry says:
+$$
+-2\sum_i a_i b_i = -2 \|\mathbf{a}\|\|\mathbf{b}\|\cos\theta
+$$
 
-  $$
-  \|\mathbf{a} - \mathbf{b}\|^2 = \|\mathbf{a}\|^2 + \|\mathbf{b}\|^2 - 2\|\mathbf{a}\|\|\mathbf{b}\|\cos\theta
-  $$
+Divide by −2:
 
-  If we expand the left side in coordinates — `‖a − b‖² = Σ(aᵢ − bᵢ)² = Σaᵢ² − 2Σaᵢbᵢ + Σbᵢ²` — and equate the two, the `Σaᵢ²` cancels with `‖a‖²` and the `Σbᵢ²` cancels with `‖b‖²`, leaving:
+$$
+\sum_i a_i b_i = \|\mathbf{a}\|\|\mathbf{b}\|\cos\theta
+$$
 
-  $$
-  -2\sum_i a_i b_i = -2 \|\mathbf{a}\|\|\mathbf{b}\|\cos\theta
-  $$
+The algebraic and geometric definitions *must* be equal. From now on you pick whichever description fits the moment: geometry to *reason*, arithmetic to *compute*.
 
-  Divide both sides by −2 and you have proved:
+## The code you'll actually write
 
-  $$
-  \sum_i a_i b_i = \|\mathbf{a}\|\|\mathbf{b}\|\cos\theta
-  $$
+No working engineer writes the sum by hand. In NumPy there are three interchangeable forms:
 
-  The algebraic and geometric definitions *must* be the same. The law of cosines glues them together. If this feels like a lot to swallow the first time, come back — the payoff is that from now on you can pick whichever description fits the moment.
+<CodeBlock language="python" title="dot product — three equivalent moves" code={threeWaysCode} />
 
-  </Angle>
+The generator-sum version is for teaching. The `@` operator is the modern form (added in Python 3.5 for exactly this purpose). `np.dot` is the historical spelling, still fine.
 
-  <Angle type="computational" title="A NumPy one-liner — the code you'll actually write">
-
-  In practice, no working engineer writes the sum by hand. Every scientific-computing library has a native, blazing-fast dot product. In NumPy there are three interchangeable forms:
-
-  <CodeBlock language="python" title="dot product — three equivalent moves" code={threeWaysCode} />
-
-  All three produce `4.0`. The `sum-of-products` version is for teaching. The `@` operator is the modern Pythonic form (Python 3.5+ added it precisely for linear-algebra libraries; nothing outside numpy/torch/jax uses it much). The `np.dot` function is the historical spelling and is still perfectly fine.
-
-  Why does it matter that these are C-fast? Because in real work you'll compute *millions* of dot products per query — every embedding against every stored document, every attention token against every other token. A Python-loop dot product between two 1,000-dimensional vectors takes microseconds; a NumPy dot product takes nanoseconds. Multiply either by "10,000 documents × 100 queries per second" and only one of those numbers is livable.
-
-  When you scale further — say to 100 million document embeddings — even NumPy is too slow. Vector databases (FAISS, HNSW, pgvector) precompute clever indices so that "find the 10 nearest cosine-similar vectors" runs in log time. But the primitive operation, in the innermost loop, is still the dot product.
-
-  </Angle>
-
-  <Angle type="physical" title="Work and force — where physics uses the same object">
-
-  In physics, if a constant force `F` (a vector) acts on an object that moves along a displacement `d` (also a vector), the **work done** by the force is `W = F · d`. Read that formula through the geometric lens: the work equals the component of force *along the motion*, times the magnitude of motion. If the force is perpendicular to the motion (say, gravity acting on a horizontally sliding block on a frictionless surface), the dot product is zero — no work is done, energy is not transferred. If the force pushes the object exactly the way it's going, all the force is "spent" moving it — maximum work.
-
-  This isn't a coincidence. The dot product was invented precisely because so many physical and geometric quantities have exactly this structure: *how much of one vector points along another?* Every time you see it in an ML paper, remember: physicists had it first.
-
-  </Angle>
-
-  <Angle type="code" title="Projection — extracting the shadow itself">
-
-  Suppose you don't just want the *scalar* shadow of `a` onto `b`, but the actual **vector projection** — the arrow that lies along `b` and represents "the part of `a` that goes in `b`'s direction." Here's the formula, derived directly from the geometric picture:
-
-  $$
-  \text{proj}_\mathbf{b}(\mathbf{a}) = \left( \frac{\mathbf{a} \cdot \mathbf{b}}{\mathbf{b} \cdot \mathbf{b}} \right) \mathbf{b}
-  $$
-
-  Parse it slowly. The numerator `a · b` is the scalar dot product. The denominator `b · b` is `‖b‖²`. So `(a · b) / (b · b)` is a scalar; multiplying it by `b` gives a vector pointing along `b`. That scalar is exactly the right size so that the resulting vector lands where the shadow of `a` on `b`'s line falls.
-
-  <RunnableCode title="scalar and vector projections" code={projectionCode} />
-
-  Projection is the backbone of an enormous amount of ML: least-squares regression is literally "project the target vector onto the column space of the feature matrix." Gram-Schmidt orthogonalization is repeated projection. PCA finds the directions along which the projection captures the most variance. **If you understand the projection formula, you have a shared vocabulary with half of statistics.**
-
-  </Angle>
-
-</Angles>
-
-<Convergence>
-
-Five separate accounts have converged on the same object. The **geometric** view (`‖a‖‖b‖cos θ`) tells you *what the answer means* — how aligned two arrows are, weighted by their lengths. The **algebraic** view (`Σ aᵢbᵢ`) tells you *how to compute it* with a few multiplications and additions. The **computational** view (`a @ b`) is what your fingers actually type in real code. The **physical** view says the same operation shows up whenever "how much of one direction lives inside another" is the question. The **projection** view unlocks least-squares, Gram-Schmidt, and PCA.
-
-Divide the dot product by the two lengths and every whisper of magnitude vanishes; what's left is the **cosine similarity** — a single number in [−1, +1] that answers *how aligned are these two arrows, regardless of length?* That is the ML workhorse. Read every embedding, every retrieval, every attention head through this lens; each is a variation on the same identity.
-
-</Convergence>
+Speed is why the library form matters: real work computes *millions* of dot products per query — every query embedding against every stored document, every token against every other token. A Python-loop dot product over 1,000 dimensions costs microseconds; NumPy's C loop costs nanoseconds. At vector-database scale (100M+ embeddings), even NumPy is too slow, and systems like FAISS or pgvector build indices so "top-10 nearest by cosine" runs in log time — but the primitive in the innermost loop is still `a @ b`.
 
 <Derivation title="Deriving cos θ = (a · b) / (‖a‖ ‖b‖)">
 
@@ -318,94 +268,97 @@ Nothing changed except the number of terms. In 100 dimensions there'd be 100 ter
 
 </Example>
 
-<Nuance>
+## Projection — extracting the shadow itself
 
-**Cosine ignores magnitude — by design.** A movie represented as `(4, 4)` and one as `(400, 400)` have identical cosine similarity to *any* user vector. That's usually a feature: it means "long" and "short" documents can be compared on equal footing. But sometimes magnitude is real signal — for TF-IDF, longer documents genuinely *should* get more weight for a matching term, which is why BM25 (a length-aware refinement) was invented. Choose the metric to match the semantics.
+Sometimes you want more than the scalar shadow — you want the actual **vector projection**, the arrow lying along `b` that represents "the part of `a` that goes in `b`'s direction":
 
-**Cosine is not a distance.** Distance functions must obey the triangle inequality: `d(a, c) ≤ d(a, b) + d(b, c)`. Cosine similarity, and even `1 − cos θ`, doesn't satisfy this in general. Real vector databases work with *cosine distance on unit-normalized vectors*, where the space behaves better; treat that as an engineering convention, not a mathematical guarantee.
+$$
+\text{proj}_\mathbf{b}(\mathbf{a}) = \left( \frac{\mathbf{a} \cdot \mathbf{b}}{\mathbf{b} \cdot \mathbf{b}} \right) \mathbf{b}
+$$
 
-**High-dimensional weirdness.** In hundreds or thousands of dimensions, two random vectors are almost always nearly *perpendicular*. Their cosine similarity clusters tightly around 0. Rankings still work — the useful signal comes from the *rank order* of scores, not their raw magnitude — but you cannot judge "is 0.35 a good cosine similarity" without knowing the distribution in your particular embedding space.
+Parse it slowly. The numerator `a · b` is the scalar dot product. The denominator `b · b` is `‖b‖²`. So the fraction is a scalar; multiplying it by `b` gives a vector along `b`, sized exactly so it lands where the shadow of `a` falls.
+
+<RunnableCode title="scalar and vector projections" code={projectionCode} />
+
+Projection is the backbone of an enormous amount of ML: least-squares regression is literally "project the target vector onto the column space of the feature matrix," Gram-Schmidt orthogonalization is repeated projection, and PCA finds the directions along which projections capture the most variance. If you understand this one formula, you share vocabulary with half of statistics.
+
+## The traps that matter
+
+**Cosine ignores magnitude — by design.** `(4, 4)` and `(400, 400)` have identical cosine similarity to any vector. Usually a feature: long and short documents compare on equal footing. But sometimes magnitude *is* signal — for TF-IDF text vectors, longer matching documents genuinely deserve more weight, which is why BM25 (a length-aware refinement) exists. Choose the metric to match the semantics.
+
+**Cosine is not a distance.** Distances must obey the triangle inequality; cosine similarity — and even `1 − cos θ` — doesn't in general. Vector databases work with cosine on *unit-normalized* vectors, where the space behaves better; treat that as an engineering convention, not a mathematical guarantee.
+
+**High dimensions collapse toward 0.** In hundreds or thousands of dimensions, two *random* vectors are almost always nearly perpendicular — cosine similarities cluster tightly around 0, with spread shrinking like `1/√D`:
 
 <RunnableCode title="Cosine collapse in high dimensions" code={highDimCode} />
 
-Run the cell above. You'll see the standard deviation of cosine similarities shrink like `1/√D`. In D=1000, the spread is under 0.03. This is why "raw" cosine values from LLM embedding models can look tiny (0.5–0.7) even for very related documents — the interesting signal lives in the *tail*, not near ±1.
+At D=1000 the spread is under 0.03. This is why raw cosine values from LLM embedding models can look unimpressive (0.5–0.7) even for very related documents — the useful signal is the *rank order* of scores, not their absolute size. Never judge "is 0.35 good?" without knowing the distribution in your embedding space.
 
-**Zero-length vectors** break the formula (division by zero). Real pipelines either filter them out or add a small ε to the denominator. Watch for this the first time you build a search system and a query embedding somehow comes out all-zeros.
+**Zero vectors break the formula** (division by zero). Filter them out or add a small ε to the denominator — remember this the first time a query embedding comes out all-zeros.
 
-**Sign matters (a lot) in some domains.** Cosine can be negative — meaning "actively opposite." For most modern embedding models (which pack semantic content into positive directions), negative cosines are rare and often meaningful. But in classical bag-of-words spaces where feature vectors are non-negative, cosine is *always* in [0, 1] and you never see negatives.
-
-</Nuance>
+**Sign carries meaning.** Negative cosine means "actively opposite," and in modern embedding spaces negatives are rare but meaningful. In classical bag-of-words spaces where all features are non-negative, cosine always lands in [0, 1] and you'll never see a negative.
 
 <RealWorldML title="A tiny movie recommender, in your browser">
 
-We're going to build a five-dimensional recommender in about ten lines of NumPy — the same shape as what commercial systems do at scale. Each row of a matrix is a movie described by five made-up "genre axes": `[sci-fi, romance, action, philosophy, pace]`. The user's taste is a five-number vector too. Every score you'll ever see on a semantic search engine is doing exactly this, only with 768- or 1536-dimensional vectors coming out of an embedding model instead of a hand-typed table.
+A five-dimensional recommender in about ten lines of NumPy — the same shape commercial systems run at scale, only theirs use 768- or 1536-dimensional embedding vectors instead of a hand-typed genre table.
 
-Read the cell as follows. `movies @ taste` computes one dot product per row — that's the raw similarity, ignoring magnitude. Dividing by `np.linalg.norm(movies, axis=1) * np.linalg.norm(taste)` normalizes each result to a cosine. Finally `np.argsort(-sims)` sorts in descending order (the minus sign is the trick).
+Read the cell as follows. `movies @ taste` computes one dot product per row — raw similarity, magnitude included. Dividing by `np.linalg.norm(movies, axis=1) * np.linalg.norm(taste)` normalizes each result to a cosine. Finally `np.argsort(-sims)` sorts descending (the minus sign is the trick).
 
 <RunnableCode title="movie recommender · cosine similarity in numpy" code={movieCode} packages={["numpy"]} />
 
-Notice: the two Arrival-adjacent films — *Solaris* and *Interstellar* — rise to the top because their genre profiles point in a similar *direction* to the user's taste. *Mad Max* sinks because it's action-heavy in an axis the user cares little about. Change the taste vector to something more romantic (say `(2, 9, 3, 4, 4)`) and re-run — watch *La La Land* and *Before Sunrise* climb the ranks. This is the whole game of recommender systems, minus a few zeros and some clever caching.
+Notice: the two Arrival-adjacent films — *Solaris* and *Interstellar* — rise to the top because their genre profiles point in a similar *direction* to the user's taste. *Mad Max* sinks because it's action-heavy on an axis the user cares little about. Change the taste vector to something more romantic (say `(2, 9, 3, 4, 4)`) and re-run — watch *La La Land* and *Before Sunrise* climb. This is the whole game of recommender systems, minus a few zeros and some clever caching.
 
 </RealWorldML>
 
 <RealWorldML title="Transformer attention — the dot product in disguise">
 
-Here is the same operation, dressed as the mechanism inside every modern language model. Transformer attention starts with a set of "token vectors" — one per word or sub-word — and asks: *for each token, how much should it look at each of the other tokens?* The mechanism is a scaled dot product.
+The same operation, dressed as the mechanism inside every modern language model. Attention starts with one vector per token and asks: *for each token, how much should it look at each other token?* The answer is a scaled dot product.
 
 <RunnableCode title="a two-line 'attention' calculation" code={attentionMiniCode} />
 
-Read the cell. Each score is a dot product between the query token (`"dog"`) and every other token. The `softmax` turns those raw scores into a probability distribution — how much attention to pay to each token. The output is the weighted sum of token vectors, according to those weights. That's it. That's what a transformer's attention head does, minus (a) the `/ √d_k` scaling for numerical stability and (b) separate learned matrices to produce query/key/value vectors. When you build up to Tier IV you'll find that this same picture — a dot product, a softmax, a weighted sum — appears in every single layer of every single LLM.
-
-The reason we spent so long on the dot product in this chapter is that it is the *only* operation you need to understand deeply to see how a transformer thinks. Everything else is bookkeeping.
+Each score is a dot product between the query token (`"dog"`) and every other token. Softmax turns raw scores into a probability distribution — how much attention to pay to each token. The output is the weighted sum of token vectors under those weights. That's what a transformer attention head does, minus (a) the `/ √d_k` scaling for numerical stability and (b) learned matrices producing separate query/key/value vectors. A dot product, a softmax, a weighted sum — that picture repeats in every layer of every LLM, and it's why this chapter earns its depth: the dot product is the *only* operation you must understand deeply to see how a transformer thinks. Everything else is bookkeeping.
 
 </RealWorldML>
 
-<CodeItYourself
-  title="Rank the ten cities most like your home city"
-  spec={<>You have five numeric features for twenty cities: mean temperature, cost of living, population, elevation, and rainfall. Write a function <code>most_similar_cities(home, cities, k=5)</code> that returns the indices of the k most similar cities to <code>home</code> under cosine similarity — <em>without</em> using <code>np.linalg.norm</code> or <code>sklearn</code>. Then explain in one sentence why the answer would differ under Euclidean distance.</>}
-  hints={[
-    "Cosine similarity divides by both norms — that's what makes it invariant to scale. Compute each norm as sqrt(v @ v).",
-    "You can use np.argsort. Remember to sort by descending similarity — a common bug is forgetting the minus sign.",
-    "Cost of living probably ranges 20–100 while population ranges 10^3–10^7. Euclidean distance is dominated by whichever feature has the largest numbers — cosine ignores that entirely."
+<StudyDepth
+  intro={<>Derive the cosine formula once, by hand, until the law-of-cosines link feels obvious. After that it's a small set of reflexes you drill and a set of edge cases you look up when they bite.</>}
+  drill={[
+    <>Computing <code>a · b = Σ aᵢbᵢ</code> and <code>cos θ = (a · b)/(‖a‖‖b‖)</code> by hand for small vectors — until instant</>,
+    <>Reading the sign: positive → aligned, zero → perpendicular, negative → opposing</>,
+    <>The projection formula <code>proj_b(a) = ((a · b)/(b · b)) b</code> — write it from memory</>,
+    <>The NumPy forms: <code>a @ b</code>, row-wise <code>M @ v</code>, and <code>np.argsort(-sims)</code> for ranking</>,
+    <>Scale-invariance: doubling either vector changes the dot product but never the cosine</>,
   ]}
-  solution={<CodeBlock language="python" title="most_similar_cities" code={solutionCode} />}
-/>
-
-<LifeLesson title="Direction beats magnitude — a habit worth carrying">
-
-Cosine similarity teaches something the ML textbooks skip: **direction matters more than magnitude**. A vector with the *right* direction and a small length is often more useful than a vector with impressive length and the wrong direction. The math has been telling us this quietly for two hundred years.
-
-The same shape appears in life. Two people can pour identical hours into a career — one with a clear direction (deliberately shaping toward a specific craft), one with volume but no compass — and end up in radically different places a decade later. The dot product is telling you: **align first, scale second.** Small-but-aligned effort compounds. Big-but-misaligned effort dissipates. It's the same reason the *Arrival*-loving user should never be recommended *Mad Max* just because *Mad Max* has more "everything." Volume without direction is just noise.
-
-When you're overwhelmed by "how much" you're doing, ask instead: *what does the taste vector I'm trying to match actually look like — and is my day pointing at it?* If not, no amount of scaling saves you. If yes, even a short vector goes far. This is why senior engineers accomplish more in twenty focused hours than juniors in eighty scattered ones — same magnitude, better cosine.
-
-</LifeLesson>
-
-<MLConnection>
-
-The dot product is not one operation among many; it is *the* operation that quietly runs modern AI. Once you internalize this chapter, you will start noticing it in every paper.
-
-- **Semantic search / RAG:** every query embedding is compared to every document embedding by cosine similarity. The top-k documents get stuffed into the LLM's prompt. Change nothing in this chapter and you already understand how a vector database ranks results.
-- **Transformer attention:** the "score" between a query token and a key token, inside self-attention, is a scaled dot product. Softmax over those scores tells the model which token to attend to. Every attention head in every LLM is a dot product.
-- **Neural networks:** every fully-connected layer is `y = Wx + b`. That `Wx` is a batch of dot products — one per output neuron. A ReLU network is just a stack of dot products with kinks between them.
-- **Word embeddings:** GloVe explicitly factorized a matrix so that `word_i · word_j ≈ log P(i, j)`. The dot product was the entire loss function.
-- **Classical ML:** logistic regression, SVM decision function, PCA all read directly out of dot products.
-- **Physics and graphics:** projections, illumination models, computer-graphics shading — anywhere "how much of one direction points along another" is the question.
-
-The chapter you just finished is, quietly, the most reused unit of arithmetic in engineering.
-
-</MLConnection>
-
-<Summary
-  bullets={[
-    "a · b = Σ aᵢbᵢ (algebraic) = ‖a‖ ‖b‖ cos θ (geometric). Both give the same number; the law of cosines is the reason.",
-    "Cosine similarity = (a · b) / (‖a‖ ‖b‖) — normalizes away magnitude, keeps direction. Range [−1, +1].",
-    "cos θ = +1 → same direction; cos θ = 0 → perpendicular; cos θ = −1 → opposite.",
-    "Projection formula: proj_b(a) = ((a · b) / (b · b)) · b. Backbone of least squares, Gram-Schmidt, PCA.",
-    "Powers every semantic-search, transformer attention score, and recommender you'll ever build.",
-    "Traps: not a distance (no triangle inequality); undefined for zero vectors; high-D vectors cluster near cos θ = 0.",
+  skim={[
+    <>The Cauchy–Schwarz proof — work it once (hard problem below), then reference it</>,
+    <>BM25 and length-aware alternatives — until you build text retrieval</>,
+    <>High-dimensional cosine collapse — run the cell once, recall the <code>1/√D</code> shape when reading embedding scores</>,
+    <>Vector-database index internals (FAISS, HNSW) — Tier V territory</>,
   ]}
 />
+
+<CodeItYourself title="Three drills — similarity from scratch">
+
+1. **Rank cities like the movie recommender.** You have a `(20, 5)` matrix of city features (temperature, cost of living, population, elevation, rainfall) and a `home` vector. Write `most_similar_cities(home, cities, k=5)` returning the indices of the k most cosine-similar cities — *without* `np.linalg.norm` or sklearn. Then say in one sentence why Euclidean distance would give a different (worse) answer. *Hint: each norm is `sqrt(v @ v)`; sort descending with `np.argsort(-sims)`; Euclidean is dominated by the hugest-scaled feature (population), cosine ignores scale.*
+
+2. **Write `cosine_matrix(A, B)`** that takes an `(n, d)` and an `(m, d)` matrix and returns the `(n, m)` matrix of all pairwise cosine similarities — no Python loops. This is the exact kernel a RAG system runs between query embeddings and document embeddings. *Hint: normalize the rows of each matrix first (`A / np.linalg.norm(A, axis=1, keepdims=True)`), then the answer is one matrix product `A_n @ B_n.T`.*
+
+3. **Add the missing scaling to the attention cell.** Extend `attentionMiniCode` to compute `scores = tokens @ q / np.sqrt(d)` where `d = tokens.shape[1]`, and print the softmax weights with and without the scaling. In 3-D the difference is small — repeat with random 512-dimensional tokens and watch the unscaled softmax saturate toward one-hot. *Hint: bigger d → bigger raw dots → exp() overflows toward a single winner; the `/√d` keeps scores in a tame range.*
+
+<CodeBlock language="python" title="drill 1 solution — write yours first" code={solutionCode} />
+
+</CodeItYourself>
+
+<Summary>
+
+- `a · b = Σ aᵢbᵢ` (algebraic) `= ‖a‖ ‖b‖ cos θ` (geometric). Both give the same number; the law of cosines is the reason.
+- Cosine similarity `= (a · b) / (‖a‖ ‖b‖)` — normalizes away magnitude, keeps direction. Range [−1, +1].
+- cos θ = +1 → same direction; cos θ = 0 → perpendicular; cos θ = −1 → opposite.
+- Projection formula: `proj_b(a) = ((a · b) / (b · b)) · b`. Backbone of least squares, Gram-Schmidt, PCA.
+- Powers every semantic search, transformer attention score, and recommender you'll ever build.
+- Traps: not a distance (no triangle inequality); undefined for zero vectors; high-D vectors cluster near cos θ = 0.
+
+</Summary>
 
 <ProblemSet
   problems={[
@@ -420,18 +373,6 @@ The chapter you just finished is, quietly, the most reused unit of arithmetic in
       q: <>What is the angle between <code>a = (1, 0)</code> and <code>b = (0, 1)</code>?</>,
       hint: <>Compute a·b first.</>,
       answer: <>a·b = 1·0 + 0·1 = 0, so cos θ = 0, so θ = <b>90°</b>. The standard basis vectors are perpendicular — by construction.</>
-    },
-    {
-      difficulty: "easy",
-      q: <>What is the cosine similarity between <code>a = (5, 5)</code> and <code>b = (2, 2)</code>? Interpret the number.</>,
-      hint: <>Both vectors point in the same direction (45° above the x-axis).</>,
-      answer: <>a·b = 10 + 10 = 20; ‖a‖ = √50 = 5√2; ‖b‖ = √8 = 2√2; cos θ = 20 / (5√2 · 2√2) = 20/20 = <b>1</b>. Two vectors pointing in the same direction always have cosine similarity 1 — magnitude is irrelevant.</>
-    },
-    {
-      difficulty: "medium",
-      q: <>Prove that if <code>a · b = 0</code> and neither vector is zero, then a and b are perpendicular.</>,
-      hint: <>Start from the geometric definition and solve for cos θ.</>,
-      answer: <>Given <code>a · b = ‖a‖ · ‖b‖ · cos θ = 0</code>. Both norms are strictly positive (neither vector is zero). So we can divide both sides by ‖a‖ · ‖b‖ without issue, giving <code>cos θ = 0</code>. The only angle in [0°, 180°] with cosine equal to zero is θ = 90°. Therefore a and b are perpendicular. □</>
     },
     {
       difficulty: "medium",
@@ -514,3 +455,5 @@ The chapter you just finished is, quietly, the most reused unit of arithmetic in
     },
   ]}
 />
+
+<MarkDone slug="mathematics/vectors-space/dot-product-cosine-similarity" title="Dot Product & Cosine Similarity" />
