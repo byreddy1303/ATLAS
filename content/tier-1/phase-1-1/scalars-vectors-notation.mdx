@@ -1,0 +1,349 @@
+---
+title: Scalars, vectors, and notation
+tier: 1
+phase: "1.1"
+---
+
+export const threeFacesCode = `import numpy as np
+
+v = np.array([3.0, 4.0])          # face 1: an ordered list of numbers
+
+# face 2: an arrow — 3 right, 4 up from the origin
+length = (v[0]**2 + v[1]**2) ** 0.5     # Pythagoras
+print("as numbers :", v)
+print("as an arrow: 3 right, 4 up — length", length)
+
+# face 3: a point — the tip of that arrow, a location in 2-D space
+print("as a point : located at x=3, y=4")
+
+# a scalar is a single number — no direction, no ordering, shape ()
+s = np.float64(2.5)
+print("scalar shape:", np.shape(s), "   vector shape:", v.shape)`;
+
+export const columnRowCode = `import numpy as np
+
+x   = np.array([1.0, 2.0, 3.0])    # 1-D array: shape (3,) — no row/column identity
+col = x.reshape(3, 1)              # column vector: shape (3, 1)
+row = x.reshape(1, 3)              # row vector:    shape (1, 3)
+
+print("x   :", x.shape)
+print("col :", col.shape)
+print(col)
+print("row :", row.shape, row)
+
+# THE trap: mixing (3,) and (3,1) silently broadcasts to a (3,3) matrix
+print()
+print("x + col has shape", (x + col).shape, " <- almost never what you meant")`;
+
+export const notationToCode = `import numpy as np
+
+x = np.array([7.0, 2.0, 5.0])      # the paper writes: x ∈ R^3
+y = np.array([1.0, 0.0, 2.0])
+
+# paper says          ->  code says          (math counts from 1, numpy from 0)
+print("x_1        =", x[0])        # first entry
+print("x_3        =", x[2])        # third entry
+print("sum_i x_i  =", x.sum())     # Σ_i x_i  — add up all entries
+print("x + y      =", x + y)       # component-wise addition
+print("2x         =", 2 * x)       # scaling every entry
+print("n (dim)    =", x.shape[0])  # the n in R^n`;
+
+export const arrowsPointsCode = `import numpy as np, matplotlib.pyplot as plt
+
+# 8 movies, 2 features each: [sci-fi, romance] — every ROW is a vector
+X = np.array([
+    [9, 2], [8, 1], [9, 3],      # sci-fi cluster
+    [1, 9], [2, 8], [1, 7],      # romance cluster
+    [5, 5], [6, 4],              # in between
+])
+
+fig, axes = plt.subplots(1, 2, figsize=(8.4, 3.8))
+
+# picture 1: the vectors as ARROWS from the origin
+for r in X:
+    axes[0].annotate("", xy=r, xytext=(0, 0),
+                     arrowprops=dict(arrowstyle="->", color="crimson", alpha=0.7))
+axes[0].set_title("as arrows (geometry)")
+
+# picture 2: the SAME vectors as POINTS (a dataset)
+axes[1].scatter(X[:, 0], X[:, 1], s=45, color="teal")
+axes[1].set_title("as points (data)")
+
+for ax in axes:
+    ax.set_xlim(0, 10); ax.set_ylim(0, 10)
+    ax.set_xlabel("sci-fi"); ax.set_ylabel("romance"); ax.grid(alpha=0.25)
+plt.tight_layout()`;
+
+export const embeddingCode = `import numpy as np
+
+# A tiny embedding table: 6 tokens, 4 dimensions each.
+# Real scale: GPT-3's table is 50,257 tokens x 12,288 dims.
+vocab = ["the", "dog", "cat", "barks", "meows", "runs"]
+E = np.array([
+    [ 0.1,  0.0,  0.2,  0.0],   # the
+    [ 0.9,  0.8,  0.1,  0.3],   # dog
+    [ 0.8,  0.9,  0.1,  0.2],   # cat
+    [ 0.7,  0.2,  0.9,  0.1],   # barks
+    [ 0.6,  0.3,  0.9,  0.1],   # meows
+    [ 0.4,  0.1,  0.5,  0.9],   # runs
+])
+token_to_id = {tok: i for i, tok in enumerate(vocab)}
+
+def embed(token):
+    return E[token_to_id[token]]       # a "lookup" IS row indexing
+
+sentence = ["the", "dog", "barks"]
+vectors = np.stack([embed(t) for t in sentence])
+print("sentence as a stack of row-vectors, shape", vectors.shape)
+print(vectors)
+print()
+print("'dog' IS the vector", embed("dog"), "— one row of E")`;
+
+<Prerequisites items={[
+  { href: "/learn/foundations/scientific-stack/numpy-arrays-vectorization", label: "NumPy arrays & vectorization", blurb: "Arrays, shapes, dtypes — the raw material vectors are made of in code." },
+  { href: "/learn/foundations/scientific-stack/numpy-broadcasting-slicing", label: "Broadcasting & slicing", blurb: "How shapes combine — needed to dodge the (n,) vs (n,1) trap." },
+]} />
+
+<Motivation title="Every model sees the world as vectors">
+
+When an LLM reads the word "dog", the first thing it does is replace it with a list of numbers — 768 of them in BERT, 12,288 in GPT-3. That list is a **vector**, and everything the model does afterward — attention, layers, the final prediction — is arithmetic on vectors. Images become vectors of pixel values, users become vectors of behavior, and a RAG system retrieves documents by comparing their vectors. Vectors are not one topic in ML; they are the *substance* models compute on.
+
+The catch: this material lives in two languages. Papers write bold **x**, subscripts x₂, and "x ∈ ℝⁿ"; code writes `np.array`, `x[1]`, and `.shape`. Mistranslation causes real bugs — off-by-one indexing errors, and shape mismatches that silently produce a matrix where you wanted a vector.
+
+This short chapter is the Rosetta stone: what the symbols mean, how they map to NumPy, and the two mental pictures (arrow, point) you'll reuse in every later chapter. Nothing here is hard — but everything in Tier 1 through Tier 4 is written in this language.
+
+</Motivation>
+
+<Intuition title="One object, three faces">
+
+A vector is one thing with three faces. **Face 1: a list of numbers** — `(3, 4)` — this is what the computer stores. **Face 2: an arrow** — start at the origin, go 3 right and 4 up; direction and length live in those same two numbers. **Face 3: a point** — the tip of that arrow, a location in space; this is how a *dataset* looks, each sample one point.
+
+Same numbers, three pictures. Geometry questions (which way? how far? how aligned?) use the arrow. Data questions (which samples are near each other? what does the cloud look like?) use the point. Storage and computation use the list. Fluency in this chapter means switching faces without noticing you did it — and all the notation that follows is just a compact way of saying *which vector* and *which piece of it*.
+
+</Intuition>
+
+<Recall term="NumPy array shape">
+
+Every NumPy array has a `.shape` — a tuple with one entry per axis. `np.array([1, 2, 3])` has shape `(3,)`: one axis, three entries. `np.zeros((3, 1))` has shape `(3, 1)`: two axes. The *number of axes* is `ndim`; the *number of entries along an axis* is that axis's size. Keep these words separate — this chapter's biggest trap lives exactly here.
+
+</Recall>
+
+## Scalars vs vectors — one number vs an ordered list
+
+A **scalar** is a single number: a temperature, a learning rate, a similarity score. Papers write scalars as *italic lowercase*: x, η, λ.
+
+A **vector** is an *ordered* list of numbers, written **bold lowercase**: **x**, **v**. Ordered matters: `(2, 5)` and `(5, 2)` are different vectors — the first slot and the second slot *mean different things* (sci-fi-ness vs romance-ness, or east vs north). The number of entries is the vector's **dimension**, and the set of all n-dimensional real vectors is written ℝⁿ ("R-n"). So "**x** ∈ ℝ³" reads: *x is a vector of 3 real numbers*. ℝ alone (no exponent) is just the real number line — scalars live there.
+
+<RunnableCode title="one vector, three faces" code={threeFacesCode} packages={["numpy"]} />
+
+The pitfall is a word collision: in ML, a "768-**dimensional** embedding" means a vector with 768 *entries* — in NumPy, an array of shape `(768,)` with **one** axis. It does *not* mean a 768-axis array. When an ML person says dimension, they almost always mean *entries in the vector*, not `ndim`.
+
+## Column vectors — the ML default (and NumPy's third option)
+
+By convention, math treats every vector as a **column** unless told otherwise:
+
+$$
+\mathbf{x} = \begin{bmatrix} x_1 \\ x_2 \\ \vdots \\ x_n \end{bmatrix} \in \mathbb{R}^n
+\qquad\qquad
+\mathbf{x}^\top = [\, x_1 \; x_2 \; \cdots \; x_n \,]
+$$
+
+The **transpose** symbol ᵀ flips a column into a **row** (and back). Why default to columns? Because matrix-times-vector, the single most common operation in ML, is written `W x` — and the shapes only line up when x stands vertically. Every neural-network layer `y = Wx + b` assumes it.
+
+NumPy quietly adds a third option: the 1-D array of shape `(n,)`, which is *neither* a row nor a column — it has no second axis at all. This is what you'll use 95% of the time, and it's fine: `W @ x` treats it as a column automatically. But the moment 2-D shapes enter, be explicit:
+
+<RunnableCode title="(3,) vs (3,1) vs (1,3) — and the silent (3,3)" code={columnRowCode} packages={["numpy"]} />
+
+The last line is the trap that costs real debugging hours: adding a `(3,)` to a `(3,1)` doesn't error — broadcasting stretches both and hands you a `(3, 3)` **matrix**. If a "vector" in your code suddenly has two axes (a stray `keepdims=True`, a sklearn column), either `ravel()` it back to `(n,)` or keep *everything* 2-D. Never mix.
+
+## Reading the symbols — subscripts, superscripts, indexing
+
+Three rules decode almost every line of vector notation you'll meet:
+
+1. **Subscript = component.** xᵢ (italic — it's a scalar!) is the i-th *entry* of the vector **x**. So for **x** = (7, 2, 5): x₁ = 7, x₃ = 5.
+2. **Parenthesized superscript = which sample.** ML papers write x⁽ʲ⁾ for the j-th *data point* in a dataset. So x₂⁽⁷⁾ reads: entry 2 of sample 7. Subscript picks the piece; superscript picks the vector.
+3. **Math counts from 1, code counts from 0.** The paper's x₁ is your `x[0]`; xₙ is `x[-1]`. This off-by-one is the single most common bug when translating a formula. Say it out loud when you translate: *math one is code zero*.
+
+And the workhorse symbol Σ (capital sigma) just means "add them up": Σᵢ xᵢ is the sum of all entries — `x.sum()`.
+
+<RunnableCode title="the translation table, executed" code={notationToCode} packages={["numpy"]} />
+
+## Arrows vs points — two pictures of the same numbers
+
+Draw **x** = (3, 4) as an **arrow** from the origin when you care about geometric questions — which direction does it point, how long is it, how aligned is it with another vector? Every *operation* you'll learn (adding, scaling, projecting, rotating) is easiest to see on arrows.
+
+Draw it as a **point** — just the arrow's tip — when the vector is a *sample in a dataset*: one movie, one user, one token embedding. A dataset of N samples with d features each is a matrix **X** ∈ ℝᴺˣᵈ, and each **row** is one vector, one point in d-dimensional space. Clusters, outliers, decision boundaries — all of those are point-cloud pictures.
+
+<RunnableCode title="the same 8 vectors, drawn both ways" code={arrowsPointsCode} packages={["numpy", "matplotlib"]} captureFig={true} />
+
+Same eight vectors. The left picture asks "which arrows point the same way?" — that's the *similarity* question the dot-product chapter answers. The right picture asks "which movies cluster together?" — that's the question k-means and every classifier answers. You'll flip between these pictures for the rest of the syllabus; practice flipping now.
+
+<Example title="Decoding a dataset, symbol by symbol">
+
+A paper says: *"Given a dataset X ∈ ℝᴺˣᵈ with N = 3 samples x⁽¹⁾, x⁽²⁾, x⁽³⁾ ∈ ℝ², compute x₂⁽¹⁾ + x₁⁽³⁾."* Let's take
+
+$$
+X = \begin{bmatrix} 7 & 2 \\ 4 & 9 \\ 5 & 1 \end{bmatrix}
+$$
+
+- **X ∈ ℝᴺˣᵈ = ℝ³ˣ²** — a matrix with 3 rows (samples) and 2 columns (features). In code: `X.shape == (3, 2)`.
+- **x⁽¹⁾** is *sample 1* — the first **row**: (7, 2). In code: `X[0]` (math one, code zero).
+- **x₂⁽¹⁾** is *entry 2 of sample 1*: the 2 in (7, 2). In code: `X[0, 1]`.
+- **x₁⁽³⁾** is *entry 1 of sample 3*: sample 3 is (5, 1), so x₁⁽³⁾ = 5. In code: `X[2, 0]`.
+- Answer: x₂⁽¹⁾ + x₁⁽³⁾ = 2 + 5 = **7**.
+
+Every intimidating formula in an ML paper decodes this same way: identify which vector (superscript / row), then which entry (subscript / column), then shift every index down by one for code. Slow the first ten times, automatic forever after.
+
+</Example>
+
+<RealWorldML title="An embedding table — the first thing every LLM does">
+
+Before a transformer can attend to anything, text must become vectors. The mechanism is almost embarrassingly simple: a big matrix **E** with one **row per token** in the vocabulary, and "embedding a token" is *looking up its row*.
+
+<RunnableCode title="tokens → vectors by row lookup" code={embeddingCode} packages={["numpy"]} />
+
+Read the cell:
+
+1. **The table.** `E` has shape `(6, 4)`: 6 tokens in the vocabulary, each owning a 4-dimensional vector. In this chapter's language: each row of E is a vector in ℝ⁴.
+2. **The lookup.** `token_to_id` maps a token string to a row number; `E[token_to_id[token]]` fetches that row. That's the entire "embedding layer" of a neural network — indexing.
+3. **A sentence becomes a matrix.** Stacking the three token vectors gives shape `(3, 4)` — N = 3 samples in ℝ⁴, exactly the X ∈ ℝᴺˣᵈ shape from this chapter. This matrix is what flows into the transformer.
+4. **Scale.** GPT-3's table is 50,257 × 12,288 — about 617 million numbers, learned by gradient descent like every other parameter. Notice "dog" and "cat" were given similar rows here; real training *discovers* that similarity on its own — which is what makes the arrow picture (directions encode meaning) so powerful later.
+
+When Tier 4 builds a transformer, this cell is literally step one of the forward pass.
+
+</RealWorldML>
+
+<StudyDepth
+  intro={<>This is vocabulary, not theory — drill the reading reflexes until they're automatic, because every later chapter (and every paper you'll ever read) assumes them silently.</>}
+  drill={[
+    <>Bold lowercase = vector, italic = scalar; subscript xᵢ = entry, superscript x⁽ʲ⁾ = sample</>,
+    <><em>Math one is code zero</em>: paper x₁ ↔ <code>x[0]</code>, xₙ ↔ <code>x[-1]</code></>,
+    <>Reading <code>x ∈ ℝⁿ</code> and <code>X ∈ ℝᴺˣᵈ</code> aloud, with shapes <code>(n,)</code> and <code>(N, d)</code></>,
+    <>Shape discipline: <code>(n,)</code> vs <code>(n, 1)</code> vs <code>(1, n)</code> — and that mixing the first two breeds a silent <code>(n, n)</code></>,
+    <>The two pictures — arrow for operations, point for datasets — and flipping between them on purpose</>,
+  ]}
+  skim={[
+    <>Why some fields (graphics, statistics) prefer row-vector conventions — recognize it, don't adopt it</>,
+    <>Einstein/einsum index notation — arrives with matrices and attention, not needed yet</>,
+    <>Complex and integer vector spaces — ML is ℝⁿ (and increasingly low-precision floats) almost everywhere</>,
+  ]}
+/>
+
+<CodeItYourself title="Three drills — notation to code and back">
+
+1. **Write `describe(v)`** that takes a 1-D NumPy array and prints: its dimension n, the tag `R^n`, the first and last entries in *both* notations (`x_1 = 7  (code: v[0])`), and its point-face as a coordinate tuple. Call it on `np.array([7.0, 2.0, 5.0])`. *Hint: `v.shape[0]` is n; f-strings make the paired notation easy.*
+
+2. **Build a mini embedding lookup.** From `vocab = ["sun", "moon", "star", "sky"]` and a random `(4, 3)` table (use `np.random.default_rng(0).normal(size=(4, 3))`), write `embed(token)` returning that token's row, and `embed_sentence(tokens)` returning the stacked `(T, 3)` matrix. Add `assert embed("sun").shape == (3,)` and a friendly `KeyError` message for unknown tokens. *Hint: build `token_to_id` with a dict comprehension over `enumerate(vocab)`.*
+
+3. **Fix the silent (3,3).** This snippet is meant to add a bias to a vector but returns a matrix: `x = np.ones(3); b = np.ones((3, 1)); out = x + b`. Diagnose the shapes, then fix it two different ways — once by flattening `b` (`ravel`), once by making *everything* 2-D column vectors. Print shapes to prove both fixes. *Hint: broadcasting stretched `(3,)` against `(3, 1)`; the fix is to make the axes agree, not to transpose blindly.*
+
+</CodeItYourself>
+
+<Summary>
+
+- Scalar = one number (*italic x*); vector = **ordered** list of numbers (**bold x**). Order carries meaning; the entry count is the dimension; **x** ∈ ℝⁿ says "n real entries."
+- Math's default vector is a **column**; xᵀ flips it to a row. NumPy's `(n,)` array is neither — fine on its own, dangerous next to 2-D shapes.
+- Subscript = component (xᵢ), parenthesized superscript = sample (x⁽ʲ⁾), and *math one is code zero*: x₁ ↔ `x[0]`.
+- Two pictures, same numbers: **arrow** from the origin for geometry and operations; **point** for datasets and clustering.
+- A dataset is X ∈ ℝᴺˣᵈ — every row a sample vector. An embedding table is the same thing for tokens, and "embedding" a token is just row indexing.
+- Shape traps to say out loud: a "768-dimensional" embedding is shape `(768,)` (one axis); `(n,) + (n, 1)` silently produces `(n, n)`.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>A movie is described by three features in the order [sci-fi, romance, action] with values: sci-fi 3, romance 0, action 9. Write it as a vector in ℝ³. Is <code>(0, 9, 3)</code> the same vector?</>,
+      hint: <>Vectors are <em>ordered</em> — each slot has a meaning.</>,
+      answer: <>The vector is <b>(3, 0, 9)</b> ∈ ℝ³. <code>(0, 9, 3)</code> is a <b>different</b> vector — same numbers, different slots: it describes a romance-action movie with no sci-fi. Order is part of a vector's identity because each position is a specific feature.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>You have <code>x = np.array([1., 2., 3.])</code>, <code>c = x.reshape(3, 1)</code>, and <code>r = x.reshape(1, 3)</code>. Give the shape of each, and say which one a mathematician means by "the vector x ∈ ℝ³" written as a column.</>,
+      hint: <>Count the axes in each.</>,
+      answer: <><code>x</code> is <b>(3,)</b> — one axis, no row/column identity. <code>c</code> is <b>(3, 1)</b> — the explicit <b>column</b>, which matches the math default. <code>r</code> is <b>(1, 3)</b> — the explicit row, i.e. xᵀ. All three hold the same numbers; only the axis bookkeeping differs — and NumPy treats them differently the moment they meet a 2-D shape.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>A dataset has 200 samples with 6 features each. (a) What is the shape of the data matrix X and which space does each sample live in? (b) What is x⁽¹³⁷⁾ in NumPy? (c) What is x₄⁽¹³⁷⁾ in NumPy?</>,
+      hint: <>Rows are samples. Math one is code zero — twice.</>,
+      answer: <>(a) X ∈ ℝ²⁰⁰ˣ⁶, i.e. <code>X.shape == (200, 6)</code>; each sample is a vector in <b>ℝ⁶</b>. (b) Sample 137 is row 137, so <code>X[136]</code> — shift down by one. (c) Entry 4 of that sample: <code>X[136, 3]</code> — <em>both</em> indices shift. The double off-by-one is exactly where translation bugs hide.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Predict the shape of <code>a + b</code> when <code>a = np.ones(4)</code> and <code>b = np.ones((4, 1))</code>. Explain what broadcasting did, and give one fix that returns a shape-(4,) result.</>,
+      hint: <>Align the shapes right-to-left: (4,) vs (4, 1).</>,
+      answer: <>Shape <b>(4, 4)</b>. Broadcasting right-aligns <code>(4,)</code> against <code>(4, 1)</code>: the 4 pairs with b's trailing 1 (stretching b along columns), and a gains a leading 1 that pairs with b's 4 (stretching a along rows) — a full outer sum. Fix: <code>a + b.ravel()</code> (both <code>(4,)</code>), or keep everything 2-D on purpose. The deeper lesson: never let <code>(n,)</code> and <code>(n, 1)</code> touch.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>An LLM's embedding layer maps a 32,000-token vocabulary to 4,096-dimensional vectors. (a) How many parameters is the table? (b) How much memory does it need in FP16 (2 bytes per number), in MB? (c) What single NumPy operation is "embedding a batch of token ids <code>ids</code> (shape (T,))"?</>,
+      hint: <>Parameters = rows × columns. Memory = parameters × bytes each.</>,
+      answer: <>(a) 32,000 × 4,096 = <b>131,072,000</b> parameters (~131M — a meaningful slice of a small model). (b) 131,072,000 × 2 bytes = 262,144,000 bytes ≈ <b>262 MB</b> (250 MiB). (c) <code>E[ids]</code> — fancy row indexing returns shape <code>(T, 4096)</code>. The "embedding layer" of every framework is this one indexing operation plus gradient bookkeeping.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>A paper defines the mean vector of a dataset: <code>μ = (1/N) Σⱼ x⁽ʲ⁾</code> where x⁽ʲ⁾ ∈ ℝᵈ are the rows of X ∈ ℝᴺˣᵈ. Translate this to one line of NumPy, state the result's shape, and explain why the axis argument is what it is.</>,
+      hint: <>Which axis indexes j (the samples)?</>,
+      answer: <><code>mu = X.mean(axis=0)</code>, shape <b>(d,)</b>. The sum runs over j — the <em>samples</em> — which is axis 0 (rows). Collapsing axis 0 leaves one number per feature: the average sample, itself a vector in ℝᵈ. Using <code>axis=1</code> would instead average the features <em>within</em> each sample (shape (N,)) — a classic mistranslation. Rule of thumb: the Σ's index tells you which axis dies.</>
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "In standard ML notation, bold lowercase x denotes:",
+      choices: [
+        { text: "A scalar" },
+        { text: "A vector", correct: true },
+        { text: "A matrix" },
+        { text: "A dataset" },
+      ],
+      explanation: <>Bold lowercase (<b>x</b>) is a vector; italic lowercase (x, or xᵢ) is a scalar; bold uppercase (<b>X</b>) is a matrix — which is also how a dataset is usually packaged (rows = samples).</>
+    },
+    {
+      q: "The paper writes x₃ for the vector x = (9, 4, 7, 1). Which NumPy expression is it?",
+      choices: [
+        { text: "x[3]" },
+        { text: "x[2]", correct: true },
+        { text: "x[4]" },
+        { text: "x[-3]" },
+      ],
+      explanation: <>Math is 1-indexed, NumPy is 0-indexed: x₃ is the third entry, 7, which lives at <code>x[2]</code>. "Math one is code zero" — the most common translation bug in ML code.</>
+    },
+    {
+      q: "What does a shape of (5,) tell you about a NumPy array?",
+      choices: [
+        { text: "It's a column vector with 5 rows" },
+        { text: "It's a row vector with 5 columns" },
+        { text: "It's a 1-D array of 5 entries — neither row nor column", correct: true },
+        { text: "It's empty" },
+      ],
+      explanation: <>Shape <code>(5,)</code> has exactly one axis. Rows and columns only exist for 2-D shapes: <code>(5, 1)</code> is a column, <code>(1, 5)</code> a row. The 1-D form is the everyday workhorse — just don't mix it with the 2-D forms in arithmetic.</>
+    },
+    {
+      q: "A '1536-dimensional embedding' from an API is best described as:",
+      choices: [
+        { text: "A NumPy array with 1536 axes" },
+        { text: "A vector with 1536 entries — shape (1536,)", correct: true },
+        { text: "A 1536 × 1536 matrix" },
+        { text: "1536 separate scalars with no order" },
+      ],
+      explanation: <>"Dimension" in ML counts the <em>entries</em> of the vector (the n in ℝⁿ), not array axes. It's one axis, 1536 numbers — and the order is meaningful, which is why it's a vector and not a bag of scalars.</>
+    },
+    {
+      q: "In a data matrix X of shape (N, d), one row is:",
+      choices: [
+        { text: "One feature measured across all samples" },
+        { text: "One sample, as a d-dimensional vector", correct: true },
+        { text: "The mean of the dataset" },
+        { text: "A scalar" },
+      ],
+      explanation: <>Rows are samples (x⁽ʲ⁾ ∈ ℝᵈ), columns are features — the near-universal ML convention. One <em>column</em> would be one feature across all N samples. Embedding tables follow the same layout: one row per token.</>
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/vectors-space/scalars-vectors-notation" title="Scalars, vectors, and notation" />

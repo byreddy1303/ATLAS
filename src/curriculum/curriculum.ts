@@ -332,7 +332,7 @@ const tier1: Tier = {
             "Vectors as arrows vs vectors as data points",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "vector-addition-scaling",
