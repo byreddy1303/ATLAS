@@ -1,0 +1,413 @@
+---
+title: "scikit-learn: the shape of ML code"
+tier: 0
+phase: "0.2"
+---
+
+export const contractCode = `import numpy as np
+from sklearn.linear_model import LinearRegression
+
+# tiny data: hours studied -> exam score
+X = np.array([[1.0], [2.0], [3.0], [4.0], [5.0]])   # 2-D: (n_samples, n_features)
+y = np.array([52.0, 61.0, 70.0, 79.0, 88.0])        # 1-D: one label per row
+
+model = LinearRegression()     # 1 - instantiate: configuration only, no data yet
+model.fit(X, y)                # 2 - fit: ALL learning happens here, nowhere else
+
+# everything learned during fit is stored with a trailing underscore
+print("slope:    ", model.coef_)         # 9 points per hour
+print("intercept:", model.intercept_)    # 43-point baseline
+
+# 3 - predict: REPLAY what was learned, on rows the model never saw
+X_new = np.array([[6.0], [7.5]])
+print("predictions:", model.predict(X_new).round(1))
+print()
+
+# the most common beginner crash: a 1-D X
+try:
+    LinearRegression().fit(np.array([1.0, 2.0, 3.0]), np.array([1.0, 2.0, 3.0]))
+except ValueError as e:
+    print("1-D X ->", str(e)[:58], "...")
+# X is ALWAYS (n_samples, n_features) - one feature still means shape (n, 1)`;
+
+export const splitCode = `import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.neighbors import KNeighborsClassifier
+
+rng = np.random.default_rng(0)
+X = rng.normal(size=(200, 2))
+y = (X[:, 0] + X[:, 1] > 0).astype(int)     # a genuinely learnable rule
+
+X_tr, X_te, y_tr, y_te = train_test_split(
+    X, y, test_size=0.25, random_state=42, stratify=y)
+print("train:", X_tr.shape, "| test:", X_te.shape)
+print("class balance train / test:", y_tr.mean().round(2), "/", y_te.mean().round(2))
+print()
+
+model = KNeighborsClassifier(n_neighbors=1)   # k=1: memorizes the training set
+model.fit(X_tr, y_tr)
+
+print("score on TRAINING data:", model.score(X_tr, y_tr))    # perfect. meaningless.
+print("score on UNSEEN test:  ", model.score(X_te, y_te).round(2))
+# the gap between those two numbers is the difference between
+# memorizing the homework and understanding the subject`;
+
+export const scalerCode = `import numpy as np
+from sklearn.preprocessing import StandardScaler
+
+X_tr = np.array([[1.0, 100.0], [2.0, 200.0], [3.0, 300.0], [4.0, 400.0]])
+X_te = np.array([[2.5, 250.0], [10.0, 900.0]])
+
+scaler = StandardScaler()
+Xtr_s = scaler.fit_transform(X_tr)   # fit (learn mean/std) + transform, one call
+print("learned in fit: mean =", scaler.mean_, "| std =", scaler.scale_.round(2))
+print(Xtr_s.round(2))
+print()
+
+# THE GOLDEN RULE: the test set is transformed with the TRAIN set's numbers
+Xte_s = scaler.transform(X_te)       # transform ONLY. Never fit on test.
+print(Xte_s.round(2))
+# row 2 correctly shows up as extreme (~ +6 std) BECAUSE train's stats judged it.
+# fit_transform(X_te) would have re-centered the test set around its own mean,
+# making the outlier look normal - the transformer "peeking" at the future`;
+
+export const pipeCode = `import pandas as pd
+import numpy as np
+from sklearn.pipeline import make_pipeline
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+
+df = pd.DataFrame({
+    "age":   [23, 41, 25, 55, 34, 38, 27, 46, 31, 52],
+    "spend": [0.0, 60.0, np.nan, 99.0, 12.5, 8.0, np.nan, 75.0, 20.0, 88.0],
+    "plan":  ["free", "pro", "free", "pro", "team", "free", "free", "pro", "team", "pro"],
+    "churned": [1, 0, 1, 0, 0, 1, 1, 0, 0, 0],
+})
+X, y = df.drop(columns="churned"), df["churned"]
+
+# declare WHAT happens to WHICH columns - preprocessing as configuration
+prep = ColumnTransformer([
+    ("num", make_pipeline(SimpleImputer(strategy="median"), StandardScaler()),
+     ["age", "spend"]),
+    ("cat", OneHotEncoder(handle_unknown="ignore"), ["plan"]),
+])
+pipe = make_pipeline(prep, LogisticRegression())
+print("steps:", list(pipe.named_steps))
+
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.3,
+                                          random_state=0, stratify=y)
+pipe.fit(X_tr, y_tr)   # ONE fit: imputer, scaler, encoder, model - train-only, in order
+print("test accuracy:", pipe.score(X_te, y_te).round(2))
+print()
+
+# the payoff: a RAW customer goes straight in - NaN spend, never-seen plan and all
+newbie = pd.DataFrame({"age": [29], "spend": [np.nan], "plan": ["enterprise"]})
+print("churn probability:", pipe.predict_proba(newbie)[0, 1].round(2))`;
+
+export const cvCode = `import numpy as np
+from sklearn.model_selection import cross_val_score, train_test_split
+from sklearn.tree import DecisionTreeClassifier
+
+rng = np.random.default_rng(1)
+X = rng.normal(size=(120, 4))
+y = ((X[:, 0] + 0.5 * X[:, 1] + rng.normal(scale=0.8, size=120)) > 0).astype(int)
+
+model = DecisionTreeClassifier(max_depth=3, random_state=0)
+
+# one split = one number, and the number depends on WHICH rows landed in test
+for seed in [0, 1, 2]:
+    X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.25, random_state=seed)
+    print(f"seed {seed}: single-split accuracy = {model.fit(X_tr, y_tr).score(X_te, y_te):.2f}")
+print()
+
+# cross-validation: 5 folds, every row takes one turn in the test seat
+scores = cross_val_score(model, X, y, cv=5, scoring="accuracy")
+print("5-fold scores:", scores.round(2))
+print(f"mean = {scores.mean():.2f} +/- {scores.std():.2f}")
+print()
+
+# same model, different question: scoring= swaps the metric
+auc = cross_val_score(model, X, y, cv=5, scoring="roc_auc")
+print("5-fold ROC-AUC:", auc.mean().round(2))`;
+
+export const realWorldCode = `import pandas as pd
+import numpy as np
+import joblib
+from sklearn.pipeline import make_pipeline
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import cross_val_score
+
+# a churn table like last chapter's, synthesized at 60 users
+rng = np.random.default_rng(7)
+n = 60
+plans = rng.choice(["free", "pro", "team"], size=n, p=[0.5, 0.3, 0.2])
+age = rng.integers(19, 65, size=n).astype(float)
+spend = np.where(plans == "free", 0.0, rng.lognormal(3, 0.6, n)).round(2)
+spend[rng.random(n) < 0.1] = np.nan            # some users hide their spend
+tickets = rng.poisson(2, n)
+churn_logit = 1.2 * (plans == "free") + 0.35 * tickets - 0.02 * age - 0.6
+churned = (rng.random(n) < 1 / (1 + np.exp(-churn_logit))).astype(int)
+
+df = pd.DataFrame({"age": age, "spend": spend, "tickets": tickets,
+                   "plan": plans, "churned": churned})
+X, y = df.drop(columns="churned"), df["churned"]
+print("data:", X.shape, "| churn rate:", y.mean().round(2))
+
+# every cleaning decision from last chapter, frozen into one object
+prep = ColumnTransformer([
+    ("num", make_pipeline(SimpleImputer(strategy="median"), StandardScaler()),
+     ["age", "spend", "tickets"]),
+    ("cat", OneHotEncoder(handle_unknown="ignore"), ["plan"]),
+])
+pipe = make_pipeline(prep, LogisticRegression(max_iter=1000))
+
+# evaluate the WHOLE pipeline: preprocessing is re-fit inside every fold
+scores = cross_val_score(pipe, X, y, cv=5, scoring="accuracy")
+print(f"5-fold accuracy: {scores.mean():.2f} +/- {scores.std():.2f}")
+
+# ship it: fit on all data, save, reload, score a raw customer
+pipe.fit(X, y)
+joblib.dump(pipe, "churn_model.joblib")
+loaded = joblib.load("churn_model.joblib")
+
+new_customer = pd.DataFrame(
+    {"age": [24.0], "spend": [np.nan], "tickets": [6], "plan": ["free"]})
+p = loaded.predict_proba(new_customer)[0, 1]
+print(f"new raw customer -> churn probability {p:.0%}")`;
+
+<Prerequisites items={[
+  { href: "/learn/foundations/scientific-stack/numpy-arrays-vectorization", label: "NumPy · arrays", blurb: "X is a (n_samples, n_features) float array — the shape rules from this chapter are enforced by every estimator." },
+  { href: "/learn/foundations/scientific-stack/eda-cleaning", label: "EDA & cleaning", blurb: "Imputation, encoding, and the get_dummies column-drift flaw — this chapter turns those manual steps into one leak-proof object." },
+  { href: "/learn/foundations/scientific-stack/pandas-dataframe-fundamentals", label: "Pandas · DataFrames", blurb: "Pipelines eat DataFrames directly; column selection by name is how ColumnTransformer routes." },
+]} />
+
+<Motivation title="One API to rule a decade of ML — learn the grammar once, speak every library">
+
+You don't yet know how any model works inside — that's Tier 2's job. You don't need to. scikit-learn's genius was separating the *grammar* of machine learning from the *math* of it: every model, from a one-line linear regression to a gradient-boosted forest, is driven through the same three methods — `fit`, `predict`, `transform`. Learn the grammar now, on models treated as black boxes, and every algorithm you meet later arrives with its interface already familiar.
+
+The grammar escaped the library. XGBoost, LightGBM, and countless industrial systems clone the sklearn API; its metrics (`accuracy`, `roc_auc`, F1) are the vocabulary of every LLM eval harness; and the professional reflex of *baseline first* — before fine-tuning anything expensive, fit a logistic regression to learn whether the problem is even hard — runs entirely on what's in this chapter.
+
+Just as important: sklearn is where the discipline lives. Train/test splits, the fit-on-train-only rule, cross-validation, pipelines that make leakage structurally impossible — these habits separate numbers you can defend from numbers that merely look good. This is the chapter where you train, evaluate, save, and reload your first real model.
+
+</Motivation>
+
+<Intuition title="Every estimator is an appliance with the same three buttons — and fit is the only one that learns">
+
+Picture every sklearn object as an appliance with three buttons. **`fit(X, y)` — learn.** The appliance studies the data and stores everything it learned in attributes ending with an underscore (`coef_`, `mean_`, `categories_`); the trailing `_` literally means *"computed during fit."* **`predict(X)` — answer.** Replay what was learned on new rows; nothing is learned here. **`transform(X)` — reshape.** Same replay, but the output is modified data instead of answers (scalers, encoders, imputers). One workflow drives everything: *instantiate → fit → use*.
+
+Two consequences carry the whole chapter. First, **the golden rule**: since `fit` is where learning happens, it is only ever allowed to see the *training* data — calling it on test data lets the future contaminate the model's view of the past. Second, **a Pipeline is appliances bolted into an assembly line** that share one set of buttons: call `fit` on the pipeline and each stage fits then passes its output down the line; call `predict` and raw data flows through every learned transformation into the model. The line is one object — one thing to cross-validate, one thing to save, one thing that cannot leak.
+
+</Intuition>
+
+## The contract — three buttons and an underscore
+
+<Recall term="The X, y handoff">
+The NumPy and pandas chapters both ended at the same doorstep: features as a float matrix `X` with one row per sample and one column per feature, labels as a length-matching `y`. That handoff shape is exactly what every sklearn estimator demands.
+</Recall>
+
+<RunnableCode title="instantiate, fit, inspect the learned state, predict" code={contractCode} />
+
+The data is exactly the line `score = 43 + 9·hours`, and after `fit` the model's learned state says so: `coef_ = [9.]`, `intercept_ = 43.` — recovered from data, not told. The three-step rhythm never changes: **instantiate** (hyperparameter choices, no data), **fit** (all learning, stored in `_`-suffixed attributes), **use** (`predict` on rows the model never saw). Accessing `coef_` *before* fit raises `NotFittedError` — the underscore attributes don't exist until learning happens.
+
+The pitfall that greets every beginner within the first hour: **X must be 2-D even with one feature.** `df["age"]` is a 1-D Series and crashes with *"Expected 2D array"*; `df[["age"]]` (list inside the brackets — last chapter's selection rule) keeps it a one-column DataFrame and works. Fixes when you're in NumPy-land: `x.reshape(-1, 1)`.
+
+## Train/test split — the exam must be unseen
+
+<RunnableCode title="a memorizer aces the homework and flunks the exam" code={splitCode} />
+
+A model's score on data it trained on is a student grading their own homework — the demo makes it vivid with `KNeighborsClassifier(n_neighbors=1)`, which literally memorizes the training set (every training point's nearest neighbor is itself): **1.0 on training data, every time, for any dataset**, telling you nothing. The score on the held-out 25% is the only number that estimates performance on data the model will actually face. That gap — perfect homework, imperfect exam — is your first sighting of **overfitting**, and the entire reason evaluation discipline exists.
+
+Three arguments to never omit: **`random_state=42`** makes the shuffle reproducible (any integer works; consistency is the point — rerunning with a different split and calling the improvement "progress" is self-deception). **`stratify=y`** keeps class proportions equal in both halves — with imbalanced classes, an unlucky split can leave the test set with almost no positives. And the split happens **before anything else touches the data** — before scaling, before imputation statistics, before feature selection. The test set is the future; the future hasn't happened yet.
+
+`.score(X, y)` is the estimator's built-in default metric — accuracy for classifiers, R² for regressors. Handy, but it answers only one question; `scoring=` below opens the rest.
+
+## Transformers and the golden rule — fit on train only
+
+<RunnableCode title="the scaler learns on train, then judges test by train's numbers" code={scalerCode} />
+
+Transformers are the appliances whose output is *data*: `StandardScaler` learns each column's mean and std during `fit` (see `mean_`, `scale_`) and `transform` re-expresses every value as "how many stds from the mean." `fit_transform(X_tr)` is the two-step shortcut — **legal only on training data**.
+
+The test set gets `transform` *only* — judged by the **train** set's numbers. That's not pedantry; it's the whole point, and the demo shows why: the test row with `10.0` lands at roughly +6 stds — correctly flagged as extreme relative to what the model trained on. Call `fit_transform` on the test set instead and the scaler re-centers around the *test* mean, the outlier gets laundered back toward normal, and information about the test distribution has silently flowed into your features. That's **data leakage** — the future whispering to the past — and it inflates every score it touches while destroying the model in production, where there is no batch of future data to re-fit on.
+
+The same rule binds every transformer: the imputer's median, the encoder's category list, the scaler's mean — all learned from train, all *replayed* on test. Keeping that straight by hand across five transformers is exactly the bookkeeping humans botch. Hence:
+
+## Pipeline + ColumnTransformer — preprocessing as one object
+
+<RunnableCode title="impute + scale + encode + model, fused into one appliance" code={pipeCode} />
+
+`make_pipeline(prep, LogisticRegression())` bolts the stages into one estimator with the standard three buttons. **One `fit` call** runs the assembly line left to right on training data only: imputer learns medians → scaler learns means/stds → encoder learns categories → model learns weights. **One `predict` call** replays every learned transformation on raw input. The golden rule stops being a discipline you maintain and becomes a property of the object — there is *no way* to accidentally fit preprocessing on test data, because you never touch the pieces individually.
+
+`ColumnTransformer` handles the reality that columns need different treatment: numeric columns route through impute-then-scale, categorical through one-hot — declared as configuration, by column name. Two arguments do heavy lifting:
+
+- **`handle_unknown="ignore"`** — last chapter flagged `get_dummies`' production flaw: new month, new plan value, different columns, broken model. `OneHotEncoder` fixes it: categories are *learned at fit* and frozen; a never-seen `"enterprise"` at predict time encodes as all-zeros instead of crashing. Watch the final lines: a raw customer with a NaN spend **and** an unknown plan flows straight through to a probability.
+- **`SimpleImputer(strategy="median")`** — the median from the *training* rows, stored, replayed forever. The eda-chapter's paper-trail imputation, now leak-proof by construction.
+
+(The accuracy printed on 3 test rows is statistical noise — with data this small only the *shape* of the code is the lesson. Fixing the noise is next.)
+
+## Cross-validation — never trust one split
+
+<RunnableCode title="three seeds, three different 'truths' — then five folds settle it" code={cvCode} />
+
+The first loop is quietly devastating: the *same model* on the *same data* scores noticeably differently depending on which rows the seed happened to deal into the test set. Any single split is one draw from a lottery — report it alone and you're reporting luck.
+
+**Cross-validation** deals the lottery fairly: split the data into 5 folds, train on 4, test on the 5th, rotate until every fold has taken one turn as the exam, and report **all five scores**. `cross_val_score(model, X, y, cv=5)` does the whole dance. The deliverable is `mean ± std` — the std is honesty about how much the number wobbles (a model scoring 0.78 ± 0.02 is credibly better than 0.74 ± 0.02; at ± 0.15 the comparison is noise). This is the format every serious practitioner expects, and single-number claims without it are a smell.
+
+`scoring=` swaps the question: `"accuracy"`, `"roc_auc"`, `"f1"`, `"neg_mean_squared_error"` — same models, same folds, different metric. Accuracy in particular lies under class imbalance (a 95%-negative dataset gives "predict nothing ever happens" 95% accuracy), which is when `roc_auc` or recall earn their keep — Tier 2 dissects the metric zoo.
+
+The clause that ties the chapter together: **cross-validate the pipeline, not the bare model.** `cross_val_score(pipe, X, y)` re-fits the *entire assembly line* inside every fold, so each fold's imputer and scaler learn only from that fold's training portion. Scale first and cross-validate after, and every fold's test data has already leaked into the preprocessing — the subtle version of the crime from the scaler section, committed at scale by people who know the golden rule and forgot the pipeline.
+
+<RealWorldML title="Churn table → cross-validated pipeline → a .joblib file you could deploy tonight">
+
+<RunnableCode title="synthesize, pipeline, cross-validate, persist, reload, predict raw" code={realWorldCode} />
+
+The full arc of Phase 0.2 in one cell — line by line:
+
+- **The synthesis block** builds last chapter's churn table at 60 rows, dirt included: free-plan users spend nothing, 10% of spends are NaN, and churn probability genuinely depends on plan, tickets, and age (through a logistic formula — the model's job is to rediscover it).
+- **`prep` + `pipe`** — every cleaning decision from the EDA chapter, frozen as configuration: median imputation, scaling, one-hot with `handle_unknown="ignore"`. One object from raw DataFrame to prediction.
+- **`cross_val_score(pipe, X, y, cv=5)`** — the *pipeline* rides inside the folds, so all preprocessing is re-learned per fold from that fold's training data alone. The mean ± std that prints is a number you could defend in a review.
+- **`pipe.fit(X, y)`** — evaluation done, now use *all* labeled data for the model you'll actually ship: standard practice (more data, better fit; the CV number remains the performance claim).
+- **`joblib.dump(pipe, ...)` / `joblib.load(...)`** — persistence. The file contains the *whole assembly line*: learned medians, scaler stats, category lists, model weights. The serving system needs zero preprocessing code — just this file and raw columns. (One production caveat worth knowing now: a joblib file is tied to the sklearn version that wrote it — pin versions when you deploy.)
+- **The last two lines are the payoff** — a raw new customer, missing spend and all, straight into `predict_proba`, out comes a churn probability. Between the CSV and this line sits everything Phase 0.2 taught: arrays, DataFrames, cleaning, and now the contract that packages it all.
+
+</RealWorldML>
+
+<StudyDepth
+  intro={<>The API is small and the discipline is everything. Drill the contract and the leakage rules until they&apos;re reflexes — they transfer to every ML library you&apos;ll ever touch. The model zoo and metric zoo stay shallow until Tier 2 gives them their math.</>}
+  drill={[
+    <>The rhythm: instantiate → <code>fit</code> → <code>predict</code>/<code>transform</code>; trailing underscore = learned during fit</>,
+    <>X is always 2-D <code>(n_samples, n_features)</code> — <code>df[["col"]]</code> not <code>df["col"]</code>, <code>reshape(-1, 1)</code> in NumPy</>,
+    <>Split before everything; <code>stratify=y</code>; <code>random_state</code> for reproducibility</>,
+    <>The golden rule: <code>fit_transform</code> on train, <code>transform</code> on test — and why the pipeline makes it automatic</>,
+    <>Cross-validate the <em>pipeline</em>, report mean ± std — never a single split, never a training score</>,
+  ]}
+  skim={[
+    <>The model zoo (trees, forests, SVMs...) — treated as interchangeable black boxes until Tier 2 opens them</>,
+    <>The full metric catalog and <code>scoring=</code> strings — accuracy vs AUC intuition suffices for now</>,
+    <>GridSearchCV / hyperparameter tuning — it&apos;s just CV in a loop; formal treatment comes with model selection</>,
+    <>Custom transformers and <code>ColumnTransformer</code>&apos;s corners (<code>remainder=</code>, sparse output) — look up when a project needs them</>,
+  ]}
+/>
+
+<CodeItYourself title="Three drills — learn the buttons, then catch the leak">
+
+**Drill 1 — Recover a line you invented.** Make up your own linear rule (say `y = 20 + 3.5x` plus a little `rng.normal` noise over 30 points), fit a `LinearRegression`, and check that `coef_` and `intercept_` recover your numbers. Then predict at three new x-values and verify by hand against your formula. This closes the loop on what "learning" stores.
+
+**Drill 2 — Watch scaling matter.** Build a 300-row dataset with two features on wildly different scales — `age` (20–60) and `income` (20,000–200,000) — where the label depends on *age only*. Cross-validate `KNeighborsClassifier(5)` twice: bare, and inside `make_pipeline(StandardScaler(), ...)`. Explain the gap in one sentence (hint: whose distance dominates when one axis is measured in thousands?).
+
+**Drill 3 — Ship the books model.** Take your 8-book table (grow it to ~30 rows with invented data), predict `rating > 4` from pages, year, and a one-hot genre column. Build the full `ColumnTransformer` pipeline, get a 5-fold mean ± std, `joblib.dump` it, reload it, and predict one brand-new raw book — including a genre the training data never contained. If that last call doesn't crash, you've earned `handle_unknown="ignore"`.
+
+</CodeItYourself>
+
+<Summary>
+
+- **The contract:** instantiate (config, no data) → `fit(X, y)` (all learning; results stored in `_`-suffixed attributes) → `predict`/`transform` (pure replay). One grammar for every model in the library — and most beyond it.
+- **Shapes:** `X` is 2-D `(n_samples, n_features)` — always, even for one feature (`df[["col"]]`, `reshape(-1, 1)`); `y` is 1-D and row-aligned.
+- **Split first, judge on unseen:** training scores are homework grades (k=1 KNN scores 1.0 forever); `train_test_split(..., stratify=y, random_state=...)` before any statistic is computed. The test set is the future.
+- **The golden rule:** transformers `fit` on train only; test gets `transform` with train's learned numbers. Violations are *leakage* — scores inflate, production dies.
+- **Pipeline = the rule made structural:** `make_pipeline` fuses impute → scale → encode → model into one estimator; `ColumnTransformer` routes columns to treatments; `handle_unknown="ignore"` survives categories the future invents.
+- **Cross-validation:** one split is a lottery ticket; `cross_val_score(pipe, X, y, cv=5)` rotates the exam and reports **mean ± std** — and it must wrap the *pipeline* so preprocessing re-fits inside each fold.
+- **Persistence:** `joblib.dump/load` ships the whole assembly line — learned statistics, categories, weights — as one file (pinned to its sklearn version). Raw row in, prediction out.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <><code>model.fit(df["age"], y)</code> crashes with <em>&quot;Expected 2D array, got 1D array instead&quot;</em>. Why, and what are the two standard fixes (one in pandas, one in NumPy)?</>,
+      hint: <>What shape does every estimator demand of X, regardless of feature count?</>,
+      answer: <>Estimators require <code>X</code> to be 2-D — <code>(n_samples, n_features)</code> — because the columns axis is how they count features; a 1-D Series is ambiguous (200 samples of 1 feature? 1 sample of 200?). Pandas fix: <code>df[["age"]]</code> — the inner list makes it a one-column <em>DataFrame</em> of shape (n, 1). NumPy fix: <code>x.reshape(-1, 1)</code> — the −1 means &quot;infer this dimension.&quot; <code>y</code>, by contrast, stays 1-D.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>State what <code>fit</code>, <code>transform</code>, and <code>fit_transform</code> each do for a <code>StandardScaler</code>, and name the one dataset <code>fit_transform</code> must never touch.</>,
+      hint: <>Which of the three <em>learns</em>? What would learning from that dataset mean?</>,
+      answer: <><code>fit</code> <em>learns</em> each column&apos;s mean and std and stores them (<code>mean_</code>, <code>scale_</code>). <code>transform</code> <em>replays</em>: re-expresses values using the stored numbers, learning nothing. <code>fit_transform</code> does both in one call — a convenience for training data. It must never touch the <strong>test set</strong>: fitting there re-centers the data around test statistics, quietly feeding information about the &quot;future&quot; into features (leakage) and making genuine outliers look normal. Test data gets <code>transform</code> only, judged by train&apos;s numbers.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>A teammate scales the <em>entire</em> dataset with <code>StandardScaler().fit_transform(X)</code>, then splits train/test, then reports a strong test score. Explain precisely what leaked, why the score is inflated, and two correct workflows.</>,
+      hint: <>Whose values participated in the mean and std that transformed the training rows?</>,
+      answer: <>The scaler&apos;s mean and std were computed over <em>all</em> rows — including the ones that later became the test set. Every training feature was therefore transformed using statistics that encode information about the test distribution: the test set has whispered its location and spread to the training data before the exam. The test score is inflated because the &quot;unseen&quot; data isn&apos;t fully unseen — and the inflation silently vanishes in production, where future data can&apos;t contribute to the stats. Correct workflows: (1) split <em>first</em>, then <code>fit_transform(X_tr)</code> / <code>transform(X_te)</code>; (2) better, put the scaler in a <code>Pipeline</code> and cross-validate the pipeline — each fold then re-fits the scaler on its own training portion, making the mistake structurally impossible.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Your decision tree scores 1.00 on training data and 0.71 ± 0.04 across 5 folds. A stakeholder asks &quot;so is the model 100% accurate or 71%?&quot; Answer them, and explain what each number actually measures.</>,
+      hint: <>Homework vs exam. Which data will the deployed model face?</>,
+      answer: <>The model is ~71% accurate in the only sense that matters. The 1.00 is the score on rows the tree <em>memorized during training</em> — a sufficiently deep tree can carve a leaf for every training row, so training accuracy measures memory capacity, not skill (recall k=1 KNN: always 1.0). The 0.71 ± 0.04 is cross-validated performance on <em>held-out</em> data — an estimate of behavior on the new customers the deployed model will actually face, with the ± quantifying how much that estimate wobbles across folds. The gap between the two numbers is overfitting, and reporting the training number as &quot;accuracy&quot; would be professional malpractice.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>A deployed churn model was built with manual <code>pd.get_dummies</code> + a hand-fitted scaler, then only the <em>model</em> was saved with joblib. Two months later predictions crash on some days and are silently wrong on others. Diagnose both failure modes and redesign the deployment.</>,
+      hint: <>What produces the feature columns in production? Where do the scaler&apos;s mean/std live now?</>,
+      answer: <><strong>Crash days:</strong> <code>get_dummies</code> builds columns from whatever categories appear <em>in that batch</em> — a batch missing a plan (or containing a new one) yields a different column set/order than training, and the model errors (or worse, matches columns positionally). <strong>Silently-wrong days:</strong> the scaler wasn&apos;t saved, so serving code either re-fits it on the day&apos;s batch — different mean/std per day, features that mean different things than at training — or skips scaling entirely; both feed the model numbers on the wrong scale with no error raised. <strong>Redesign:</strong> one <code>Pipeline</code> containing <code>ColumnTransformer</code> (with <code>OneHotEncoder(handle_unknown="ignore")</code> — categories frozen at fit; unknowns encode as zeros) + scaler + model; <code>joblib.dump</code> the <em>whole pipeline</em>; serving passes raw columns to <code>loaded.predict_proba</code>. Pin the sklearn version alongside the artifact, and log/alert on unknown-category rates so drift is noticed rather than absorbed.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Design the evaluation for a fraud model where 97% of rows are legitimate. Cover: why accuracy is disqualified, the metric(s) you&apos;d pass to <code>scoring=</code>, where stratification enters (twice), and what object goes inside <code>cross_val_score</code>.</>,
+      hint: <>What score does &quot;predict nothing is ever fraud&quot; earn? Which rows might a random fold contain zero of?</>,
+      answer: <><strong>Accuracy is disqualified</strong> because the constant model &quot;never fraud&quot; scores 0.97 — the metric rewards ignoring the minority class you exist to catch. <strong>Metrics:</strong> <code>scoring="roc_auc"</code> (ranking quality across thresholds) as the headline, with recall/precision (or <code>average_precision</code>) to expose the miss-fraud vs false-alarm trade-off that the business actually feels. <strong>Stratification, twice:</strong> <code>stratify=y</code> in any initial <code>train_test_split</code>, and stratified folds in CV (sklearn&apos;s default <code>StratifiedKFold</code> for classifiers — know that it&apos;s load-bearing here) — otherwise a fold can draw near-zero fraud rows and produce garbage or undefined scores. <strong>The object:</strong> the full <code>Pipeline</code> (imputer/scaler/encoder + model), never the bare model — at 3% positives, even mild preprocessing leakage across folds is enough to fabricate the &quot;edge&quot; you&apos;re trying to measure. Report mean ± std, not a lucky single split.</>
+    },
+  ]}
+/>
+
+<Quiz items={[
+  {
+    q: <>In sklearn, what does a trailing underscore (as in <code>coef_</code>, <code>mean_</code>, <code>categories_</code>) signify?</>,
+    choices: [
+      { text: <>A private attribute you shouldn&apos;t read</> },
+      { text: <>The attribute was learned from data during <code>fit</code> and doesn&apos;t exist before it</>, correct: true },
+      { text: <>A deprecated API kept for compatibility</> },
+      { text: <>The attribute is read-only</> },
+    ],
+    explanation: <>The trailing underscore is sklearn&apos;s convention for &quot;computed during <code>fit</code>&quot; — learned state, not configuration. Accessing it before fitting raises <code>NotFittedError</code>. Hyperparameters you chose at instantiation have no underscore.</>
+  },
+  {
+    q: <>Which is the correct treatment of the test set with a <code>StandardScaler</code>?</>,
+    choices: [
+      { text: <><code>scaler.fit_transform(X_te)</code> — fresh statistics for fresh data</> },
+      { text: <><code>scaler.transform(X_te)</code> using the scaler fitted on training data only</>, correct: true },
+      { text: <>Fit on the full dataset before splitting, for consistency</> },
+      { text: <>Test data shouldn&apos;t be scaled</> },
+    ],
+    explanation: <>Learning (fit) sees train only; test is replayed through train&apos;s learned mean/std. Fitting on test (or on the full data pre-split) leaks the test distribution into preprocessing, inflating scores — and re-centering test around its own mean launders real outliers into looking normal.</>
+  },
+  {
+    q: <>Why should <code>cross_val_score</code> wrap the <em>pipeline</em> rather than the bare model (with preprocessing done beforehand)?</>,
+    choices: [
+      { text: <>It&apos;s faster because transforms are cached</> },
+      { text: <>Bare models can&apos;t be cross-validated</> },
+      { text: <>Pre-transforming uses all rows to learn preprocessing, so every fold&apos;s test data has already leaked into the features; the pipeline re-fits preprocessing inside each fold</>, correct: true },
+      { text: <>It changes the scoring metric automatically</> },
+    ],
+    explanation: <>Preprocessing fitted once on the full dataset learned from rows that will later sit in each fold&apos;s test seat — leakage by construction. Wrapping the pipeline means every fold independently fits imputer/scaler/encoder on its own training portion, keeping each mini-exam honest.</>
+  },
+  {
+    q: <>A fitted <code>OneHotEncoder(handle_unknown="ignore")</code> meets a category it never saw at predict time. What happens?</>,
+    choices: [
+      { text: <>It raises an error, as any encoder must</> },
+      { text: <>It adds a new column for the new category</> },
+      { text: <>The row encodes as all zeros across that feature&apos;s columns — the schema stays frozen and prediction proceeds</>, correct: true },
+      { text: <>The row is silently dropped</> },
+    ],
+    explanation: <>Categories are learned (and frozen) at fit; unknowns map to all-zeros so the column contract never changes. This is exactly what raw <code>get_dummies</code> can&apos;t promise — its columns depend on whatever values each batch happens to contain, which is a production time bomb.</>
+  },
+  {
+    q: <>What does <code>cross_val_score(pipe, X, y, cv=5)</code> return, and what should you report from it?</>,
+    choices: [
+      { text: <>One score from the best fold</> },
+      { text: <>Five scores — each fold takes one turn as the held-out test set; report mean ± std</>, correct: true },
+      { text: <>A fitted copy of the pipeline</> },
+      { text: <>The training accuracy averaged over folds</> },
+    ],
+    explanation: <>CV rotates the exam: train on 4 folds, score on the 5th, five times. The array of five held-out scores is the return value; mean ± std is the honest summary (the std is your evidence for whether a difference between models is real or fold-lottery noise). Best-fold reporting is cherry-picking.</>
+  }
+]} />
+
+<MarkDone slug="foundations/scientific-stack/sklearn-shape-of-ml" title="scikit-learn: the shape of ML code" />

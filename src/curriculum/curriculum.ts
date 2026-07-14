@@ -278,7 +278,7 @@ const tier0: Tier = {
             "Persistence (joblib) and pipeline serialization",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "project-csv-cli",
