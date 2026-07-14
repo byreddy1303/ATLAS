@@ -1,0 +1,424 @@
+---
+title: Projections & orthogonality
+tier: 1
+phase: "1.1"
+---
+
+export const orthoCode = `import numpy as np
+
+# perpendicular vectors have dot product zero — the ONE test
+a = np.array([3.0, 0.0])
+b = np.array([0.0, 5.0])
+c = np.array([2.0, 4.0])
+
+print("a . b =", a @ b, "  (0 -> perpendicular)")
+print("a . c =", a @ c, "  (>0 -> less than 90 apart)")
+
+# Pythagorean identity: for perpendicular a and b, ||a+b||^2 = ||a||^2 + ||b||^2
+lhs = np.linalg.norm(a + b) ** 2
+rhs = np.linalg.norm(a) ** 2 + np.linalg.norm(b) ** 2
+print("Pythagoras: 34.0 ==", lhs, "==", rhs)`;
+
+export const projectionCode = `import numpy as np
+
+def project(v, u):
+    """Vector projection of v onto u — the shadow of v on u's direction."""
+    return (v @ u) / (u @ u) * u
+
+v = np.array([4.0, 3.0])
+u = np.array([1.0, 0.0])          # the x-axis direction
+
+p = project(v, u)                  # shadow of v on the x-axis
+r = v - p                          # residual: what's left over — perpendicular to u
+
+print("projection p    =", p)     # (4, 0) — the x-component
+print("residual   r    =", r)     # (0, 3) — the y-component
+print("p . r          =", round(float(p @ r), 10), " (== 0 -> perpendicular)")
+print("check: p + r == v ->", np.allclose(p + r, v))`;
+
+export const gramSchmidtCode = `import numpy as np
+
+def gram_schmidt(vectors):
+    """Turn any basis into an orthonormal basis — subtract shadows, then normalize."""
+    out = []
+    for v in vectors:
+        w = v.copy()
+        for u in out:                # subtract off shadows onto previously-fixed directions
+            w = w - (w @ u) * u      # (u is already unit, so no /(u@u) needed)
+        n = np.linalg.norm(w)
+        if n > 1e-12:                # skip near-zero vectors (linearly dependent input)
+            out.append(w / n)        # normalize to unit length
+    return np.stack(out)
+
+V = np.array([[1.0, 1.0, 0.0],
+              [1.0, 0.0, 1.0],
+              [0.0, 1.0, 1.0]])
+Q = gram_schmidt(V)
+print("orthonormal basis (rows):")
+print(np.round(Q, 3))
+print()
+print("Q Q^T =")                    # should be the identity
+print(np.round(Q @ Q.T, 3))`;
+
+export const easyCoordsCode = `import numpy as np
+
+# ONE orthonormal basis of R^3 — three perpendicular unit vectors
+q1 = np.array([1.0, 0.0, 0.0])
+q2 = np.array([0.0, 1.0, 0.0])
+q3 = np.array([0.0, 0.0, 1.0])
+Q  = np.column_stack([q1, q2, q3])
+
+x = np.array([4.0, -2.0, 7.0])
+
+# with a general basis you'd solve B c = x. with orthonormal Q, coordinates are DOT PRODUCTS
+c1, c2, c3 = x @ q1, x @ q2, x @ q3
+print("coordinates via dot products:", c1, c2, c3)
+print("compare to np.linalg.solve   :", np.linalg.solve(Q, x))
+
+# a fancier example: an orthonormal basis rotated 45 degrees in the xy-plane
+s = 1 / np.sqrt(2)
+r1 = np.array([s, s, 0])
+r2 = np.array([-s, s, 0])
+r3 = np.array([0.0, 0.0, 1.0])
+print()
+print("in 45-degree frame:", x @ r1, x @ r2, x @ r3)`;
+
+export const lstsqCode = `import numpy as np, matplotlib.pyplot as plt
+
+# fabricate noisy points on a line y = 2x + 1
+rng = np.random.default_rng(0)
+x = np.linspace(-2, 2, 30)
+y = 2 * x + 1 + rng.normal(scale=0.6, size=x.shape)
+
+# design matrix: two columns [x, 1] — one for slope, one for intercept
+X = np.column_stack([x, np.ones_like(x)])
+
+# least squares: PROJECT y onto the plane spanned by X's columns
+w, *_ = np.linalg.lstsq(X, y, rcond=None)
+print("slope, intercept =", np.round(w, 3))
+y_hat = X @ w                            # the projection = predicted values
+resid = y - y_hat                        # residuals: perpendicular to that plane
+
+# proof: residual is orthogonal to EVERY column of X (the normal equations)
+print("X^T residual =", np.round(X.T @ resid, 6), " (~ 0 -> perpendicular)")
+
+plt.figure(figsize=(7.0, 3.6))
+plt.scatter(x, y, label="data", color="crimson")
+plt.plot(x, y_hat, color="teal", lw=2, label="least-squares fit")
+for xi, yi, yh in zip(x, y, y_hat):
+    plt.plot([xi, xi], [yi, yh], color="gray", lw=0.7)  # the residuals
+plt.legend(); plt.grid(alpha=0.3); plt.tight_layout()`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/vectors-space/dot-product-cosine-similarity", label: "Dot product & cosine similarity", blurb: "a · b = 0 defines perpendicular — the entire chapter turns on this." },
+  { href: "/learn/mathematics/vectors-space/norms-distances", label: "Norms & distances", blurb: "Squared length ‖v‖² = v·v — the tool that turns projections into geometry." },
+  { href: "/learn/mathematics/vectors-space/linear-independence-basis", label: "Linear independence, span & basis", blurb: "Bases and coordinates — orthonormal bases are the special case where coordinates become dot products." },
+]} />
+
+<Motivation title="Least squares, attention, PCA — one operation">
+
+Regression fits a line to points by minimizing squared error — that turns out to be a **projection** of the target vector onto the space spanned by the features. PCA finds the direction that captures the most variance — the projection whose residual is smallest. Attention averages value vectors weighted by attention scores — a projection onto the span of the values. Layer normalization removes the mean from an activation — a projection onto the subspace where entries sum to zero.
+
+Four apparently unrelated operations, one geometric shape: **drop a perpendicular from a vector onto a subspace, split it into (component in the subspace) + (residual perpendicular to it)**.
+
+The specific formulas take a few lines. The mental picture — the *shadow* on a line, the *residual* perpendicular to it — is what makes least squares stop feeling like a matrix formula and start feeling like a right angle you can draw. That picture is the payoff of this chapter; the derivations below earn it once, so you never have to guess again.
+
+</Motivation>
+
+<Intuition title="Sunlight from directly above">
+
+Point a flashlight straight down at a stick lying on the ground. The **shadow** the stick casts is the *projection* of the stick onto the ground. Two things happen in the picture, and both are exactly what mathematical projection does:
+
+- **The shadow lives on the ground** — it's the closest ground-point-to-the-stick.
+- **The stick minus the shadow rises straight up** — perpendicular to the ground.
+
+Every projection in this chapter is that split. Split the vector v into two pieces: the piece **that lies in the target direction (or subspace)**, and the piece **left over, perpendicular to it**. The first piece is the projection; the second is the residual. And the residual is *always* perpendicular to what you projected onto — the shadow can't have a component pointing further along the ground, because you already extracted every drop of "along the ground" into the shadow.
+
+</Intuition>
+
+<Recall term="Dot product zero = perpendicular">
+
+From two chapters ago: a · b = ‖a‖ · ‖b‖ · cos θ, so a · b = 0 exactly when cos θ = 0, i.e. θ = 90°. **Orthogonal** and **perpendicular** are the same word — one geometric, one from Greek. The whole chapter runs on this: "u is perpendicular to v" is not something you draw and squint at, it's the algebra check `u @ v == 0`.
+
+</Recall>
+
+## Orthogonality — the ninety-degree relation
+
+Two vectors are **orthogonal** when their dot product is zero:
+
+$$
+\mathbf{u} \perp \mathbf{v} \quad\Longleftrightarrow\quad \mathbf{u} \cdot \mathbf{v} = 0
+$$
+
+Three quick consequences that get quoted constantly:
+
+- **The zero vector is orthogonal to everything** (0 · v = 0 for all v).
+- **A vector orthogonal to itself is the zero vector** (v · v = ‖v‖² = 0 only if v = 0).
+- **A basis whose vectors are pairwise orthogonal** is called an **orthogonal basis**. If additionally every basis vector has length 1, it's **orthonormal** — the format of choice, because it makes coordinates trivial (proved below).
+
+And the geometric bonus: **Pythagoras generalizes**. If a ⊥ b, then
+
+$$
+\lVert \mathbf{a} + \mathbf{b} \rVert^2 = \lVert \mathbf{a} \rVert^2 + \lVert \mathbf{b} \rVert^2
+$$
+
+— the ancient right-triangle law, dressed up in vector notation. It's a direct consequence of last chapter's identity ‖a + b‖² = ‖a‖² + ‖b‖² + 2a·b: the last term dies when a·b = 0.
+
+<RunnableCode title="Perpendicular check + Pythagorean identity" code={orthoCode} packages={["numpy"]} />
+
+## The projection formula — the shadow of v on u
+
+Given a vector v and a nonzero direction u, the **vector projection** of v onto u is the piece of v pointing along u — its shadow. The formula:
+
+$$
+\mathrm{proj}_{\mathbf{u}}(\mathbf{v}) = \frac{\mathbf{v} \cdot \mathbf{u}}{\mathbf{u} \cdot \mathbf{u}}\, \mathbf{u}
+$$
+
+Two pieces, two jobs:
+
+- **The scalar coefficient** (v·u)/(u·u) says *how far along u* the shadow extends. If u is a unit vector, u·u = 1 and this simplifies to v·u alone — the **scalar projection**.
+- **Multiplying by u** turns that scalar into an actual vector pointing along u — that's the shadow itself.
+
+Everything else — least squares, Gram–Schmidt, easy coordinates — is repeated application of this one formula.
+
+<RunnableCode title="Shadow and residual — the two pieces of every vector" code={projectionCode} packages={["numpy"]} />
+
+<Derivation title="Deriving the projection formula — from 'perpendicular residual' alone">
+
+We ask for the shadow **p** of v on the direction u, and demand the *only* geometric property that makes it a shadow: **the residual r = v − p is perpendicular to u**.
+
+<Step n={1} math={<span>Since <b>p</b> lies along <b>u</b>: <code>p = c u</code> for some scalar c</span>}>
+    The whole point of "projection onto u" is that the answer points along u — nowhere else. So <b>p</b> is some scaling of <b>u</b>; we just need to find the right scalar c. That's the only unknown in the problem.
+</Step>
+
+<Step n={2} math={<span>Impose perpendicularity: <code>(v − c u) · u = 0</code></span>}>
+    "Shadow" is defined by the perpendicular-residual property — that's what makes it the <em>closest</em> point on u's line to v (see the fine print at the end of the derivation). Dot-product-zero encodes 90°. This one equation determines c.
+</Step>
+
+<Step n={3} math={<span>Expand with linearity: <code>v·u − c (u·u) = 0</code></span>}>
+    The dot product distributes over subtraction (proved slot-by-slot in the dot-product chapter): (v − c u) · u = v·u − (c u)·u, and the scalar c pulls out: (c u)·u = c (u·u). The equation now has one unknown — a linear equation in c.
+</Step>
+
+<Step n={4} math={<span>Solve: <code>c = (v · u) / (u · u)</code>, hence <code>proj_u(v) = ((v·u)/(u·u)) u</code></span>}>
+    Divide through by u·u (safe because u ≠ <b>0</b> means u·u = ‖u‖² &gt; 0). Substitute back into p = c u and you have the formula. If u happens to be a <b>unit vector</b>, u·u = 1 and c collapses to v·u — the plain dot product <em>is</em> the coordinate. That's the punchline that makes orthonormal bases magical below.
+</Step>
+
+<Step n={5} math={<span>Bonus — the closest point: <code>‖v − p‖ ≤ ‖v − q‖</code> for any other q on u's line</span>}>
+    We derived <b>p</b> from perpendicularity, not from minimizing distance — but the two conditions are the same. If <b>q</b> = <b>p</b> + s<b>u</b> is any other point on u's line, then v − q = (v − p) − su, and (v − p) ⊥ u, so by Pythagoras ‖v − q‖² = ‖v − p‖² + s²‖u‖². The extra term is ≥ 0, with equality only when s = 0 — i.e., when <b>q</b> = <b>p</b>. So the projection is <em>literally</em> the closest point on u's line to v. This is the reason least squares works: minimizing squared error <em>is</em> projecting.
+</Step>
+
+</Derivation>
+
+<Example title="Working it by hand — one full trace">
+
+Project v = (4, 3) onto u = (1, 0) (the x-axis direction):
+
+- v · u = 4·1 + 3·0 = **4**.
+- u · u = 1·1 + 0·0 = **1** (u is a unit vector).
+- c = 4/1 = **4**.
+- proj_u(v) = 4·(1, 0) = **(4, 0)** — the x-component of v, exactly.
+- Residual r = v − p = (4, 3) − (4, 0) = **(0, 3)** — the y-component, purely vertical.
+- Perpendicularity check: p · r = 4·0 + 0·3 = **0** ✓.
+- Pythagoras check: ‖v‖² = 25, ‖p‖² + ‖r‖² = 16 + 9 = **25** ✓ — right triangle with legs 4 and 3, hypotenuse 5.
+
+Now onto a slanted direction: project v = (4, 3) onto u = (1, 1). u · u = 2, v · u = 7, c = 7/2 = 3.5, so p = 3.5(1, 1) = **(3.5, 3.5)**. Residual r = (4, 3) − (3.5, 3.5) = (0.5, −0.5); check r · u = 0.5 − 0.5 = **0** ✓. Same formula, same geometry — the u doesn't have to align with an axis for the trick to work.
+
+</Example>
+
+## Gram–Schmidt — build an orthonormal basis from any basis
+
+Given a set of independent vectors (say a basis of a subspace), **Gram–Schmidt** produces an orthonormal basis of the same subspace — perpendicular unit vectors, same span. The recipe:
+
+1. **Take v₁**, normalize it: u₁ = v₁/‖v₁‖. (Unit length; first perpendicular direction.)
+2. **Take v₂**, subtract off its shadow on u₁: w = v₂ − (v₂ · u₁) u₁. That residual is perpendicular to u₁ (by the projection formula itself). Normalize: u₂ = w/‖w‖.
+3. **Take v_k**, subtract off its shadow on *every* u_i already fixed: w = v_k − Σᵢ (v_k · u_i) u_i. Normalize.
+
+Each step "peels off" the components of v_k that were already covered by earlier directions, keeping only what's genuinely new — which by construction is perpendicular to everything before. It's just the projection formula, applied in a loop.
+
+<RunnableCode title="Gram–Schmidt in 10 lines" code={gramSchmidtCode} packages={["numpy"]} />
+
+The `Q @ Q.T` producing the identity matrix is the vector way of saying "every pair of rows is perpendicular, every row has length 1" — the signature of an orthonormal set. Read `(Q @ Q.T)[i, j] = q_i · q_j = δ_ij` (1 on the diagonal, 0 off). This will be the definition of an **orthogonal matrix** in the matrices phase.
+
+## Orthonormal bases — coordinates by dot product
+
+Recall from the last chapter: to find the coordinates of x in a basis with columns B, you solve `Bc = x`. That's an O(d³) operation with an ugly matrix inverse.
+
+**When B is orthonormal, no solving is needed** — the coordinates are just dot products:
+
+$$
+\mathbf{x} = \sum_{i=1}^{d} (\mathbf{x} \cdot \mathbf{q}_i)\, \mathbf{q}_i
+$$
+
+Why? Because the projection formula collapses when q_i are unit vectors and pairwise perpendicular. Write x = c₁q₁ + ⋯ + c_dq_d, dot both sides with q_j, and every term except one dies (thanks to q_j · q_i = 0 for i ≠ j): x · q_j = c_j (q_j · q_j) = c_j. Solved. No inverse, no linear system — just one dot product per coordinate.
+
+<RunnableCode title="Orthonormal shortcut: coordinates via dot products" code={easyCoordsCode} packages={["numpy"]} />
+
+This is why orthonormal bases are everywhere: rotations (which preserve orthonormality) are cheap, DCT and Fourier bases are orthonormal (making coefficients ⟨signal, basis_k⟩), attention often uses orthogonal initializations for stability, and PCA returns an orthonormal basis of principal components — so projecting your data onto the top-k components is just k dot products per sample.
+
+## The traps that matter
+
+**Projection onto a subspace, not just a line.** Everything above shrinks to "shadow on a line". For a general subspace with orthonormal basis q₁, …, q_k, the projection generalizes to the sum of shadows on each direction:
+
+$$
+\mathrm{proj}_S(\mathbf{v}) = \sum_{i=1}^{k} (\mathbf{v} \cdot \mathbf{q}_i)\, \mathbf{q}_i
+$$
+
+That's the formula least squares uses (S = column space of the design matrix X), that PCA uses (S = top-k principal components), that image compression uses (S = k basis images). One shape, many jobs — but only clean when the basis is *orthonormal*, which is why Gram–Schmidt exists.
+
+**Numerical Gram–Schmidt bleeds precision.** The classical version above accumulates rounding error and can produce basis vectors that aren't quite orthogonal — for near-parallel input vectors, the residuals become tiny and the normalization amplifies noise. Real libraries use **modified Gram–Schmidt** (interleave the subtractions) or, better, a **QR decomposition** via Householder reflections (`np.linalg.qr(V)`) that's stable at any conditioning. Rule of thumb: understand Gram–Schmidt, call QR.
+
+**"Orthogonal" ≠ "independent" in general — but orthogonal implies independent.** Any set of nonzero pairwise-orthogonal vectors is automatically linearly independent (dot the "sum = 0" relation with each q_j to force all coefficients zero, using the same argument as the coordinates derivation above). The reverse doesn't hold — independent vectors need not be orthogonal — but you can *make* them orthogonal via Gram–Schmidt. So "linearly independent" is the loose condition, "orthonormal" is the deluxe upgrade.
+
+**Least squares IS a projection.** If a linear system `Xw = y` has no solution (more rows than columns, y not in the column space of X), the least-squares solution `ŵ = argmin ‖Xw − y‖` gives you `Xŵ` = projection of y onto span(columns of X). The **normal equations** `XᵀX w = Xᵀy` are literally "the residual y − Xw is orthogonal to every column of X" written matrix-style — same perpendicularity condition, one dimension per column.
+
+<RealWorldML title="Least-squares line fit — projection you can see">
+
+Every scientific-computing course fits a line to points; here it is, told as a projection.
+
+<RunnableCode title="Least squares as a projection onto a plane" code={lstsqCode} packages={["numpy", "matplotlib"]} captureFig={true} />
+
+Read the cell:
+
+1. **The design matrix.** `X = [x, ones]` has two columns — one for the slope-coefficient, one for the intercept. Its column space (span of those two columns) is a plane inside ℝ³⁰: every vector of the form `w₁·x + w₂·1` for some (w₁, w₂) — every possible "y = w₁ x + w₂" line evaluated at these 30 x-values.
+2. **What lstsq does.** The noisy y vector lives in ℝ³⁰ but almost certainly *outside* that plane (no straight line fits noisy data exactly). Least squares finds the closest point in the plane to y — the **projection** — and returns the (w₁, w₂) that produce it. `y_hat = X @ w` is that projection.
+3. **The residual is perpendicular to the column space.** `X.T @ resid ≈ 0` — every column of X (the two directions defining the plane) is orthogonal to the residual. That's step 5 of the derivation, generalized to a plane: the closest point property is equivalent to orthogonal residual, and it's exactly what `lstsq` computes.
+4. **The picture.** The gray vertical segments in the plot are the residuals — the vertical distance from each point to the fitted line. Least squares minimizes the sum of *their squared lengths*: ‖y − ŷ‖² — the squared distance in ℝ³⁰ from y to its projection onto the plane. Squared distance, minimum, projection: the three names for the same operation.
+
+The same skeleton — build a design matrix, solve `lstsq` — fits polynomials, exponentials, and neural network output layers. The geometry never changes: it's always "project the target onto the span of the features."
+
+</RealWorldML>
+
+<StudyDepth
+  intro={<>These formulas are the algebraic backbone of half of Tier 1 through Tier 4 — spend the time to make the shadow-and-residual picture second nature.</>}
+  drill={[
+    <>Perpendicular = dot product zero — the one test, always</>,
+    <>The projection formula <code>proj_u(v) = ((v·u)/(u·u)) u</code> — and its simplification to <code>(v·u) u</code> when u is unit</>,
+    <>The split: v = (shadow on u) + (residual ⊥ u); Pythagoras applies to the two pieces</>,
+    <>Gram–Schmidt as "subtract shadows, then normalize" — enough intuition to read the code, defer to QR in practice</>,
+    <>Orthonormal basis: coordinates are dot products, cᵢ = x · qᵢ; the reason PCA, DCT and rotations are cheap</>,
+  ]}
+  skim={[
+    <>Modified vs classical Gram–Schmidt numerical stability — recognize the distinction; use <code>np.linalg.qr</code></>,
+    <>Householder reflections and Givens rotations — the internals of QR, not needed to use it</>,
+    <>Weighted / oblique projections — real, but appear only in specialized regression contexts</>,
+  ]}
+/>
+
+<CodeItYourself title="Three drills — shadow, orthonormalize, fit">
+
+1. **Write `project(v, u)`** implementing the vector projection formula, returning the shadow of v on u (`u` need not be a unit vector). Then decompose: `p, r = project(v, u), v - project(v, u)` — assert `r @ u ≈ 0` and `np.allclose(p + r, v)`. Test on v = (3, 4, 0), u = (1, 1, 0): expect p = (3.5, 3.5, 0) and r = (−0.5, 0.5, 0). *Hint: guard against u = 0.*
+
+2. **Write `orthonormalize(V)`** using Gram–Schmidt on the rows of an `(k, n)` matrix. Return a `(k, n)` matrix Q whose rows are orthonormal and span the same subspace as V's rows. Verify with `np.allclose(Q @ Q.T, np.eye(k))`. Test on V = `[[1, 1, 0], [1, 0, 1], [0, 1, 1]]`, and compare (row-by-row up to sign) against `np.linalg.qr(V.T)[0].T`. *Hint: loop with running list `out`; for each new v subtract every previous u's shadow, then normalize.*
+
+3. **Fit a parabola** y ≈ a x² + b x + c to 30 noisy points by least squares — the design matrix is `X = np.column_stack([x**2, x, np.ones_like(x)])`. Solve with `lstsq`, then explicitly verify the residual is perpendicular to every column: `np.allclose(X.T @ (y - X @ w), 0, atol=1e-6)`. Overlay the fitted curve on the scatter plot. *Hint: same skeleton as the line fit — only the columns of X change.*
+
+</CodeItYourself>
+
+<Summary>
+
+- **Orthogonal = perpendicular = dot product zero**. Pythagoras generalizes: if a ⊥ b, ‖a + b‖² = ‖a‖² + ‖b‖².
+- **Projection formula**: `proj_u(v) = ((v·u)/(u·u)) u` — the shadow of v on u. For unit u it simplifies to `(v·u) u`.
+- The split every projection produces: v = (shadow on u) + (residual perpendicular to u); the shadow is also the *closest point* on u's line to v.
+- **Gram–Schmidt** turns any independent set into an orthonormal one by subtracting off shadows on already-fixed directions, then normalizing. Numerically prefer `np.linalg.qr`.
+- **Orthonormal basis magic**: coordinates are dot products, cᵢ = x · qᵢ — no linear-system solve needed. The reason PCA, DCT, Fourier, and orthogonal-init neural nets are all cheap.
+- **Least squares IS a projection**: minimizing ‖Xw − y‖ projects y onto span(cols of X); the normal equations `XᵀX w = Xᵀy` are the "residual perpendicular to every column" condition.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>Are the vectors a = (3, 4) and b = (−4, 3) orthogonal? Compute their dot product, and verify Pythagoras: ‖a + b‖² should equal ‖a‖² + ‖b‖².</>,
+      hint: <>Perpendicular = a · b = 0.</>,
+      answer: <>a · b = 3·(−4) + 4·3 = <b>0</b>, so <b>yes, orthogonal</b>. Lengths: ‖a‖² = 9 + 16 = 25, ‖b‖² = 16 + 9 = 25. Sum: a + b = (−1, 7), ‖a + b‖² = 1 + 49 = <b>50 = 25 + 25</b> ✓. Pythagoras holds — as it always does for perpendicular vectors, in any dimension.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>Project v = (5, 2) onto u = (1, 0). Give the projection, the residual, and check that the residual is perpendicular to u.</>,
+      hint: <>u is a unit vector, so the scalar coefficient is just v · u.</>,
+      answer: <>v · u = 5, u · u = 1, so c = 5, and proj = <b>(5, 0)</b>. Residual r = v − proj = <b>(0, 2)</b>. Check r · u = 0·1 + 2·0 = <b>0</b> ✓ perpendicular. This is the everyday geometric statement "the projection of a plane vector onto the x-axis is its x-component" — dressed up in vector language.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Project v = (2, 3, 6) onto u = (1, 2, 2). Compute the projection, the residual, its length, and confirm ‖v‖² = ‖proj‖² + ‖resid‖².</>,
+      hint: <>u · u = 9, and u is not a unit vector — remember to divide.</>,
+      answer: <>v · u = 2 + 6 + 12 = 20, u · u = 1 + 4 + 4 = 9, so c = 20/9. proj = (20/9)·(1, 2, 2) = <b>(20/9, 40/9, 40/9) ≈ (2.22, 4.44, 4.44)</b>. Residual r = v − proj = (−2/9, −13/9, 14/9) ≈ (−0.22, −1.44, 1.56). Perpendicularity check: r · u = −2/9 − 26/9 + 28/9 = <b>0</b> ✓. Lengths: ‖v‖² = 4 + 9 + 36 = 49, ‖proj‖² = (400/81)·9 = 400/9 ≈ 44.4, ‖r‖² = 49 − 400/9 = 41/9 ≈ 4.6, and 44.4 + 4.6 = <b>49</b> ✓ (a 3-D Pythagoras).</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Apply Gram–Schmidt to v₁ = (1, 1), v₂ = (2, 0) — by hand. Give the resulting orthonormal basis u₁, u₂, and check both properties: unit length and mutually perpendicular.</>,
+      hint: <>Normalize v₁ first, then subtract v₂'s shadow on u₁ before normalizing.</>,
+      answer: <>Step 1: ‖v₁‖ = √2, so u₁ = <b>(1/√2, 1/√2)</b>. Step 2: v₂ · u₁ = 2/√2 = √2, so the shadow of v₂ on u₁ is √2 · (1/√2, 1/√2) = (1, 1). Residual w = (2, 0) − (1, 1) = (1, −1). Normalize: ‖w‖ = √2, so u₂ = <b>(1/√2, −1/√2)</b>. Check ‖u₁‖ = ‖u₂‖ = 1 ✓, and u₁ · u₂ = 1/2 − 1/2 = <b>0</b> ✓. This is the same 45°-rotated basis from the change-of-basis chapter — Gram–Schmidt derived it from scratch from a non-orthogonal starting set.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Consider a line fit y = w₁x + w₂ to the four points (0, 1), (1, 2), (2, 2), (3, 4). (a) Write down the design matrix X and the target y. (b) Solve the normal equations XᵀX w = Xᵀy by hand for w₁, w₂. (c) Verify that the residual is orthogonal to both columns of X.</>,
+      hint: <>X has 4 rows, 2 columns. XᵀX is 2×2 — invert by hand.</>,
+      answer: <>(a) X = [[0,1], [1,1], [2,1], [3,1]], y = (1, 2, 2, 4). (b) XᵀX = [[14, 6], [6, 4]], Xᵀy = [16, 9]. Solve: det = 14·4 − 6·6 = 20; inverse = (1/20)[[4, −6], [−6, 14]]; w = (1/20)[[4, −6], [−6, 14]] · [16, 9] = (1/20)(64−54, −96+126) = (10/20, 30/20) = <b>(0.5, 1.5)</b>. Fit: y = 0.5x + 1.5. (c) ŷ = X w = (1.5, 2, 2.5, 3), residual = y − ŷ = (−0.5, 0, −0.5, 1). Check Xᵀr: column 0 dotted with r: 0·(−0.5) + 1·0 + 2·(−0.5) + 3·1 = <b>0</b> ✓. Column 1 dotted with r: (−0.5) + 0 + (−0.5) + 1 = <b>0</b> ✓. Perpendicular to both columns — the normal equations are literally "make this true."</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Prove that any set of nonzero pairwise-orthogonal vectors q<sub>1</sub>, …, q<sub>k</sub> in ℝⁿ is linearly independent. (This is the argument that turns "orthogonal" into "automatically a basis of its span".)</>,
+      hint: <>Assume c₁q₁ + ⋯ + c_kq_k = 0, dot both sides with q_j.</>,
+      answer: <>Suppose c₁q₁ + ⋯ + c_kq_k = <b>0</b>; independence needs every cᵢ = 0. Dot both sides with q_j: <br />(c₁q₁ + ⋯ + c_kq_k) · q_j = <b>0</b> · q_j = 0. <br />Distribute: c₁(q₁·q_j) + ⋯ + c_k(q_k·q_j) = 0. By pairwise orthogonality, every term with i ≠ j vanishes — only c_j(q_j·q_j) survives. So c_j · ‖q_j‖² = 0, and since q_j ≠ <b>0</b> we have ‖q_j‖² &gt; 0, forcing <b>c_j = 0</b>. That works for every j, so all coefficients are zero — the set is independent. ∎ Consequence: an orthonormal basis is a basis <em>automatically</em>; you don't need to check independence separately, orthogonality gives it for free.</>
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "Two vectors are orthogonal exactly when:",
+      choices: [
+        { text: "They have the same length" },
+        { text: "One is a scalar multiple of the other" },
+        { text: "Their dot product is zero", correct: true },
+        { text: "Their sum is the zero vector" },
+      ],
+      explanation: <>Orthogonality is the ninety-degree relation, and a · b = ‖a‖‖b‖cos θ, so a · b = 0 exactly when cos θ = 0 (i.e., θ = 90°) — provided neither is zero. Equal length has nothing to do with angle; scalar multiples are parallel, not perpendicular.</>
+    },
+    {
+      q: "The projection of v onto a nonzero vector u is:",
+      choices: [
+        { text: "((v · u) / (u · u)) u", correct: true },
+        { text: "(v · u) u — always" },
+        { text: "v − u" },
+        { text: "‖v‖ cos θ" },
+      ],
+      explanation: <>The general formula is ((v·u)/(u·u)) u — the scalar coefficient adjusts for u's length. It simplifies to (v·u) u only when u is a unit vector (u·u = 1). ‖v‖cos θ is the <em>scalar</em> projection — the length of the shadow, not the vector itself.</>
+    },
+    {
+      q: "When you project v onto u, the residual v − proj_u(v) is:",
+      choices: [
+        { text: "Parallel to u" },
+        { text: "Perpendicular to u", correct: true },
+        { text: "Equal to v" },
+        { text: "Equal to the zero vector, always" },
+      ],
+      explanation: <>The projection extracts everything of v that points along u, so the leftover has nothing pointing along u — its dot product with u is zero. That perpendicularity is exactly what <em>defines</em> the projection, and why "least squares" and "orthogonal residuals" mean the same thing.</>
+    },
+    {
+      q: "For an orthonormal basis {q₁, …, q_d}, the coordinates of x in that basis are:",
+      choices: [
+        { text: "Given by B⁻¹x with B = [q₁ | ⋯ | q_d]" },
+        { text: "cᵢ = x · qᵢ — dot products, no solving needed", correct: true },
+        { text: "Undefined — orthonormal bases don't have coordinates" },
+        { text: "cᵢ = ‖x‖ · ‖qᵢ‖" },
+      ],
+      explanation: <>The inverse-solve is unnecessary when B is orthonormal because Bᵀ = B⁻¹ — coordinates collapse to dot products (proved by writing x = Σ cᵢqᵢ and dotting with q_j, where every off-diagonal term dies). This is why orthonormal bases are the format everyone prefers: PCA, DCT, Fourier, rotations all give you them.</>
+    },
+    {
+      q: "Least-squares linear regression is geometrically:",
+      choices: [
+        { text: "Solving Xw = y exactly" },
+        { text: "Projecting y onto the column space of X, and returning the coefficients that reach the projection", correct: true },
+        { text: "Minimizing the L1 norm of the residual" },
+        { text: "Choosing weights that maximize the dot product Xᵀy" },
+      ],
+      explanation: <>When y isn't in the column space of X (the usual case with noisy data), no exact solution exists; least squares returns the closest reachable ŷ = Xŵ — the projection of y onto span(cols of X). The normal equations XᵀX w = Xᵀy encode "residual perpendicular to every column of X," which is exactly the projection condition.</>
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/vectors-space/projections-orthogonality" title="Projections & orthogonality" />

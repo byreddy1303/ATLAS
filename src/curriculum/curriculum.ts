@@ -403,7 +403,7 @@ const tier1: Tier = {
             "Orthonormal bases — coordinates the easy way",
           ],
           priority: "mandatory",
-          status: "outline",
+          status: "written",
         },
       ],
     },
