@@ -292,7 +292,7 @@ const tier0: Tier = {
             "Package as pip-installable CLI",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
       ],
     },

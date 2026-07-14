@@ -1,0 +1,431 @@
+---
+title: "Project · CSV → insights CLI"
+tier: 0
+phase: "0.2"
+---
+
+export const argparseCode = `import argparse
+
+parser = argparse.ArgumentParser(
+    prog="insights",
+    description="Summarize a sales CSV: clean it, report it, chart it.")
+parser.add_argument("csv_path", help="input CSV file")
+parser.add_argument("--group-by", default="region", help="column for the breakdown")
+parser.add_argument("--top", type=int, default=5, help="rows to show in the report")
+parser.add_argument("--save-chart", action="store_true", help="also write chart.png")
+
+# on a real command line you'd type:   insights sales.csv --group-by city --top 3
+# in code (and, crucially, in tests) you hand argv to parse_args yourself:
+args = parser.parse_args(["sales.csv", "--group-by", "city", "--top", "3"])
+print(args)
+print(args.csv_path, "|", args.group_by, "|", args.top, "|", args.save_chart)
+print()
+
+parser.print_help()      # --help came for free`;
+
+export const coreCode = `import pandas as pd
+import numpy as np
+from io import StringIO
+
+RAW = """order_id,region,amount,status
+1,North,120.0,complete
+2,south ,80.5,complete
+3,North,-999,complete
+4,East,200.0,refunded
+5,SOUTH,95.0,complete
+5,SOUTH,95.0,complete
+6,,60.0,complete
+7,East,310.0,complete
+"""
+
+def clean(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.drop_duplicates()
+    df["region"] = df["region"].str.strip().str.lower()
+    df["amount"] = df["amount"].mask(df["amount"] < 0)   # sentinel sweep
+    return df
+
+def summarize(df: pd.DataFrame, by: str, top: int) -> pd.DataFrame:
+    return (df.groupby(by, dropna=False)                 # NaN keys stay visible
+              .agg(orders=("order_id", "size"), revenue=("amount", "sum"))
+              .sort_values("revenue", ascending=False)
+              .head(top))
+
+df = clean(pd.read_csv(StringIO(RAW)))
+print(summarize(df, "region", 5))
+# every EDA-chapter move is here: dedup, normalize, sentinel->NaN, dropna=False.
+# And none of it is a "script" - each piece is a callable, testable function.`;
+
+export const logCode = `import sys
+import logging
+import pandas as pd
+from io import StringIO
+
+logging.basicConfig(level=logging.INFO, stream=sys.stdout,
+                    format="%(levelname)s %(name)s: %(message)s", force=True)
+log = logging.getLogger("insights")
+
+def clean(df):
+    before = len(df)
+    df = df.drop_duplicates()
+    log.info("dropped %d duplicate rows", before - len(df))
+
+    bad = int((df["amount"] < 0).sum())
+    df["amount"] = df["amount"].mask(df["amount"] < 0)
+    if bad:
+        log.warning("converted %d negative amounts to NaN", bad)
+
+    missing = int(df["region"].isna().sum())
+    if missing:
+        log.warning("%d rows have no region (kept under NaN)", missing)
+    return df
+
+RAW = """order_id,region,amount
+1,North,120
+1,North,120
+2,South,-999
+3,,50
+"""
+df = clean(pd.read_csv(StringIO(RAW)))
+print()
+print(df)
+# print() is the USER's report; logging is the OPERATOR's diagnosis channel.
+# Levels are a volume knob you turn at launch time (--verbose), not by editing code.`;
+
+export const testCode = `import pandas as pd
+import numpy as np
+
+def clean(df):
+    df = df.drop_duplicates()
+    df["region"] = df["region"].str.strip().str.lower()
+    df["amount"] = df["amount"].mask(df["amount"] < 0)
+    return df
+
+# each test: a tiny inline fixture, one behavior, one assertion of the contract
+def test_drops_exact_duplicates():
+    df = pd.DataFrame({"region": ["a", "a"], "amount": [1.0, 1.0]})
+    assert len(clean(df)) == 1
+
+def test_normalizes_region_variants():
+    df = pd.DataFrame({"region": ["North", "north ", "NORTH"],
+                       "amount": [1.0, 2.0, 3.0]})
+    assert clean(df)["region"].nunique() == 1
+
+def test_sentinels_become_nan_not_zero():
+    df = pd.DataFrame({"region": ["a"], "amount": [-999.0]})
+    out = clean(df)
+    assert out["amount"].isna().all()     # NaN, not 0 - a zero would be a lie
+    assert out["amount"].sum() == 0.0     # and no sum is poisoned
+
+def test_clean_is_idempotent():
+    df = pd.DataFrame({"region": ["North ", "North "], "amount": [5.0, -1.0]})
+    once = clean(df)
+    pd.testing.assert_frame_equal(clean(once), once)   # cleaning clean data: no-op
+
+for t in [test_drops_exact_duplicates, test_normalizes_region_variants,
+          test_sentinels_become_nan_not_zero, test_clean_is_idempotent]:
+    t()
+    print("PASS", t.__name__)
+# in a real repo these live in test_insights.py and you run:  pytest`;
+
+export const realWorldCode = `import argparse, logging, sys
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# ---------------- insights.py, in miniature ----------------
+log = logging.getLogger("insights")
+
+def build_parser():
+    p = argparse.ArgumentParser(prog="insights")
+    p.add_argument("csv_path")
+    p.add_argument("--group-by", default="region")
+    p.add_argument("--top", type=int, default=5)
+    p.add_argument("--save-chart", action="store_true")
+    p.add_argument("--verbose", action="store_true")
+    return p
+
+def clean(df):
+    before = len(df)
+    df = df.drop_duplicates()
+    log.info("dropped %d duplicates", before - len(df))
+    df["region"] = df["region"].str.strip().str.lower()
+    bad = int((df["amount"] < 0).sum())
+    df["amount"] = df["amount"].mask(df["amount"] < 0)
+    if bad:
+        log.warning("masked %d negative amounts", bad)
+    return df
+
+def summarize(df, by, top):
+    return (df.groupby(by, dropna=False)
+              .agg(orders=("order_id", "size"), revenue=("amount", "sum"))
+              .sort_values("revenue", ascending=False).head(top))
+
+def save_chart(report, path):
+    fig, ax = plt.subplots(figsize=(6, 3))
+    ax.barh(report.index.astype(str), report["revenue"], color="#b8e62e")
+    ax.invert_yaxis()                       # biggest bar on top
+    ax.set_title("Revenue by group", loc="left", color="#8a8f98")
+    ax.tick_params(colors="#8a8f98")
+    fig.tight_layout()
+    fig.savefig(path, dpi=120)              # the FILE is the artifact
+    log.info("chart -> %s", path)
+
+def main(argv=None) -> int:
+    args = build_parser().parse_args(argv)
+    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
+                        stream=sys.stdout, format="%(levelname)s: %(message)s",
+                        force=True)
+    try:
+        df = pd.read_csv(args.csv_path)
+    except FileNotFoundError:
+        log.error("no such file: %s", args.csv_path)
+        return 2                            # non-zero = failure, loudly, to the shell
+    report = summarize(clean(df), args.group_by, args.top)
+    print(report.to_string())
+    if args.save_chart:
+        save_chart(report, "chart.png")
+    return 0
+
+# ---------------- pretend to be the shell ----------------
+CSV = """order_id,region,amount
+1,North,120
+2,south ,80.5
+3,North,-999
+4,East,200
+5,SOUTH,95
+5,SOUTH,95
+6,,60
+7,East,310
+"""
+with open("sales.csv", "w") as f:
+    f.write(CSV)
+
+print("$ insights sales.csv --top 3 --save-chart")
+code = main(["sales.csv", "--top", "3", "--save-chart"])
+print("exit code:", code)
+print()
+print("$ insights missing.csv")
+code = main(["missing.csv"])
+print("exit code:", code)   # the shell, cron, and CI all read this number`;
+
+<Prerequisites items={[
+  { href: "/learn/foundations/scientific-stack/eda-cleaning", label: "EDA & cleaning", blurb: "The clean() function in this project is that chapter's audit-and-repair moves, frozen into code." },
+  { href: "/learn/foundations/scientific-stack/matplotlib-figures", label: "Matplotlib · figures", blurb: "The chart function follows the Axes-first rules — and savefig turns a figure into a shippable file." },
+  { href: "/learn/foundations/python-craft/errors-testing-logging", label: "Errors, testing & logging", blurb: "Exit codes, logging levels, and assert-based tests all come home to roost here." },
+  { href: "/learn/foundations/python-craft/cli-io-serialization", label: "CLI, I/O & serialization", blurb: "argparse and file I/O were introduced there; here they front a real data pipeline." },
+]} />
+
+<Motivation title="Skills become an artifact — and the artifact's shape is the shape of every ML script you'll ever run">
+
+Everything so far ran in a notebook-like cell and vanished when you left. This chapter turns Volume 0 into a **tool**: `insights sales.csv --group-by region --top 5 --save-chart` — a command that ingests a messy CSV, cleans it with logged decisions, prints a report, writes a chart, and tells the shell whether it succeeded. Something you can install, run on a schedule, and put in front of another human.
+
+The reason this matters for your actual destination: **every serious ML program is this exact shape.** `train.py --lr 3e-4 --epochs 10`, an eval harness with `--model` and `--dataset` flags, a data-prep job on a cron schedule — argparse front door, functions doing the work, logging narrating, exit code reporting back. Learn the anatomy on 60 lines of pandas and you've learned the anatomy of a training script before ever writing one.
+
+It's also the difference between "I know pandas" and *proof*: a pip-installable CLI with tests is the kind of artifact you can show anyone.
+
+</Motivation>
+
+<Intuition title="Thin shell, thick core — a 10-line script wrapped around testable functions">
+
+The architecture of every good command-line tool is the same sandwich. **The shell layer is thin**: argparse translates the words a human typed into typed Python values, and `main()` returns an integer the shell understands (0 = success, anything else = failure). **The core is thick and pure**: `clean(df)`, `summarize(df, by, top)`, `save_chart(report, path)` — ordinary functions that take data and return data, never touching `sys.argv`, never calling `input()`, never knowing a terminal exists.
+
+Why the separation is the whole game: the core can be **tested** (call `clean` on a 2-row fixture — no subprocess needed), **reused** (import `summarize` from a notebook tomorrow), and **rewired** (the same core could back a web API next month). Meanwhile logging gives the tool a narrator — `print` is for the user's *report*, logging is for the *operator's* diagnosis — and the exit code makes it a good citizen of pipelines, cron, and CI. One sentence to build by: **the script is 10 lines; everything interesting is a function.**
+
+</Intuition>
+
+## argparse — the front door
+
+<RunnableCode title="declare the interface; parsing, types, defaults and --help come free" code={argparseCode} />
+
+You *declare* the interface and argparse builds the parser: a **positional** argument (`csv_path` — required, no dashes), **options** with defaults (`--group-by region`), **typed options** (`type=int` means `"3"` arrives as the integer 3 — leave it off and every argument is a string, and `head("3")` breaks), and **flags** (`action="store_true"`: present → True, absent → False). Note the rename: `--group-by` becomes `args.group_by`, dashes turning to underscores because Python identifiers can't contain dashes.
+
+The line that makes tools testable: `parse_args(argv)` accepts a **list**. The shell normally supplies `sys.argv[1:]`, but you can hand it `["sales.csv", "--top", "3"]` from a test — which is exactly how the whole tool gets exercised without ever opening a terminal. And `--help` (plus argument validation with readable errors) is generated from your declarations: documentation that cannot drift out of sync with behavior. (Typer and click are popular third-party wrappers over this same idea with decorators; argparse is stdlib, universal, and the one you'll meet in every ML repo — learn it first.)
+
+## The core — functions, not a script
+
+<RunnableCode title="clean() and summarize(): the EDA chapter as two named contracts" code={coreCode} />
+
+Resist the beginner default of one long top-to-bottom script. The core is **two functions with names that state contracts**: `clean` dedups, normalizes the category, and sweeps sentinels to NaN (all three moves from the EDA chapter — including `dropna=False` in the groupby so unlabeled rows stay *visible* in the report instead of silently vanishing). `summarize` is the groupby-chapter's named-aggregation pattern with a sort and a head.
+
+Neither function knows about argparse, files, or terminals — `clean` takes a DataFrame and returns a DataFrame, full stop. That's what makes the next two sections possible: a function with no hidden inputs can be logged around, tested in isolation, and reused anywhere. The pitfall being dodged: a 200-line script where parsing, cleaning, and printing interleave is untestable except by running the whole thing and eyeballing the output — which is to say, untestable.
+
+## Logging — the operator's channel
+
+<RunnableCode title="the tool narrates its own decisions, at adjustable volume" code={logCode} />
+
+A tool that silently drops duplicates and masks sentinels is a tool nobody can trust or debug. Logging makes every cleaning decision **narrated**: how many duplicates dropped, how many sentinels masked, how many rows had no region. Run it in six months, and the log tells you what happened to *this month's* file without touching the code.
+
+The discipline has three parts. **Channel separation**: `print` writes the user's actual product (the report); `logging` writes the operator's diagnosis. Keep them distinct and the report stays clean enough to pipe into another program. **Levels as a volume knob**: `INFO` for normal narration, `WARNING` for "handled, but you should know" (sentinels found), `ERROR` for failures — and the threshold is set once at startup (`--verbose` → `DEBUG`), never by editing code. **Lazy formatting**: `log.info("dropped %d", n)` — logging fills in the `%d` only if the message will actually be emitted, so silenced levels cost nothing (and it's the style every production codebase enforces).
+
+## Tests — the contract, enforced
+
+<RunnableCode title="four fixtures, four behaviors, four asserts" code={testCode} />
+
+Each test is the same three beats: **a tiny inline fixture** (2–3 rows, built in the test — small enough to verify by eye), **one call**, **one assertion about the contract**. Test *behaviors*, not implementation: "duplicates are dropped", "region variants collapse to one", "sentinels become NaN, *not zero*" (a zero would silently poison every sum downstream — the assertion encodes the reasoning), and the sleeper: **idempotence** — cleaning already-clean data changes nothing, which is what makes re-running a pipeline safe.
+
+`pd.testing.assert_frame_equal` is pandas' purpose-built comparison (dtype-aware, NaN-aware — `NaN == NaN` is False, so `==` alone can't verify frames). In a real repo these functions live in `test_insights.py` and `pytest` discovers and runs anything named `test_*` — the loop at the bottom is just this page's stand-in for that. The payoff compounds: next month, when you "improve" `clean`, four green tests are the difference between confidence and hope.
+
+<RealWorldML title="The assembled tool — argparse to exit code, end to end">
+
+<RunnableCode title="one file: parser, core, chart, main() — then two shell runs" code={realWorldCode} captureFig />
+
+This is the whole tool in one file, then two simulated shell invocations. The assembly, piece by piece:
+
+- **`build_parser()`** — the interface as a function, so tests can build a fresh parser too.
+- **`clean` / `summarize`** — the tested core, unchanged from their sections. Notice they still know nothing about the CLI.
+- **`save_chart(report, path)`** — the matplotlib-chapter rules in miniature: makes its *own* Figure (never `plt.plot` inside a function), horizontal bars inverted so the biggest sits on top, `savefig` before anything else — **the file is the artifact**; a chart nobody can re-open never happened.
+- **`main(argv=None) -> int`** — the thin shell. Parse; configure logging *once* at the volume the user asked for; do the work by calling functions; return an integer. The `argv=None` parameter is the testability trick from the argparse section: production passes nothing (argparse falls back to `sys.argv`), tests pass a list.
+- **The `try/except FileNotFoundError` → `return 2`** — failure handling for a *tool*: catch the specific expected failure, log an `ERROR` a human can act on, and return non-zero. No traceback vomit, no silent `print` — the shell, cron, and CI all read that number (`echo $?`), and a pipeline like `insights sales.csv && deploy` only proceeds on 0.
+- **The two runs at the bottom** — the happy path (report + chart + `exit 0`) and the failure path (clean error + `exit 2`). A tool is only done when its *failure* behavior is designed.
+
+The missing last mile — making `insights` a real command — is packaging, and it's ~10 lines:
+
+```toml
+# pyproject.toml, next to insights.py
+[project]
+name = "insights"
+version = "0.1.0"
+dependencies = ["pandas", "matplotlib"]
+
+[project.scripts]
+insights = "insights:main"
+```
+
+`pip install -e .` reads this, installs the dependencies, and generates an `insights` command on your PATH that calls `sys.exit(main())` — which is why `main` returning an int was the right shape all along. The `-e` ("editable") flag means edits to `insights.py` take effect without reinstalling. That's the entire distance from script to installed tool.
+
+</RealWorldML>
+
+<StudyDepth
+  intro={<>This chapter is a shape to internalize, not a syntax list. Drill the architecture — thin shell, thick core, narrated decisions, loud failures — because it is verbatim the shape of every training script, eval harness, and data job in your future. The packaging recipe can stay a recipe.</>}
+  drill={[
+    <>The sandwich: argparse shell → pure functions → <code>main(argv=None) -&gt; int</code> → exit code</>,
+    <><code>parse_args(list)</code> as the testability hinge — exercising a whole CLI without a terminal</>,
+    <>print = user&apos;s report, logging = operator&apos;s diagnosis; levels set once at startup</>,
+    <>Fixture-based tests of behaviors: dedup, normalization, sentinel→NaN, idempotence</>,
+    <>Exit-code discipline: 0 on success, specific non-zero on designed failures, caught exceptions over tracebacks</>,
+  ]}
+  skim={[
+    <>Typer/click — decorator sugar over the same pattern; adopt later if a project prefers them</>,
+    <>Packaging beyond the <code>pyproject.toml</code> recipe (wheels, PyPI publishing, dependency pinning) — until you ship to others</>,
+    <><code>argparse</code> deep API (subcommands, argument groups, custom types) — look up when the tool grows</>,
+    <><code>pytest</code> features (fixtures, parametrize, marks) — arriving properly in later testing work</>,
+  ]}
+/>
+
+<CodeItYourself title="Three extensions — the project isn't done until you've changed it">
+
+**Drill 1 — Add `--min-amount`.** A float option (default 0) that filters rows before summarizing. The full loop: add the argument, thread it through `main` into a *function* (not inline in `main`), and write two tests — one proving rows below the threshold vanish, one proving the default keeps everything. If your filter lives in `main` where tests can't reach it, you've rebuilt the script you were escaping.
+
+**Drill 2 — Add `--format json`.** A `choices=["table", "json"]` option; JSON output via `report.reset_index().to_json(orient="records")`. Then the discipline question: make sure *nothing else* (no log line, no banner) prints to stdout in JSON mode — pipe the output into another Python that `json.loads` it as proof. You've just learned why logging defaults to stderr in real tools.
+
+**Drill 3 — Install it for real.** Outside Pyodide, on your own machine: put `insights.py` and the `pyproject.toml` from this page in a folder, `pip install -e .` in a virtualenv, and run `insights sales.csv --top 3` from *another directory*. Then run `echo $?` after a success and after a missing file. Watching your own command return 0 and 2 is the moment this chapter becomes permanent.
+
+</CodeItYourself>
+
+<Summary>
+
+- **The architecture is a sandwich:** thin argparse shell → thick core of pure functions → `main(argv=None) -> int` → exit code to the shell. The script is 10 lines; everything interesting is a testable function.
+- **argparse:** declare positionals, typed options (`type=int` — or everything is a string), and flags (`action="store_true"`); dashes become underscores; `--help` is generated and can't drift. `parse_args(list)` is the hook that makes CLIs testable.
+- **Core functions know nothing about the CLI** — DataFrames in, DataFrames out. That single property buys testability, reuse, and the ability to rewire the same core behind any interface.
+- **Logging is the operator's channel:** narrate every cleaning decision (`INFO`), flag handled surprises (`WARNING`), report failures (`ERROR`); set the level once from `--verbose`; keep `print` for the user's actual report.
+- **Tests are tiny fixtures asserting contracts** — including the two beginners skip: sentinel→NaN (*not zero*) and idempotence. `pd.testing.assert_frame_equal` compares frames correctly (NaN-aware).
+- **Fail loudly and specifically:** catch expected errors, log something actionable, return non-zero. `cron`, CI, and `&&` chains all read the exit code.
+- **Packaging is 10 lines:** `pyproject.toml` + `[project.scripts]` + `pip install -e .` = your function on the PATH as a real command, wrapper calling `sys.exit(main())`.
+- **Carry the shape forward:** `train.py --lr 3e-4` is this chapter with a bigger core.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>A user runs <code>insights sales.csv --top 3</code> but the tool crashes inside <code>head()</code>. The argument was declared as <code>parser.add_argument("--top", default=5)</code>. Diagnose and fix.</>,
+      hint: <>What Python type does every command-line token have until you say otherwise?</>,
+      answer: <>Everything arriving from the command line is a <strong>string</strong> unless converted: <code>args.top</code> is <code>"3"</code>, and <code>head("3")</code> fails (while the default, the int <code>5</code>, works — so the bug only appears when the flag is actually used, the nastiest kind). Fix: <code>parser.add_argument("--top", type=int, default=5)</code> — argparse converts and even validates (<code>--top abc</code> becomes a clean usage error instead of a crash deep in pandas).</>
+    },
+    {
+      difficulty: "easy",
+      q: <>Why does <code>main</code> <em>return</em> <code>0</code> or <code>2</code> instead of printing &quot;error: file not found&quot; and returning nothing?</>,
+      hint: <>Who runs this tool besides humans? What can <code>cron</code> or a CI pipeline read?</>,
+      answer: <>Because programs — not just people — run CLI tools, and programs read the <strong>exit code</strong>, not prose. The shell exposes it as <code>$?</code>; <code>a && b</code> runs <code>b</code> only if <code>a</code> exited 0; cron and CI mark jobs failed on non-zero. A tool that prints an error but exits 0 tells every automated system &quot;all good&quot; — the pipeline happily continues with missing data. Returning the int from <code>main</code> (with the console-script wrapper calling <code>sys.exit(main())</code>) makes failure machine-visible. Print for humans, exit codes for machines — do both.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Explain the <code>def main(argv=None)</code> pattern: what happens when <code>argv</code> is <code>None</code>, and what does the parameter buy you that reading <code>sys.argv</code> directly doesn&apos;t?</>,
+      hint: <>How would a test invoke the whole tool — flags, failure paths and all — without a subprocess?</>,
+      answer: <>When <code>argv</code> is <code>None</code>, <code>parse_args(None)</code> falls back to <code>sys.argv[1:]</code> — so production behavior is unchanged. But a test can call <code>main(["sales.csv", "--top", "3"])</code> or assert <code>main(["missing.csv"]) == 2</code> — the <em>entire tool</em>, argument parsing and failure paths included, exercised as an ordinary function call: no subprocess, no shell, fast enough to run hundreds of times. Hardcode <code>sys.argv</code> inside <code>main</code> and tests must mutate a global (fragile, order-dependent) or actually spawn processes (slow, awkward to assert on). One default parameter buys the whole test surface.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Write (in words or code) a test for the behavior &quot;summarize sorts by revenue, descending.&quot; What makes the fixture good, and name one thing your test deliberately should <em>not</em> assert.</>,
+      hint: <>How few rows prove ordering? What parts of the output are incidental?</>,
+      answer: <>Fixture: three rows with distinct, hand-checkable revenues where insertion order differs from the expected output order — e.g. regions a/b/c with amounts 10/300/50. Call <code>summarize(df, "region", 5)</code> and assert <code>list(out.index) == ["b", "c", "a"]</code>. Good-fixture properties: <strong>tiny</strong> (verifiable by eye), <strong>inline</strong> (the test is self-contained, no CSV file dependency), and <strong>discriminating</strong> (unsorted or ascending output would fail). Deliberately don&apos;t assert: exact dtypes, column order, or the full frame — that welds the test to incidental implementation details, so honest refactors (say, adding a column) break tests that were never about them. Test the contract (ordering), not the byte-for-byte output.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>You add <code>--format json</code> so other programs can consume the report (<code>insights sales.csv --format json | other_tool</code>). Piping breaks: the consumer gets <code>INFO: dropped 1 duplicates</code> glued to the JSON. Explain the stdout/stderr discipline that fixes this, and why logging to stdout was the original sin.</>,
+      hint: <>A process has two output streams. Which one does <code>|</code> capture?</>,
+      answer: <>A pipe captures <strong>stdout only</strong>. The Unix contract: stdout carries the <em>product</em> (the thing the next program consumes), stderr carries <em>commentary</em> (progress, warnings, errors) — which is why logging&apos;s default handler writes to stderr. This chapter&apos;s demos pointed logging at stdout so Pyodide could display it, which is fine interactively but wrong for a pipeline tool: the narration contaminates the machine-readable product. Fix: log to stderr (just drop the <code>stream=sys.stdout</code>), keep exactly one <code>print</code> of the report (table or JSON) on stdout, and nothing else. The human still sees both streams in a terminal; the pipe sees clean JSON; and <code>2&gt; run.log</code> can file the commentary separately. Bonus rigor: in JSON mode, even a &quot;done!&quot; banner on stdout is a bug — machine formats mean stdout is a file format now.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Your <code>insights</code> cron job &quot;succeeded&quot; nightly for a week while producing an empty report — upstream had renamed the <code>amount</code> column to <code>amount_usd</code>, and a bare <code>except Exception: return 0</code> swallowed everything. Redesign the tool&apos;s failure and observability behavior.</>,
+      hint: <>Which failures should be loud? What invariants would have caught this on night one? What does a bare except cost you?</>,
+      answer: <>Principles: <strong>(1) Never catch what you can&apos;t handle.</strong> A bare <code>except ... return 0</code> converts every bug into fake success — catch only <em>designed-for</em> failures (<code>FileNotFoundError</code> → exit 2), and let everything else traceback (crash = non-zero = cron alerts, which is the point). <strong>(2) Validate the schema at the door:</strong> <code>required = {"{"}"order_id", "region", "amount"{"}"}</code>; missing columns → <code>log.error("missing columns: %s", missing)</code> → exit 3. The rename fails loudly on night one with a message naming the cause. <strong>(3) Assert output invariants:</strong> empty report or zero total revenue when input rows existed → at minimum a WARNING, arguably a failure exit — &quot;produced nothing&quot; is rarely a success. <strong>(4) Log the reconciliation numbers</strong> (rows in, rows dropped, rows out) every run, so drift is visible in the logs even when nothing fails. <strong>(5) Distinct exit codes per failure class</strong> (2 = missing file, 3 = bad schema, 4 = empty output) so the operator&apos;s alert says what broke before anyone opens a log.</>
+    },
+  ]}
+/>
+
+<Quiz items={[
+  {
+    q: <>With <code>parser.add_argument("--save-chart", action="store_true")</code>, what is <code>args.save_chart</code> when the user does <em>not</em> pass the flag?</>,
+    choices: [
+      { text: <><code>None</code></> },
+      { text: <><code>False</code> — store_true flags default to False and flip to True when present</>, correct: true },
+      { text: <>An empty string</> },
+      { text: <>argparse raises: required argument missing</> },
+    ],
+    explanation: <><code>store_true</code> means &quot;this option takes no value; its presence sets True, absence leaves False.&quot; Note the attribute is <code>save_chart</code> — dashes become underscores because Python identifiers can&apos;t contain dashes.</>
+  },
+  {
+    q: <>What does <code>return 2</code> from <code>main()</code> accomplish once the tool is installed as a console script?</>,
+    choices: [
+      { text: <>Nothing — return values from main are decorative</> },
+      { text: <>The wrapper calls <code>sys.exit(main())</code>, so 2 becomes the process exit code that shells, cron, and CI read as failure</>, correct: true },
+      { text: <>It prints &quot;2&quot; to the terminal</> },
+      { text: <>It retries the operation twice</> },
+    ],
+    explanation: <>The <code>[project.scripts]</code> wrapper runs <code>sys.exit(main())</code>: the int becomes the process exit status (visible as <code>$?</code>). 0 means success; non-zero halts <code>&amp;&amp;</code> chains and flags cron/CI jobs as failed — machine-readable failure, which prose on stdout can never be.</>
+  },
+  {
+    q: <>Why do <code>clean</code> and <code>summarize</code> take DataFrames as parameters instead of reading the CSV and args themselves?</>,
+    choices: [
+      { text: <>It runs faster</> },
+      { text: <>Functions with explicit inputs and outputs can be tested with tiny fixtures, reused outside the CLI, and reasoned about in isolation</>, correct: true },
+      { text: <>argparse forbids file access inside functions</> },
+      { text: <>pandas requires it</> },
+    ],
+    explanation: <>Thin shell, thick core: the core stays pure (data in, data out), so a 2-row fixture tests it in milliseconds, a notebook can import it tomorrow, and no hidden dependency on <code>sys.argv</code> or the filesystem lurks inside. <code>main()</code> is the only place the outside world leaks in.</>
+  },
+  {
+    q: <>The tool prints its report with <code>print</code> but narrates cleaning with <code>logging</code>. What&apos;s the principle?</>,
+    choices: [
+      { text: <>logging is faster than print</> },
+      { text: <>print is deprecated in scripts</> },
+      { text: <>stdout carries the user&apos;s product; logging carries the operator&apos;s diagnosis, with levels adjustable at launch (--verbose) rather than by editing code</>, correct: true },
+      { text: <>logging automatically writes to a file</> },
+    ],
+    explanation: <>Two audiences, two channels. The report is the product; the narration (dropped rows, masked sentinels) is operational metadata with severity levels — silence it, raise it to DEBUG, or redirect it without touching the report. In pipeline-grade tools logging goes to stderr precisely so stdout stays a clean, pipeable product.</>
+  },
+  {
+    q: <>What does the <code>[project.scripts]</code> table (<code>insights = "insights:main"</code>) in pyproject.toml do after <code>pip install -e .</code>?</>,
+    choices: [
+      { text: <>Schedules insights to run automatically</> },
+      { text: <>Creates an <code>insights</code> command on the PATH whose wrapper imports the module and calls <code>sys.exit(main())</code></>, correct: true },
+      { text: <>Compiles the script to a binary</> },
+      { text: <>Uploads the package to PyPI</> },
+    ],
+    explanation: <>The <code>name = "module:function"</code> entry generates a small executable wrapper on your PATH. <code>-e</code> (editable) links it to your working copy, so code edits apply without reinstalling. That&apos;s the entire bridge from &quot;a .py file I run with python&quot; to &quot;a command I can type anywhere.&quot;</>
+  }
+]} />
+
+<MarkDone slug="foundations/scientific-stack/project-csv-cli" title="Project · CSV → insights CLI" />
