@@ -209,6 +209,139 @@ print(roundtrip_parquet(df).dtypes.to_string())`;
   { href: "/learn/foundations/python-craft/classes-protocols-dataclasses", label: "Dataclasses & protocols", blurb: "The natural shape for the objects flowing across your program's boundaries — configs, records, events." },
 ]} />
 
+<Motivation title="Where your program meets the outside world">
+
+Inside your program everything is orderly — objects with types, invariants you can trust. But nothing useful happens purely inside. Real programs read CSVs, take `--config` flags, write checkpoints, receive JSON from APIs. Every crossing is a **boundary**, and boundaries are where bugs actually live: the file that isn't there, the argument that's a string when you expected an int, the 60 GB CSV you tried to load into 16 GB of RAM, the encoding mismatch that turned "café" into "cafÃ©".
+
+In every serious ML system, more code exists to move data across boundaries than to do the actual training — pipelines convert raw CSVs to typed Parquet, configs describe experiments, checkpoints serialize model state, logs ship metrics. The right answers are surprisingly small: **pathlib** for names, **argparse/Typer** for arguments, **JSON/TOML/Parquet** for serialization, **`with` blocks + streaming** for anything bigger than memory.
+
+</Motivation>
+
+<Intuition title="Four boundaries, four right-sized tools">
+
+There are exactly four kinds of moves you make across the wall of a Python program, and each has one right-sized tool:
+
+- **Take arguments in from the command line** → `argparse` (stdlib) for scripts you own, `Typer` for CLIs other people will use.
+- **Name files and directories** → `pathlib` — always. Never `os.path.join`, never `"a/" + b`.
+- **Serialize objects to a durable format** → `json` for interop with anything else, `toml`/`yaml` for human-authored configs, **Parquet** for large tabular data, safetensors for model weights.
+- **Read things bigger than memory** → *stream* with an iterator inside a `with` block. Never `.read()` all at once.
+
+Everything else in this chapter is elaboration on these four reflexes. Miss even one and something will silently corrupt at the boundary.
+
+</Intuition>
+
+<Recall term="Context managers (`with`)">
+
+A `with` block guarantees that the resource opened at the top is **closed on the way out** — even if the code inside raises. It also ensures written data is flushed before the block exits. Every `open()` in real code lives inside a `with`; every custom resource (temp directory, network session, DB transaction) should support `__enter__`/`__exit__` so callers can do the same. Rule of thumb: *if it acquires something, it needs a `with`.*
+
+</Recall>
+
+## pathlib — paths as objects, not strings
+
+<RunnableCode title="paths that behave like paths" code={pathlibCode} />
+
+`Path` gives you four things string paths cannot: **operators** (`root / "sub" / "file.json"`, safe on every OS), **methods** (`.exists()`, `.stat()`, `.glob()`, `.read_text()`, `.write_text()`), **anatomy** (`.name`, `.stem`, `.suffix`, `.parent`, `.parts`), and **cross-platform correctness**.
+
+The moment you type `os.path.join` in modern Python, stop and use `Path(...) / ...`. The only exception: a third-party API that insists on strings — wrap with `str(p)` at the last step (most modern libraries accept both).
+
+One-liners to memorize:
+
+- `Path("data").mkdir(parents=True, exist_ok=True)` — create the directory and parents; no error if it exists.
+- `Path(f).glob("**/*.json")` — recursively find all JSON files under `f`.
+- `Path.home() / ".config" / "my-tool" / "config.toml"` — cross-platform user-config path.
+- `p.with_suffix(".pt")` — same name, different extension.
+
+## argparse — the stdlib CLI
+
+<RunnableCode title="argparse basics" code={argparseCode} />
+
+`argparse` parses `sys.argv` into a typed namespace. Four habits separate a professional CLI from a script that surprises its users:
+
+1. **Positional arguments are required; `--flags` are optional.** That's the convention across every CLI you'll meet (`git commit`, `docker run`). Don't invert it.
+2. **Set `type=int` / `type=float` / `type=Path`** so bad input dies at parse time with a helpful message, not deep inside training with a mysterious `TypeError`. And let it die — don't try/except around `parse_args`; for a CLI, the parse error *is* the UX.
+3. **Use `choices=[...]`** for enumerable options — the parser validates and `--help` lists the valid values.
+4. **Add `--dry-run` and `--verbose` generously.** They cost nothing and save hours of "did I set it right?"
+
+## Typer — the type hints ARE the schema
+
+<CodeBlock language="python" title="Typer version of the same CLI" code={typerCode} />
+
+**Typer** reads your function's type hints and defaults, and *from those alone* builds the CLI schema, help text, error messages, and tab completion. Compare with the argparse version: no `add_argument` calls (the parameter list is the argument list), no `type=int` (the hints declared it), no manual help strings (docstring + hints generate them).
+
+The trade-off: a dependency (`uv add typer`), and it's easier to accidentally break the CLI contract by refactoring the signature. **When to use which:** argparse for private scripts and simple tools; Typer (or Click) for user-facing CLIs and tools with many subcommands. The choice is stylistic, not correctness-affecting.
+
+## JSON — the lingua franca
+
+<RunnableCode title="json.dump / json.load — round-trip and its edges" code={jsonCode} />
+
+JSON is the format every language speaks — every HTTP API, every logging platform. Its type vocabulary is minimal by design — **string, number, bool, null, array, object** — which is also its constraint. Three things to always remember:
+
+1. **`None` becomes `null`** and comes back as `None`. The round-trip is faithful only for JSON's native vocabulary.
+2. **No datetime, Decimal, set, or bytes.** Convert at the boundary: ISO 8601 strings for datetimes, base64 for bytes. The cell shows a datetime going out as a string and *staying* a string on the way back.
+3. **No NaN or Infinity in the spec.** `json.dump` writes them anyway (non-standard) and other parsers reject them — pass `allow_nan=False` to catch it at write time.
+
+Style: `indent=2` when a human will read it; no indent for machine-only output; `sort_keys=True` for anything you want to diff between runs. For huge JSON data, prefer **JSONL** (one object per line) — then plain file iteration streams it.
+
+## Streaming — files bigger than memory
+
+<RunnableCode title="iterate a file line by line" code={streamCode} />
+
+`for line in file:` uses the file's own iterator protocol and pulls one line at a time — this is how you scan a 60 GB log on a 16 GB laptop. The moment you write `f.read()` or `f.readlines()`, ask: *does this fit in RAM?* If unsure, stream. The same **iterate, don't materialize** idea powers `pd.read_csv(path, chunksize=100_000)`, `csv.reader`, `ijson` for huge JSON, `pyarrow`'s `iter_batches()`, and PyTorch's `IterableDataset`.
+
+Two file-opening rules that prevent whole bug categories:
+
+- **Text vs binary mode.** `open(path)` decodes bytes to `str` (text mode) — right for JSON, CSV, TOML, logs. `open(path, 'rb')` reads raw `bytes` — right for Parquet, images, checkpoints. The classic "utf-8 codec can't decode byte 0x80" error is Python telling you a binary file was opened as text.
+- **Always pass `encoding="utf-8"` explicitly** in `open()`, `Path.read_text()`, and CSV writers. The platform default (cp1252 on older Windows) silently mangles non-ASCII text. And open CSVs with `newline=""` when using the `csv` module, or Windows double-counts line endings.
+
+## Formats — the trade-off table you'll live by
+
+Every format is a bet on **who reads it, how fast, and how big**:
+
+| Format  | Human-readable | Schema | Speed  | Size   | Sweet spot |
+| ------- | -------------- | ------ | ------ | ------ | ---------- |
+| JSON    | Yes            | Loose  | OK     | Large  | Web APIs, small configs, logs |
+| YAML    | Yes (comments!)| Loose  | Slow   | Large  | Human configs (Kubernetes, CI, Hydra) |
+| TOML    | Yes            | Strict | Fast   | Small  | `pyproject.toml`, app config |
+| CSV     | Yes            | None   | Slow   | Huge   | Interchange with spreadsheets |
+| Parquet | No             | Strong | Fast   | Tiny   | ML datasets, warehouses |
+| Arrow   | No             | Strong | Fastest| Small  | In-memory or IPC between processes |
+| Pickle  | No             | Python | Fast   | Medium | Model state — *same-Python only* |
+| Safetensors | No         | Strong | Fast   | Small  | Model weights — safe, portable |
+
+Rules: **config for humans → TOML or YAML** (comments matter; Python 3.11+ reads TOML via stdlib `tomllib`); **API interchange → JSON**; **tabular ML data → Parquet**; **model weights → safetensors**. Never use CSV when you have a choice — no types, no null representation, embarrassing byte size. Never unpickle data you didn't produce: `pickle.load` is equivalent to `eval` and executes arbitrary code on load. Large ML projects layer `pydantic`/`hydra` on top of these formats for schema + overrides.
+
+## What each format preserves
+
+<RunnableCode title="round-trip a typed DataFrame through CSV and through Parquet" code={roundtripCode} />
+
+Read the output carefully. Before the trip, `df` has `int64`, `float64` (with NaN), string, datetime, and Categorical columns. After **CSV**, everything is `int64`, `float64`, or untyped `object` — the datetime is a string pandas must re-parse, the Categorical is plain strings. After **Parquet**, every dtype is preserved exactly, nulls included.
+
+If training data goes through CSV once, you re-detect and re-cast every column type on every load. In Parquet, `pd.read_parquet(path)` returns exactly the DataFrame you saved. Multiply by 100 pipeline stages and 1000 loads a day, and Parquet-vs-CSV is the difference between reproducible ML and constant firefighting.
+
+<RealWorldML title="Parquet vs CSV, felt in bytes and milliseconds">
+
+<RunnableCode title="benchmark on 200K rows" code={parquetCode} />
+
+Line by line:
+
+1. The table is 200,000 rows of typed events (int, datetime, categorical string, float) — the shape of most ML input data.
+2. All three writes go to `io.BytesIO`, so the numbers reflect pure format cost, no disk.
+3. **CSV** re-encodes every value as text — every float becomes `"10.428"`, every timestamp a 19-byte string. No types survive; a re-read has to guess.
+4. **JSON** is fatter still: it repeats every column name in every row, 200,000 times.
+5. **Parquet** comes out 5–10× smaller with types preserved.
+
+What Parquet actually does under the hood (why it wins):
+
+- The **schema** is stored in the file — `df.dtypes` map 1:1 to Arrow types, which is why round-trips are faithful.
+- Data is laid out **column-major**: all of column A, then all of B. Reading only the columns you need skips the rest entirely.
+- Columns are split into **row groups** (~1M rows) with min/max stats — a filter like `date > '2026-01-01'` skips whole row groups without reading them ("predicate pushdown").
+- Each column is **encoded** (dictionary for categoricals, delta for sorted timestamps, run-length for repeats) — often 10× smaller before compression even runs — then **compressed** per column (Snappy = fast default; Zstd = smaller, for cold data).
+- A metadata **footer** lets readers learn the whole layout instantly, then jump straight to what they need. And it's an Apache standard — Spark, DuckDB, polars, BigQuery, Snowflake all read it.
+
+Why this matters: a training pipeline reads the same dataset thousands of times — every epoch, every tune, every replay. CSV pays the parse cost every single time; Parquet pays once at conversion. With date-partitioned layout (`/data/events/date=2026-07-12/*.parquet`), a "give me July" query scans only July's partition — and `pyarrow.dataset` or `duckdb` can query datasets far larger than RAM this way. Every major ML platform (W&B, MLflow, Databricks) stores data in Parquet or Arrow because of this multiplier.
+
+</RealWorldML>
+
 <StudyDepth
   intro={<>The boundaries are where bugs live. Drill the small vocabulary that keeps them sealed (<code>pathlib</code>, streaming, safe defaults). Skim the format encyclopedia until a specific format arrives at your door.</>}
   drill={[
@@ -226,386 +359,49 @@ print(roundtrip_parquet(df).dtypes.to_string())`;
   ]}
 />
 
-<Motivation title="Where your program meets the outside world">
+<CodeItYourself title="Three drills — CLI, paths, formats">
 
-Every Python program is a little world with a wall around it. Inside the wall, everything is orderly — objects with types, control flow you designed, invariants you can trust. But nothing useful happens purely inside. Real programs read a CSV, take a `--config` flag, write a checkpoint, ship a log to disk, receive JSON from an API, load a Parquet from S3, dump metrics to a warehouse. Every one of those crossings is a **boundary**, and every boundary is where bugs actually live: the file that isn't there, the argument that's a string when you expected an int, the JSON with a missing field, the 60 GB CSV you tried to load into 16 GB of RAM, the encoding mismatch that turned "café" into "cafÃ©".
+1. **Write `merge_jsonl.py` with argparse.** One or more `INPUT` paths (positional, `nargs="+"`, `type=Path`), a required `--output` path, and an optional `--dedupe-key KEY`. Stream each input line-by-line (JSONL), optionally dedupe on `obj[KEY]` with a `set` of seen keys, write valid JSONL to the output inside one `with` block, and print a one-line summary. Bonus: on malformed JSON, exit with `path:line: message` and code 1. *Hint: a generator `read_jsonl(path)` that yields `json.loads(line)` per line keeps memory flat.*
 
-If the first six chapters of this tier gave you the *inside* of a Python program, this chapter is about the *wall*. And the wall matters more than most beginners realize. **In every serious ML system, more of the code exists to move data across boundaries than to do the actual training.** Data pipelines convert raw CSVs into typed Parquet. Config files describe experiments. Checkpoints serialize model state. Logs ship metrics to observability platforms. Every one of those is a boundary crossing, and every one of them has a right answer.
+2. **Write `latest_checkpoint(run_dir)`** that globs `checkpoint_epoch_*.pt` under a directory and returns the Path with the highest epoch number — parse the number from `p.stem`, don't sort strings (`epoch_10` sorts before `epoch_9` alphabetically). Return `None` if there are no checkpoints. *Hint: `max(paths, key=...)` with `int(p.stem.rsplit("_", 1)[1])`.*
 
-The right answers are surprisingly small: **pathlib** for names, **argparse** or **Typer** for arguments, **JSON / TOML / Parquet** for serialization, and **`with` blocks + streaming** for reading things bigger than memory. Master these four moves and the outside world stops being scary. Miss them and you spend your career wrestling `os.path.join`, discovering `pip` installed to the wrong Python, and finding out at 2am that your 500 GB training dataset can't be loaded because you saved it as CSV instead of Parquet.
+3. **Extend the benchmark cell to measure reads.** Time `pd.read_csv(buf)` vs `pd.read_parquet(buf)` vs `pd.read_parquet(buf, columns=["value"])` on the same 200K-row table. The column-pruned read should be fastest — you're feeling the columnar layout directly. *Hint: rewind each buffer with `buf.seek(0)` before reading.*
 
-</Motivation>
+</CodeItYourself>
 
-<Intuition title="Four boundaries, four right-sized tools">
+<Summary>
 
-There are exactly four kinds of moves you make across the wall of a Python program, and each has one right-sized tool:
+- pathlib for filesystem work — `Path` objects and the `/` operator, never `os.path` or string concat in new code.
+- argparse for scripts you own; Typer/Click for tools you ship. Positional args required, flags optional, types enforced at parse time so bad input dies early and loud.
+- JSON for interop, TOML/YAML for human configs, Parquet for tabular data, safetensors for model weights. Pickle only for same-Python state you produced yourself.
+- Every `open()` lives inside a `with` block; every possibly-large file is streamed line-by-line, never `.read()` whole.
+- Parquet is columnar, typed, encoded, and compressed — 5–10× smaller than CSV, reads by column, skips row groups by min/max stats.
+- Reflexes: `encoding="utf-8"` always explicit, `newline=""` for CSV, `allow_nan=False` for strict JSON, binary mode `'rb'` for non-text files.
 
-- **Take arguments in from the command line** → `argparse` (stdlib) for scripts you own, `Typer` for CLIs other people will use.
-- **Name files and directories** → `pathlib` — always. Never `os.path.join`, never `"a/" + b`.
-- **Serialize objects to a durable format** → `json` for interop with anything else, `toml`/`yaml` for human-authored configs, **Parquet** for large tabular data, safetensors for model weights.
-- **Read things bigger than memory** → *stream* with an iterator inside a `with` block. Never `.read()` all at once.
-
-Everything else in this chapter is elaboration on these four reflexes. Get these into your fingers and you can build an entire ML pipeline that reads correctly, runs safely, fails loudly, and reproduces exactly. Miss even one and something will silently corrupt at the boundary.
-
-</Intuition>
-
-<Recall term="Context managers (`with`)">
-
-A `with` block guarantees that the resource opened at the top is **closed on the way out** — even if the code inside raises. It's how you avoid file leaks, half-flushed writes, and dangling database connections. Every `open()` in real code should be inside a `with`. Every custom resource you write (a temp directory, a network session, an S3 client, a database transaction) should support `__enter__`/`__exit__` so callers can do the same. Rule of thumb: *if it acquires something, it needs a `with`.*
-
-</Recall>
-
-<Recall term="Text mode vs binary mode">
-
-`open(path, 'r')` (default) opens in **text mode** — the file's bytes are decoded to Python `str` using an encoding (default is platform-dependent; always pass `encoding="utf-8"` explicitly). `open(path, 'rb')` opens in **binary mode** — reads raw `bytes`. Use text mode for anything textual (JSON, YAML, TOML, CSV, source code, logs). Use binary mode for anything else (Parquet, images, model checkpoints, .pt files, compiled artifacts). Mixing them up produces the classic "utf-8 codec can't decode byte 0x80" error, which is Python telling you a binary file was opened as text.
-
-</Recall>
-
-<Recall term="Encoding">
-
-An **encoding** is how a string of characters becomes a sequence of bytes on disk. UTF-8 is the universal standard in 2026 — every modern system reads and writes it correctly. On older Windows machines, the default encoding was cp1252 (Windows-1252), which produces garbled output for any non-ASCII text. **Always pass `encoding="utf-8"` explicitly** in your `open()` calls, `Path.read_text()`, `json.dump()` (via the file's encoding), and CSV writers. This one habit prevents an entire category of "works on my Mac, garbled on their PC" bugs.
-
-</Recall>
-
-<Angles intro={<>Six lenses on the boundary of your program. Each corresponds to a real habit you'll form: pathlib-first, argparse or Typer, JSON as lingua franca, streaming for scale, format-by-audience, and safe-reading defaults.</>}>
-
-  <Angle type="taste" title="pathlib — paths as objects, not strings">
-    <RunnableCode title="paths that behave like paths" code={pathlibCode} />
-
-    `Path` gives you four things that string paths cannot: **operators** (`root / "sub" / "file.json"` is safe on every OS), **methods** (`.exists()`, `.stat()`, `.glob()`, `.read_text()`, `.write_text()`), **anatomy** (`.name`, `.stem`, `.suffix`, `.parent`, `.parts`), and **cross-platform correctness** (Windows vs POSIX separators are handled for you).
-
-    The moment you type `os.path.join` in modern Python, stop. Use `Path(...) / ...`. The only exception is when a third-party API insists on a string — then wrap with `str(p)` at the very last step. Even then, most modern libraries (`pandas`, `scikit-learn`, `torch`, `open()`) accept both `str` and `Path` transparently.
-
-    Common one-liners to memorize:
-
-    - `Path("data").mkdir(parents=True, exist_ok=True)` — create the directory (and its parents), don't error if it already exists.
-    - `Path(f).glob("**/*.json")` — recursively find all JSON files under `f`.
-    - `Path.home() / ".config" / "my-tool" / "config.toml"` — cross-platform way to name a user-config path.
-    - `p.with_suffix(".pt")` — return a new Path with the suffix swapped (`checkpoint.pt` from `checkpoint.json`).
-
-  </Angle>
-
-  <Angle type="workflow" title="argparse — the stdlib CLI you'll actually use">
-    <RunnableCode title="argparse basics" code={argparseCode} />
-
-    `argparse` parses a list of strings from `sys.argv` into a typed namespace. Four habits separate a professional CLI from a script that surprises its users:
-
-    1. **Positional arguments are required; `--flags` are optional.** That's the convention across every CLI you'll ever meet (`git commit`, `docker run`, `ffmpeg`). Don't invert it.
-    2. **Set `type=int` / `type=float` / `type=Path`** so bad input dies at parse time with a helpful message, not deep inside training with a mysterious `TypeError`.
-    3. **Use `choices=[...]`** for enumerable options — the parser validates and the auto-generated `--help` lists the valid values.
-    4. **Use `--dry-run` and `--verbose` generously.** They cost nothing to add and save many hours of "did I set it right?" per-year.
-
-    For public tools upgrade to **`Typer`** (type hints become the CLI schema — see next angle) or **`Click`** (more mature ecosystem, more custom widgets). For a private script? argparse is exactly the right amount of ceremony.
-
-  </Angle>
-
-  <Angle type="comparative" title="Typer — the type hints ARE the CLI schema">
-    <CodeBlock language="python" title="Typer version of the same CLI" code={typerCode} />
-
-    **Typer** takes a fundamentally different angle: it reads your function's type hints and defaults, and *from those alone* builds the CLI schema, help text, tab completion, and error messages. Your Python function is the CLI; there's no separate "argument parser" to maintain.
-
-    Notice what disappears versus the argparse version:
-
-    - No `add_argument` calls. The parameter list is the argument list.
-    - No `type=int` / `type=float`. The hints already declared it.
-    - No manual `--help` strings. The docstring and hints generate them.
-    - Tab completion is automatic (Typer installs the shell integration for you).
-
-    The trade-off: Typer adds a dependency (`uv add typer`), and it's easier to accidentally break the CLI contract by refactoring the function signature. For long-lived tools you ship to others, this trade is worth it. For quick one-file scripts, argparse is faster to reach for.
-
-    **When to use which:** argparse for private scripts and simple tools; Typer for user-facing CLIs and internal tools with many subcommands. Both are excellent; the choice is stylistic, not correctness-affecting.
-
-  </Angle>
-
-  <Angle type="ecosystem" title="JSON — the lingua franca of every system">
-    <RunnableCode title="json.dump / json.load — round-trip and its edges" code={jsonCode} />
-
-    JSON is the format every language speaks. Every language has a native JSON parser; every HTTP API produces or consumes it; every logging platform ingests it. Its type system is minimal by design — **string, number, bool, null, array, object** — which is also its constraint: anything richer needs conversion at the boundary or JSON will raise.
-
-    Three things always to remember:
-
-    1. **`None` becomes `null`**, then comes back as `None`. The round-trip is faithful only for JSON's native vocabulary.
-    2. **JSON has no datetime, no Decimal, no set, no bytes.** These must be converted to strings (or arrays) before writing and parsed back on the way in. Common convention: ISO 8601 for datetimes (`"2026-07-12T13:15:00Z"`); base64 strings for bytes.
-    3. **JSON is unordered by spec**, but Python's parsers preserve insertion order in practice (dict since 3.7). Never rely on order across languages; if order matters, use an array of pairs.
-
-    Use `indent=2` when a human will read the JSON (configs, small debug outputs); no `indent` when only a machine will (logs, wire formats). Prefer `json.dumps(obj, sort_keys=True)` for anything you want to diff between runs.
-
-  </Angle>
-
-  <Angle type="performance" title="Streaming — reading files bigger than memory">
-    <RunnableCode title="iterate a file line by line" code={streamCode} />
-
-    `for line in file:` is not just syntactic sugar. It uses the file's own **iterator protocol** and pulls one line at a time, letting the OS buffer the rest. This is how you scan a 60 GB log on a laptop with 16 GB of RAM. The moment you write `f.read()` or `f.readlines()`, ask yourself: *does this file fit in RAM?* If you're not sure, the answer is **stream**.
-
-    The same idea powers many higher-level tools:
-
-    - **`pd.read_csv(path, chunksize=100_000)`** yields DataFrames of 100k rows at a time.
-    - **`csv.reader(open(path))`** yields row tuples.
-    - **`ijson`** (third-party) yields JSON values from a huge JSON file without loading it all.
-    - **`pyarrow.parquet.ParquetFile(path).iter_batches()`** yields Arrow record batches from a Parquet file.
-    - **`torch.utils.data.IterableDataset`** yields training samples from arbitrary sources.
-
-    In every case, the abstraction is the same as the plain file loop: **iterate, don't materialize**. The moment you learn this reflex, files stop having a maximum size.
-
-  </Angle>
-
-  <Angle type="comparative" title="Formats — the trade-off table you'll live by">
-    Every format is a bet on **who reads it, how fast, and how big**. This table is worth memorizing:
-
-    | Format  | Human-readable | Schema | Speed  | Size   | Sweet spot |
-    | ------- | -------------- | ------ | ------ | ------ | ---------- |
-    | JSON    | Yes            | Loose  | OK     | Large  | Web APIs, small configs, logs |
-    | YAML    | Yes (comments!)| Loose  | Slow   | Large  | Human configs (Kubernetes, CI, Hydra) |
-    | TOML    | Yes            | Strict | Fast   | Small  | `pyproject.toml`, app config |
-    | CSV     | Yes            | None   | Slow   | Huge   | Interchange with spreadsheets |
-    | Parquet | No             | Strong | Fast   | Tiny   | ML datasets, warehouses |
-    | Arrow   | No             | Strong | Fastest| Small  | In-memory or IPC between processes |
-    | Pickle  | No             | Python | Fast   | Medium | Model state — *same-Python only* |
-    | Safetensors | No         | Strong | Fast   | Small  | Model weights — safe, portable |
-
-    Rules:
-    - **Config for humans → TOML or YAML** (comments matter to humans).
-    - **API interchange → JSON**.
-    - **Tabular ML data → Parquet**.
-    - **Model weights → safetensors** (never pickle for weights that will cross machines).
-
-    Never use CSV when you have a choice; it has no types, no null representation, and its byte size is embarrassing. Never use pickle for anything crossing a machine or Python version boundary — it's Python-specific *and* executes arbitrary code on load (a security hole). Use safetensors instead for weights.
-
-  </Angle>
-
-</Angles>
-
-<Convergence>
-
-The rule reads left-to-right: **arguments in → paths → work → serialize out.** `pathlib` names the boundaries. `argparse` (or Typer) crosses them cleanly on the way in. `json`/`toml`/`parquet` cross them on the way out — choosing the right format for the audience. `with` blocks and streaming make sure every crossing closes cleanly even when something fails halfway. Read every ML pipeline this way and you'll find the same skeleton in every framework, from a research paper's repo to a Fortune-500 production stack.
-
-</Convergence>
-
-<Derivation title="What happens when you write `df.to_parquet(path)`">
-
-Parquet feels opaque the first time — bytes go in, bytes come out, everything is faster and smaller. Trace what the format actually does and it stops being magic; it's just a well-designed data layout.
-
-<Step n={1} math={<span>Pandas passes the DataFrame to PyArrow, which infers a schema from the column dtypes.</span>}>
-Every Parquet file starts with a schema — a typed description of the columns. `df.dtypes` maps 1:1 to Arrow types: `int64` → INT64, `float64` → DOUBLE, `datetime64[ns]` → TIMESTAMP[NANOSECOND], `object` (strings) → BYTE_ARRAY (UTF8), `category` → DICTIONARY(index_type, value_type). This is why Parquet round-trips types faithfully — the schema is stored in the file.
-</Step>
-
-<Step n={2} math={<span>The data is transposed from row-major to column-major layout.</span>}>
-CSV and JSON are *row-based*: row 1's values, then row 2's values, then row 3's. Parquet is *column-based*: all of column A, then all of column B, then all of column C. This is the single biggest reason Parquet is fast for analytics — if you only need column A, you skip the bytes for B and C entirely.
-</Step>
-
-<Step n={3} math={<span>Each column is split into "row groups" — chunks of typically ~1M rows each.</span>}>
-Row groups are the granularity of read/skip. When you filter by `WHERE date > '2026-01-01'`, Parquet's engine reads the min/max metadata for each row group's date column and *skips whole row groups* whose dates are all outside the filter. This "predicate pushdown" is why Parquet can query a 500 GB file on a laptop.
-</Step>
-
-<Step n={4} math={<span>Each column of each row group is <em>encoded</em> — dictionary, delta, run-length — before compression.</span>}>
-Categorical columns become integer indices into a small dictionary. Sorted timestamps become delta-encoded (store the differences, not the absolute values — much smaller). Long runs of the same value become run-length pairs. These encodings often shrink data 10× before compression even runs.
-</Step>
-
-<Step n={5} math={<span>Each encoded column is <em>compressed</em> — Snappy (fast) or Gzip/Zstd (smaller).</span>}>
-Snappy is the default because it's fast to decompress; Zstd gives better ratios if size matters more. Either way, the compression is *per-column*, so column-typical patterns (integers close to each other, repeated strings) compress much better than they would in a row-based mix.
-</Step>
-
-<Step n={6} math={<span>PyArrow writes the metadata footer — schema, row group offsets, min/max stats.</span>}>
-The footer is at the end of the file (an unusual choice, but it lets writers stream data without knowing the total size up front). Readers seek to the footer first, learn the layout, then jump directly to the columns and row groups they need. That's why a 500 GB Parquet file can be opened almost instantly — the reader only touches the footer at first.
-</Step>
-
-<Step n={7} math={<span>The whole file is a well-formed Parquet document that any language can read.</span>}>
-Parquet is not a Python format — it's an Apache-standard binary format used by Spark, DuckDB, Dask, Rust's polars, PostgreSQL extensions, BigQuery, Redshift, Snowflake, and every other serious analytics tool. Once you write a Parquet, you can query it from any of them. This portability is why ML pipelines standardize on Parquet regardless of what language the pipeline is written in.
-</Step>
-
-</Derivation>
-
-<Example title="What does each format actually preserve?">
-
-<RunnableCode title="round-trip a typed DataFrame through CSV and through Parquet" code={roundtripCode} />
-
-Read the output carefully. Before the round-trip, `df` has columns of type `int64`, `float64` (with NaN), string, datetime, and Categorical. After **CSV**, everything is either `int64`, `float64`, or `object` (untyped strings) — the datetime column is a string that pandas has to re-parse, the Categorical is now plain strings, the None became "None". After **Parquet**, every dtype is preserved exactly. `date_col` is still datetime; `cat_col` is still Categorical; nulls are nulls (not "None" strings).
-
-**Why this matters in ML.** If your training data goes through CSV once, you now need to re-detect and re-cast every column type every time you load it. If your data lives in Parquet, `pd.read_parquet(path)` gives you back exactly the DataFrame you saved. Multiply this by 100 pipeline stages and 1000 loads a day, and Parquet-vs-CSV becomes the difference between reproducible ML and constant-firefighting ML.
-
-</Example>
-
-<RealWorldML title="Parquet vs CSV, felt in bytes and milliseconds">
-
-<RunnableCode title="benchmark on 200K rows" code={parquetCode} />
-
-**Line by line, why this is what a real ML pipeline looks like:**
-
-1. We built a small realistic events table — 200,000 rows, four typed columns (int, datetime, categorical string, float). This is the shape of *most* ML input data — user events, sensor readings, transactions, logs.
-2. We wrote it three ways in memory using `io.BytesIO` — no disk, so the numbers reflect pure format cost.
-3. **CSV** re-encodes every value as text. Every float becomes `"10.428"`, every timestamp becomes a 19-byte ISO string. No types survive the trip — a re-read has to *guess* whether a column is int or string. And CSV has no compression by default.
-4. **JSON** is even worse: on top of stringifying, it repeats **every column name in every row** (`{"user_id": 42, ...}` × 200K). That's why it's the fattest of the three.
-5. **Parquet** stores each column separately in a compact binary layout (dictionary-encoded categorical, delta-encoded timestamps, snappy-compressed floats). Types are preserved. Result: **often 5–10× smaller and faster to read**, especially when you only need a few columns.
-
-**Why this matters for ML:** almost every training pipeline reads the same dataset thousands of times — once per epoch, once per hyperparameter tune, once per experiment replay. If you save it as CSV, you pay the parse cost *every single time*. Move it to Parquet once and every downstream job — training, EDA, feature engineering, evaluation — reads in a fraction of the time, keeps its dtypes, and uses less disk. **This is the single biggest boring win in data engineering.** Every major ML platform (Weights & Biases, MLflow, Tecton, Databricks) stores data in Parquet or Arrow (Parquet's in-memory cousin) precisely because of this multiplier.
-
-**Bonus for large data:** with a Parquet dataset partitioned by date (`/data/events/date=2026-07-12/*.parquet`), a query "give me events for July" scans only July's partition. On a 500 GB dataset that's minutes, not hours. With CSV, you're scanning the whole thing.
-
-</RealWorldML>
-
-<Nuance>
-
-**Encoding.** Always `open(path, encoding="utf-8")` or `Path.read_text(encoding="utf-8")`. Python's default is platform-dependent (cp1252 on older Windows) and will *silently* mangle non-ASCII text some day when you least expect it. Same for CSV writers — pass `encoding="utf-8"` explicitly.
-
-**Newlines and CSV.** Open CSV files with `newline=""` when using the `csv` module — otherwise Windows double-counts line endings and you get blank rows.
-
-**JSON and NaN.** The JSON spec has no NaN or Infinity. `json.dump` accepts them by default (non-standard) but many parsers will reject them. Pass `allow_nan=False` to catch this at write time, or coerce to `None` first.
-
-**Argument parsing dies loud.** Let argparse die on bad input with a clear message. Don't try/except around `parse_args` — the traceback *is* the UX for a CLI.
-
-**Config libraries.** `pydantic`, `hydra`, and `omegaconf` layer schema + defaults + overrides on top of YAML/JSON. Worth it for large ML projects with many hyperparameters; overkill for a one-file script.
-
-**Big Parquet.** For datasets larger than RAM, use `pyarrow.dataset` or `duckdb` to query them without loading. You can filter by column or row group without ever materializing the full frame. This is how "reading a 500 GB Parquet on a laptop" works in practice.
-
-**Never pickle strangers.** `pickle.load` on untrusted data is equivalent to `eval` — it can execute arbitrary code. Only unpickle files you produced. For model weights specifically, prefer **safetensors** — a Rust-implemented format that stores tensors as pure data with no executable code path.
-
-**Atomic writes.** If you're writing an output file that a downstream consumer might tail, use the "write to temp, then rename" pattern: `path.with_suffix(".tmp").write_text(...); path.with_suffix(".tmp").rename(path)`. A rename is atomic on POSIX — the consumer sees either the old file or the new one, never a half-written mess.
-
-**Compression choices.** Snappy (Parquet's default) is fast to decompress, moderate ratio. Gzip is slower but ~30% smaller. Zstd is the modern default in many pipelines — good ratio and fast. Choose based on read/write frequency: hot data → Snappy; cold archive data → Zstd or Gzip.
-
-**Streaming JSON.** Regular `json.load` reads the whole file. For huge JSONs, use `ijson` (streaming parser) or split your data as JSONL (one JSON object per line) — then plain file iteration works.
-
-**`os.path` still exists** and is fine for legacy code. Every new code path should use `pathlib`. When calling into a library that only accepts strings, wrap: `str(path)`. Most modern libraries accept both.
-
-**TOML in the stdlib.** Python 3.11+ ships `tomllib` for *reading* TOML (`import tomllib; with open(p, 'rb') as f: tomllib.load(f)`). For *writing* TOML you still need `tomli-w` or another package. `pyproject.toml` and app configs are the target audience.
-
-</Nuance>
-
-<CodeItYourself
-  title="A tiny, correct CLI"
-  spec={<>Write <code>merge_jsonl.py</code> with argparse that takes one or more <code>INPUT</code> paths (positional), an <code>--output</code> path (required), and an optional <code>--dedupe-key KEY</code>. It should stream each input file line-by-line (JSONL — one JSON object per line), optionally dedupe on <code>obj[KEY]</code>, and write valid JSONL to <code>--output</code>. Must use <code>pathlib.Path</code> and <code>with</code> blocks. Print a one-line summary at the end. Bonus: fail with a clear message if any input file has malformed JSON on any line.</>}
-  hints={[
-    "argparse: `nargs=\"+\"` on the positional gives you a list of paths; `type=Path` converts each to a Path.",
-    "Stream reads so the whole file never sits in memory: `for line in f: yield json.loads(line)`.",
-    "Dedupe with a `set` of seen keys — only add to the output if the key isn't in the set yet.",
-    "Open the output file once and write inside the loop; don't build a giant list first.",
-    "For the bonus: catch json.JSONDecodeError, print `path:line: error message`, exit with code 1."
-  ]}
-  solution={<CodeBlock language="python" title="merge_jsonl.py" code={`import argparse, json, sys
-from pathlib import Path
-
-def read_jsonl(path: Path):
-    with path.open(encoding="utf-8") as f:
-        for i, line in enumerate(f, 1):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                yield json.loads(line)
-            except json.JSONDecodeError as e:
-                sys.exit(f"{path}:{i}: bad JSON — {e}")
-
-def main():
-    p = argparse.ArgumentParser(description="Merge JSONL files with optional dedupe.")
-    p.add_argument("inputs", nargs="+", type=Path,
-                   help="one or more input JSONL files")
-    p.add_argument("--output", type=Path, required=True,
-                   help="path to write merged JSONL")
-    p.add_argument("--dedupe-key",
-                   help="if given, drop duplicates keyed by obj[KEY]")
-    args = p.parse_args()
-
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-
-    seen: set = set()
-    written = 0
-    read = 0
-    with args.output.open("w", encoding="utf-8") as out:
-        for path in args.inputs:
-            for obj in read_jsonl(path):
-                read += 1
-                if args.dedupe_key:
-                    k = obj.get(args.dedupe_key)
-                    if k in seen:
-                        continue
-                    seen.add(k)
-                out.write(json.dumps(obj) + "\\n")
-                written += 1
-    print(f"read {read} records, wrote {written} to {args.output}")
-
-if __name__ == "__main__":
-    main()`} />}
-/>
-
-<LifeLesson title="A program has a wall. Life does too — respect the boundary">
-
-Every clean program in this chapter has one thing in common: it treats its *boundary* with more care than its interior. Inside, code trusts types, invariants, function contracts. At the boundary — where user input, file bytes, network responses, config strings enter — it validates ruthlessly, converts explicitly, fails loudly with helpful messages. That asymmetry — trust-the-inside, verify-at-the-edge — is what makes systems that don't randomly explode at 2am.
-
-The pattern is not unique to code. The strongest personal and organizational systems are structured the same way. **Inside** — your team, your friend group, your home — you can afford deep trust, tight loops, less ceremony. **At the boundary** — where clients, strangers, and unknown situations meet your interior — you have to state expectations clearly, validate inputs (does this new contract make sense? does this person's ask fit our scope?), convert explicit types (a vague "help me with the project" becomes a specific "review the doc by Friday"), and be willing to fail loudly ("sorry, we can't take this on") rather than absorb bad-shape input and hope for the best.
-
-The failure mode in code is: your program silently accepts a malformed JSON, writes garbage to disk, and mysteries appear a week later. The failure mode in life is: you silently accept a scope creep, absorb the extra work, and the resentment or burnout appears a week later. Both are the same bug — treating the boundary as if it were the interior.
-
-**Say `type=Path` at the boundary. Say "utf-8, please" at the boundary. Say `argparse` — parse me, validate me, give me a real object or fail loudly — at the boundary.** Then, inside, trust what's already been converted. Do this consistently and the world stops surprising you at the wall of your program *and* the wall of your life.
-
-</LifeLesson>
-
-<MLConnection>
-
-Serialization and I/O are the invisible spine of every ML system:
-
-- **Datasets.** Raw sensor data → cleaned Parquet is the first move in every clean pipeline. HuggingFace `datasets`, PyTorch DataLoader, Ray Data, TFRecord (Google's equivalent), Arrow — all use column-oriented binary formats for a reason. Parquet is the interchange standard.
-- **Configs.** Every training script grows a config file. Small teams start with YAML/TOML. Larger ones use **Hydra** or **OmegaConf** to compose configs from multiple files with CLI overrides. Modern research code often ships with a Hydra config that captures every hyperparameter of the experiment.
-- **Checkpoints.** Model weights are serialized. Classic pipelines use `torch.save` (pickle-based); modern pipelines are migrating to **safetensors** — Rust-implemented, no arbitrary-code execution risk, faster to load. Optimizer state, scheduler state, RNG state get saved alongside so training can resume.
-- **Logs.** Every experiment writes JSONL logs — one metric event per line — because JSONL streams beautifully and any tool can read it. Weights & Biases, MLflow, TensorBoard, Comet all ingest this shape.
-- **APIs.** Every model inference server has a JSON request/response schema. FastAPI + Pydantic is the modern default: your Pydantic model is the request type, the API doc, and the runtime validator, all in one.
-- **Big data.** Column-oriented formats (Parquet, Arrow) exist because ML often reads a few columns from a huge table. Column layouts turn a full-table scan into a targeted read. Combined with **partitioning** (`/data/events/date=2026-07-12/`), this is how you query a 500 GB dataset in seconds.
-- **Reproducibility.** Alongside `uv.lock` (environment reproducibility), Parquet + Hydra configs give you *dataset reproducibility* and *experiment reproducibility*. Together they let a paper's code + data + config reproduce results down to the decimal.
-- **Streaming datasets.** `datasets.load_dataset("...", streaming=True)` yields records without downloading the full dataset. Under the hood: a generator that pulls Parquet row groups on demand, exactly the streaming pattern in this chapter.
-
-Learn the boundary tools once; they show up in every ML system you'll ever touch.
-
-</MLConnection>
-
-<Summary bullets={[
-  "pathlib for filesystem work — Path objects, not string concat. Never `os.path`, never `\"a/\" + b`.",
-  "argparse for scripts you own; Typer/Click for tools you ship — positional args required, flags optional, types set at parse time.",
-  "JSON for interop, TOML/YAML for human configs, Parquet for tabular data, safetensors for model weights. Pickle only for same-Python state you produced yourself.",
-  "Every `open()` lives inside a `with` block. Every read of a possibly-large file streams line-by-line.",
-  "Parquet is columnar, typed, compressed, filterable by row-group — 5-10× smaller than CSV and reads by column.",
-  "Always `encoding=\"utf-8\"` explicitly. Always `newline=\"\"` for CSV. Always `allow_nan=False` for strict JSON.",
-  "In ML: raw → Parquet, configs → YAML/TOML/Hydra, logs → JSONL, checkpoints → safetensors. Same four boundaries, everywhere."
-]} />
+</Summary>
 
 <ProblemSet
   problems={[
     {
       difficulty: "easy",
-      q: <>You need to build a path from a base directory and a filename that will work on both macOS and Windows. What's the right move?</>,
-      hint: <>Path, not string concat.</>,
-      answer: <>Use <code>Path(base) / filename</code>. This produces a Path object with correct separators on every OS. Never <code>base + '/' + filename</code>; never <code>os.path.join</code> in new code.</>
-    },
-    {
-      difficulty: "easy",
-      q: <>You're loading a 40 GB CSV log to count error lines on a laptop with 16 GB of RAM. Which of these will not crash?<br/><code>a) open(path).read().count(' ERROR ')</code><br/><code>b) list(open(path))</code><br/><code>c) for line in open(path): if ' ERROR ' in line: n += 1</code><br/><code>d) pd.read_csv(path)</code></>,
-      hint: <>Only one is streaming.</>,
-      answer: <>Only (c) will succeed. (a) reads the whole 40 GB into memory. (b) materializes every line as a Python string in a list. (d) tries to load the whole DataFrame at once. Only the streaming for-loop pulls one line at a time. To use pandas on a huge CSV, pass <code>chunksize=100_000</code>.</>
-    },
-    {
-      difficulty: "easy",
-      q: <>You're saving a table of 100M rows that gets read many times per day by training jobs. Best format?</>,
-      hint: <>Column-oriented, typed, compressed.</>,
-      answer: <>Parquet. It's columnar (reads only needed columns), typed (no re-guessing dtypes), compressed (5-10× smaller than CSV), and readable from every language. Pickle is Python-only and unsafe. CSV loses types and is slow. JSON is even bigger than CSV.</>
-    },
-    {
-      difficulty: "easy",
-      q: <>Your CLI's user passes <code>--epochs abc</code>. What's the ideal behavior?</>,
-      hint: <>argparse can enforce the type.</>,
-      answer: <>argparse should reject the arg with an error and exit — no training starts. Achieve this with <code>parser.add_argument("--epochs", type=int)</code>. argparse then tries to convert "abc" to int, fails, prints "argument --epochs: invalid int value: 'abc'", and exits with code 2. Bad-input-early beats bad-behavior-later.</>
-    },
-    {
-      difficulty: "medium",
-      q: <>Explain why <code>with open(path) as f:</code> is safer than <code>f = open(path)</code> even in simple scripts.</>,
-      hint: <>Exceptions and file handles.</>,
-      answer: <>Because <code>with</code> guarantees <code>f.close()</code> runs, even if the code inside raises. Without it, an exception mid-processing leaves the file handle dangling — on POSIX this leaks until GC (usually fine); on Windows the file remains locked and another process can't open it. The <code>with</code> block makes cleanup a language guarantee instead of a discipline you have to remember. Second reason: it also ensures written data is flushed to disk before the block exits (before the file is closed) — critical for anyone reading it right after.</>
-    },
-    {
-      difficulty: "medium",
       q: <>Write a Path expression that, given <code>/data/models/run-2026/checkpoint_epoch_5.pt</code>, produces the sibling path <code>/data/models/run-2026/checkpoint_epoch_5.json</code> (same directory, same stem, different suffix).</>,
       hint: <>`Path.with_suffix`.</>,
       answer: <><CodeBlock language="python" title="answer" code={`from pathlib import Path
 p = Path("/data/models/run-2026/checkpoint_epoch_5.pt")
 print(p.with_suffix(".json"))
 # -> /data/models/run-2026/checkpoint_epoch_5.json`} /> <code>Path.with_suffix</code> replaces the last suffix (or adds one if there wasn't one). It's the readable idiom for "same name, different extension" — much cleaner than string manipulation.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>You run <code>open("data.parquet").read()</code> and get <code>UnicodeDecodeError: 'utf-8' codec can't decode byte 0x80</code>. What happened, and what's the fix?</>,
+      hint: <>Text mode vs binary mode.</>,
+      answer: <><code>open()</code> defaults to <b>text mode</b>, which decodes the file's bytes to a Python <code>str</code> using UTF-8. Parquet is a <b>binary</b> format — its bytes aren't text in any encoding, so the decoder hits an invalid byte and raises. The immediate fix is binary mode: <code>open("data.parquet", "rb").read()</code> gives you raw <code>bytes</code>. The real fix is to use the right reader entirely: <code>pd.read_parquet("data.parquet")</code>. Rule: text mode for JSON/CSV/TOML/logs; binary mode for Parquet/images/checkpoints.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Explain why <code>with open(path) as f:</code> is safer than <code>f = open(path)</code> even in simple scripts.</>,
+      hint: <>Exceptions and file handles.</>,
+      answer: <>Because <code>with</code> guarantees <code>f.close()</code> runs, even if the code inside raises. Without it, an exception mid-processing leaves the file handle dangling — on POSIX this leaks until GC (usually fine); on Windows the file remains locked and another process can't open it. The <code>with</code> block makes cleanup a language guarantee instead of a discipline you have to remember. Second reason: it also ensures written data is flushed to disk before the block exits (before the file is closed) — critical for anyone reading it right after.</>
     },
     {
       difficulty: "medium",
@@ -700,3 +496,5 @@ def atomic_write_json(path: Path, obj: dict):
     explanation: <><code>pickle.load</code> can (and by design does) construct arbitrary Python objects, which means a malicious pickle can execute arbitrary code on load — a huge security hole for anything downloaded from the internet. safetensors is a plain binary format with no code execution during load; it's the modern default for shipping model weights.</>
   }
 ]} />
+
+<MarkDone slug="foundations/python-craft/cli-io-serialization" title="CLI, I/O & serialization" />
