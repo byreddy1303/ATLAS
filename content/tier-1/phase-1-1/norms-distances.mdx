@@ -1,0 +1,388 @@
+---
+title: Norms & distances
+tier: 1
+phase: "1.1"
+---
+
+export const normsCode = `import numpy as np
+
+v = np.array([3.0, -4.0])
+
+l1   = np.sum(np.abs(v))          # L1: add up the |entries|
+l2   = np.sqrt(np.sum(v ** 2))    # L2: Pythagoras
+linf = np.max(np.abs(v))          # L-inf: the single biggest |entry|
+
+print("L1   =", l1)      # 7.0
+print("L2   =", l2)      # 5.0
+print("Linf =", linf)    # 4.0
+
+# numpy has all three built in — same numbers
+print(np.linalg.norm(v, 1), np.linalg.norm(v, 2), np.linalg.norm(v, np.inf))`;
+
+export const distanceCode = `import numpy as np
+
+a = np.array([1.0, 2.0])
+b = np.array([4.0, 6.0])
+diff = a - b                       # distance = the norm of the displacement
+
+print("Euclidean =", np.linalg.norm(diff))           # 5.0 (crow flies)
+print("Manhattan =", np.linalg.norm(diff, 1))        # 7.0 (grid streets)
+print("Chebyshev =", np.linalg.norm(diff, np.inf))   # 4.0 (king moves)
+
+# the identity that powers vector databases:
+#   ||a - b||^2 = ||a||^2 + ||b||^2 - 2 a.b
+lhs = np.linalg.norm(a - b) ** 2
+rhs = np.linalg.norm(a) ** 2 + np.linalg.norm(b) ** 2 - 2 * (a @ b)
+print("identity:", round(float(lhs), 2), "==", round(float(rhs), 2))`;
+
+export const ballsCode = `import numpy as np, matplotlib.pyplot as plt
+
+# every point at "distance 1" from the origin — under three different rulers
+fig, axes = plt.subplots(1, 3, figsize=(9.6, 3.4))
+
+d = np.array([[1, 0], [0, 1], [-1, 0], [0, -1], [1, 0]]).T   # |x|+|y| = 1
+axes[0].plot(d[0], d[1], color="crimson", lw=2)
+axes[0].set_title("L1 ball: diamond")
+
+t = np.linspace(0, 2 * np.pi, 400)                           # x^2+y^2 = 1
+axes[1].plot(np.cos(t), np.sin(t), color="teal", lw=2)
+axes[1].set_title("L2 ball: circle")
+
+s = np.array([[1, 1], [-1, 1], [-1, -1], [1, -1], [1, 1]]).T # max(|x|,|y|) = 1
+axes[2].plot(s[0], s[1], color="darkorange", lw=2)
+axes[2].set_title("L-inf ball: square")
+
+for ax in axes:
+    ax.set_xlim(-1.6, 1.6); ax.set_ylim(-1.6, 1.6)
+    ax.set_aspect("equal"); ax.grid(alpha=0.25)
+    ax.axhline(0, color="gray", lw=0.5); ax.axvline(0, color="gray", lw=0.5)
+plt.tight_layout()`;
+
+export const normalizeCode = `import numpy as np
+
+def normalize(v):
+    n = np.linalg.norm(v)
+    return v / n if n > 0 else v    # guard: the zero vector has no direction
+
+a = np.array([3.0, 4.0])
+u = normalize(a)
+print("unit vector:", u, "  length =", np.linalg.norm(u))
+
+# on unit vectors, the plain dot product IS cosine similarity
+b = np.array([1.0, 7.0])
+cos = normalize(a) @ normalize(b)
+print("cosine similarity =", round(float(cos), 4))
+
+# and Euclidean distance becomes a function of that SAME cosine
+d2 = np.linalg.norm(normalize(a) - normalize(b)) ** 2
+print("unit distance^2 =", round(float(d2), 4),
+      "  == 2 - 2cos =", round(float(2 - 2 * cos), 4))`;
+
+export const searchCode = `import numpy as np
+
+docs = [
+    "how to train a neural network",
+    "best pizza dough recipe",
+    "gradient descent learning rate tips",
+    "sourdough starter guide",
+    "fine-tuning transformers on small data",
+]
+# stand-in embeddings (5 docs x 4 dims) — a real system calls an embedding model
+E = np.array([
+    [0.9, 0.1, 0.8, 0.1],
+    [0.1, 0.9, 0.1, 0.7],
+    [0.8, 0.1, 0.9, 0.2],
+    [0.1, 0.8, 0.2, 0.9],
+    [0.9, 0.2, 0.7, 0.1],
+])
+query = np.array([0.85, 0.1, 0.85, 0.1])   # "neural net training help"
+
+# normalize doc rows ONCE at index time, the query at search time
+En = E / np.linalg.norm(E, axis=1, keepdims=True)
+qn = query / np.linalg.norm(query)
+
+scores = En @ qn                  # ONE matmul = cosine with every doc
+for i in np.argsort(-scores):     # best match first
+    print(round(float(scores[i]), 3), " ", docs[i])`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/vectors-space/vector-addition-scaling", label: "Vector addition & scaling", blurb: "Displacement q − p — distance is the length of exactly that vector." },
+  { href: "/learn/mathematics/vectors-space/dot-product-cosine-similarity", label: "Dot product & cosine similarity", blurb: "‖v‖ = √(v·v) and cos θ — both get connected to distance here." },
+]} />
+
+<Motivation title="'Closest' is a design decision">
+
+Every RAG system answers one geometric question: *which stored embedding is closest to the query embedding?* But "closest" isn't one thing — it depends on the **ruler**. Measure with the L2 ruler and you get Euclidean distance; with L1, Manhattan distance; rank by cosine and you're not even using a true distance (we'll prove that). Vector databases let you pick, and picking wrong quietly degrades retrieval.
+
+The same letters follow you everywhere else in ML: **L2** appears in weight decay and gradient clipping, **L1** in lasso regularization (it's what creates sparsity — the norm-ball picture below shows why), **L∞** in adversarial robustness ("no pixel changed by more than ε"). The choice of norm is a modeling decision, not a formality.
+
+This chapter gives you the three rulers, one identity that welds distance to the dot product (the identity vector databases are built on), and the traps — including why "cosine distance" breaks the rules real distances obey.
+
+</Motivation>
+
+<Intuition title="Three rulers for the same walk">
+
+A norm answers one question: **how long is this walk?** The same displacement (3, −4) has three honest answers, depending on how you're allowed to move. The **crow** flies straight: length 5 (L2). The **taxi** is stuck on a street grid, driving 3 blocks then 4: length 7 (L1). The **chess king** moves diagonally as easily as straight, so he needs max(3, 4) = 4 moves (L∞). Same walk, three rulers. And distance is never a new idea: the distance from a to b is just the *length of the displacement walk* a − b, measured with whichever ruler you chose.
+
+</Intuition>
+
+<Recall term="Norm from the dot product">
+
+From the dot-product chapter: a vector dotted with itself gives the sum of its squared entries, v · v = v₁² + … + vₙ², so the (L2) length is ‖v‖ = √(v·v). That one link — length via dot product — does all the heavy lifting in today's derivation.
+
+</Recall>
+
+## The L2 norm — the ruler you already know
+
+The **Euclidean norm** is Pythagoras, run in any number of dimensions:
+
+$$
+\lVert \mathbf{v} \rVert_2 = \sqrt{v_1^2 + v_2^2 + \cdots + v_n^2} = \sqrt{\mathbf{v} \cdot \mathbf{v}}
+$$
+
+It's the default: when a paper writes ‖v‖ with no subscript, it means L2. Three properties make any norm a legitimate ruler, and L2 has them all:
+
+1. **Non-negative, and zero only for the zero vector** — every real walk has positive length.
+2. **Homogeneity**: ‖c v‖ = |c| · ‖v‖ — triple the stride, triple the length (the |·| is why −2v is *twice* as long, not "−2 times").
+3. **Triangle inequality**: ‖a + b‖ ≤ ‖a‖ + ‖b‖ — a detour is never shorter than the straight walk.
+
+A vector with ‖u‖ = 1 is a **unit vector** — pure direction, no magnitude. Dividing any nonzero v by its own norm produces one: u = v/‖v‖ (homogeneity guarantees length 1). This is what "normalizing an embedding" means, and it's why cosine similarity is just a dot product of normalized vectors.
+
+## L1 and L∞ — two more rulers
+
+Two more norms cover most of ML. The **L1 norm** (taxicab/Manhattan) sums absolute entries; the **L∞ norm** (max/Chebyshev) takes the single largest:
+
+$$
+\lVert \mathbf{v} \rVert_1 = |v_1| + \cdots + |v_n|
+\qquad\qquad
+\lVert \mathbf{v} \rVert_\infty = \max_i |v_i|
+$$
+
+Both satisfy the same three ruler laws. Where each shows up:
+
+- **L1** — lasso regularization (pushes weights to exactly zero → sparse models), and error metrics robust to outliers (MAE).
+- **L2** — everywhere by default: distances, weight decay, gradient clipping.
+- **L∞** — "worst single coordinate": adversarial attacks bounded by ε per pixel, sanity checks like "is any gradient entry exploding?".
+
+For every vector, the three answers are ordered: ‖v‖∞ ≤ ‖v‖₂ ≤ ‖v‖₁ — the king's count never exceeds the crow's, the crow never exceeds the taxi.
+
+<RunnableCode title="Three norms of one vector" code={normsCode} packages={["numpy"]} />
+
+## Distance is the norm of the displacement
+
+No new definitions needed. Last chapter established that q − p is *the arrow from p to q*; a distance is that arrow's length under your chosen ruler:
+
+$$
+d(\mathbf{a}, \mathbf{b}) = \lVert \mathbf{a} - \mathbf{b} \rVert
+$$
+
+L2 gives **Euclidean** distance, L1 gives **Manhattan**, L∞ gives **Chebyshev**. Because they're built from norms, all three obey the metric laws you'd demand of any honest distance: d(a, b) = 0 exactly when a = b, symmetry d(a, b) = d(b, a), and the triangle inequality d(a, c) ≤ d(a, b) + d(b, c) — no shortcut through a midpoint can beat the direct route. Hold onto that last law: it's the one "cosine distance" fails.
+
+<RunnableCode title="One displacement, three distances — and THE identity" code={distanceCode} packages={["numpy"]} />
+
+That last check in the cell is the most important equation of this chapter — derived next.
+
+<Derivation title="‖a − b‖² = ‖a‖² + ‖b‖² − 2 a·b — welding distance to the dot product">
+
+Everything comes from one recalled fact — ‖v‖² = v·v — plus the algebra laws the dot product obeys (it distributes over addition and commutes, both proved slot-by-slot in its chapter).
+
+<Step n={1} math={<span><code>‖a − b‖² = (a − b) · (a − b)</code></span>}>
+    Apply the recalled fact to the vector v = a − b: its squared length is itself dotted with itself. No geometry yet — just the definition.
+</Step>
+
+<Step n={2} math={<span>Expand like algebra: <code>(a − b)·(a − b) = a·a − a·b − b·a + b·b</code></span>}>
+    The dot product distributes over addition and subtraction exactly like multiplication over numbers, so FOIL works: four terms, each a dot product. This "multiply out the brackets" move is legal *because* distributivity was proved — it's not an analogy.
+</Step>
+
+<Step n={3} math={<span>Commute and collect: <code>‖a − b‖² = ‖a‖² + ‖b‖² − 2 a·b</code></span>}>
+    a·a is ‖a‖², b·b is ‖b‖², and a·b = b·a lets the two middle terms merge into −2a·b. Read the result: <em>squared distance is squared lengths minus twice the similarity</em>. The more aligned two vectors are (bigger dot product), the closer they are — distance and similarity are two views of one quantity.
+</Step>
+
+<Step n={4} math={<span>Unit vectors: <code>‖u − w‖² = 2 − 2 cos θ</code></span>}>
+    If both vectors are normalized, ‖u‖² = ‖w‖² = 1 and u·w = cos θ, so squared distance is 2 − 2cos θ. Consequence: on normalized embeddings, <b>smallest Euclidean distance and largest cosine similarity pick the same winner</b> — d² falls exactly when cos rises. That's why vector databases can offer "cosine" and "euclidean" modes and return identical rankings once you normalize — and why they often just compute the dot product, the cheapest of the three.
+</Step>
+
+</Derivation>
+
+<Example title="Working it by hand — one full trace">
+
+Take v = (3, −4):
+
+- **L1**: |3| + |−4| = **7** — the taxi drives 3 blocks, then 4.
+- **L2**: √(3² + (−4)²) = √25 = **5** — the crow's diagonal.
+- **L∞**: max(|3|, |−4|) = **4** — the king needs 4 moves (3 of them diagonal).
+- Ordering check: 4 ≤ 5 ≤ 7 ✓.
+
+Now a distance. For a = (1, 2) and b = (4, 6): the displacement is a − b = (−3, −4) — the same numbers, so Euclidean distance 5, Manhattan 7, Chebyshev 4. Signs never matter to a ruler: ‖−v‖ = ‖v‖ by homogeneity (|−1| = 1), which is the symmetry d(a, b) = d(b, a) in action. And in ℝ¹²²⁸⁸ the recipe is identical — square, sum, root, just with more slots.
+
+</Example>
+
+## Norm balls — what "distance 1" looks like
+
+Draw every point whose norm is exactly 1 and each ruler reveals its shape: L2 gives the familiar **circle**, L1 a **diamond** (its corners sit on the axes), L∞ a **square**. One picture is worth the three definitions:
+
+<RunnableCode title="Unit balls: diamond, circle, square" code={ballsCode} packages={["numpy", "matplotlib"]} captureFig={true} />
+
+The shapes explain behavior. **Why L1 regularization creates sparsity**: penalizing ‖w‖₁ pulls weights toward a diamond, and a diamond's *corners* — where some coordinates are exactly zero — are where solutions land; the circle of L2 has no corners, so weights shrink smoothly but rarely hit zero exactly. You'll meet this argument again, with the full picture, in the regularization chapter — the geometry is already complete here.
+
+## The traps that matter
+
+**"Cosine distance" is not a metric.** The quantity 1 − cos θ is a fine *ranking score* but violates the triangle inequality — two small "distances" can chain into a large one (a problem below has you build the counterexample with three simple vectors). Consequence: algorithms whose correctness assumes a true metric (some tree-based neighbor searches, some clustering guarantees) can silently misbehave with it. Rule of thumb: rank with cosine, but if a method demands a metric, normalize and use Euclidean — step 4 of the derivation says the ranking survives.
+
+**High dimensions squeeze distances together.** For high-dimensional data, pairwise Euclidean distances *concentrate*: the nearest and farthest neighbors can differ by only a few percent, making raw distance less informative. This is one face of the curse of dimensionality, and one reason embeddings are compared with cosine (after normalizing away magnitude) rather than raw L2 — direction stays meaningful when lengths stop being so.
+
+**Norms add apples and oranges.** A distance over features on different scales is dominated by the biggest unit: with (age in years, income in dollars), income differences of hundreds crush age differences of decades. Standardize features (subtract mean, divide by standard deviation, per column) before any distance-based method — kNN, k-means, retrieval over hand-built features. A problem below shows a nearest-neighbor *ranking flip* caused purely by units.
+
+**Normalizing the zero vector.** v/‖v‖ divides by zero when v = 0 — the zero vector has no direction to extract. Real pipelines guard it (`if n > 0`) or add a tiny ε. This bites in practice: a padding token's all-zero embedding, an empty document, a ReLU layer that zeroed everything.
+
+<RunnableCode title="Unit vectors — where norms meet cosine" code={normalizeCode} packages={["numpy"]} />
+
+<RealWorldML title="Semantic search — the core of RAG, in 15 lines">
+
+A RAG system stores document embeddings, embeds the query, and returns the closest documents. With the identity from the derivation, "closest" collapses to a single matrix-vector product:
+
+<RunnableCode title="Mini vector database" code={searchCode} packages={["numpy"]} />
+
+Read the cell:
+
+1. **Index time.** `E / np.linalg.norm(E, axis=1, keepdims=True)` normalizes every row to length 1 — done once, when documents are ingested. (`keepdims=True` keeps the norms as a column of shape `(5, 1)` so broadcasting divides each *row* by *its own* norm — drop it and you're in the (n,) vs (n, 1) trap from two chapters ago.)
+2. **Search time.** `En @ qn` computes the dot product of the query against every stored row in one shot — and because everything is unit-length, those dot products *are* cosine similarities. No loops: one matmul scores the whole corpus.
+3. **Ranking.** `np.argsort(-scores)` sorts best-first. The neural-net docs (rows 0, 2, 4) surface above pizza and sourdough — geometry doing information retrieval.
+4. **Scale.** A real system does exactly this with shape `(10_000_000, 1536)` — plus an approximate index (HNSW, IVF) so it doesn't score all ten million rows. But the *math* per candidate is still this cell: normalize, dot, sort.
+
+</RealWorldML>
+
+<StudyDepth
+  intro={<>Norms are cheap, ubiquitous, and mostly mechanical — the list to internalize is short, but every item below appears weekly in real ML work.</>}
+  drill={[
+    <>The three definitions and hand-computation of L1 / L2 / L∞ — plus the ordering ‖v‖∞ ≤ ‖v‖₂ ≤ ‖v‖₁</>,
+    <>Distance = ‖a − b‖ — always the norm of the displacement, never a new concept</>,
+    <>The identity ‖a − b‖² = ‖a‖² + ‖b‖² − 2a·b, and its unit-vector corollary d² = 2 − 2cos θ</>,
+    <>Normalizing: v/‖v‖, the zero-vector guard, and "cosine = dot product of unit vectors"</>,
+    <>Which ruler each job picks: L2 default, L1 for sparsity/robust errors, L∞ for worst-coordinate bounds</>,
+  ]}
+  skim={[
+    <>General Lp norms for arbitrary p ≥ 1 (the three you know are p = 1, 2, ∞ — the rest are rare in ML)</>,
+    <>Formal metric-space axioms and proofs — the triangle inequality for L2 rests on Cauchy–Schwarz from the dot-product chapter</>,
+    <>Matrix norms (Frobenius, spectral) — arrive with the matrices phase, where they matter for initialization and stability</>,
+  ]}
+/>
+
+<CodeItYourself title="Three drills — rulers, unit rows, retrieval">
+
+1. **Write `norms(v)`** computing (L1, L2, L∞) from scratch — `np.abs`, `np.sum`, `np.sqrt`, `np.max` only, no `np.linalg.norm`. Test on a random 10-d vector (`np.random.default_rng(0).normal(size=10)`), assert all three match `np.linalg.norm(v, ord)` for ord = 1, 2, `np.inf`, and assert the ordering L∞ ≤ L2 ≤ L1. *Hint: each norm is one line; the asserts are the actual drill.*
+
+2. **Write `normalize_rows(M)`** returning M with every row scaled to unit L2 length, leaving all-zero rows untouched. Build the row norms with `keepdims=True`, use `np.where` (or a masked divide) for the zero guard, and assert the output's row norms are all 1 (or 0 for the zero row). Test on a `(4, 3)` matrix whose third row is zeros. *Hint: `np.where(n > 0, n, 1.0)` makes a safe denominator.*
+
+3. **Write `top_k(query, E, k)`** returning the indices of the k most similar rows of E to the query, by cosine. Normalize E's rows and the query, score with one `@`, rank with `np.argsort(-scores)[:k]`. Then verify the derivation's promise: compute Euclidean distances between the *normalized* query and *normalized* rows and assert `np.argsort` of those distances gives the same order. *Hint: reuse drill 2 for the normalizing.*
+
+</CodeItYourself>
+
+<Summary>
+
+- A norm is a **ruler**: L1 sums |entries| (taxi), L2 is Pythagoras (crow, the default), L∞ takes the max |entry| (king). Always ‖v‖∞ ≤ ‖v‖₂ ≤ ‖v‖₁.
+- Every norm obeys three laws: positive (zero only at **0**), homogeneous (‖cv‖ = |c|‖v‖), triangle inequality (detours never win).
+- **Distance = ‖a − b‖** — the length of the displacement, under whichever ruler you picked: Euclidean / Manhattan / Chebyshev.
+- THE identity: ‖a − b‖² = ‖a‖² + ‖b‖² − 2a·b. On unit vectors, d² = 2 − 2cos θ — so after normalizing, Euclidean ranking ≡ cosine ranking ≡ dot-product ranking.
+- Unit vector: u = v/‖v‖ (guard v = 0). "Normalize your embeddings" means exactly this — then cosine similarity is one matmul.
+- Traps: cosine "distance" breaks the triangle inequality (rank with it, don't treat it as a metric); high-dim distances concentrate; standardize features before distance-based methods.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>Compute the L1, L2, and L∞ norms of v = (−2, 3, −6) by hand, and confirm they respect the standard ordering.</>,
+      hint: <>Absolute values first: (2, 3, 6).</>,
+      answer: <>L1 = 2 + 3 + 6 = <b>11</b>; L2 = √(4 + 9 + 36) = √49 = <b>7</b>; L∞ = max(2, 3, 6) = <b>6</b>. Ordering: 6 ≤ 7 ≤ 11 ✓ (L∞ ≤ L2 ≤ L1 — always).</>
+    },
+    {
+      difficulty: "easy",
+      q: <>Find the unit vector in the direction of v = (6, 8), verify its length, and explain — using a norm law — why dividing by ‖v‖ is guaranteed to produce length exactly 1.</>,
+      hint: <>‖v‖ = 10; then apply homogeneity to the scalar c = 1/‖v‖.</>,
+      answer: <>‖v‖ = √(36 + 64) = 10, so u = v/10 = <b>(0.6, 0.8)</b>; check ‖u‖ = √(0.36 + 0.64) = 1 ✓. Guarantee: homogeneity says ‖cv‖ = |c|·‖v‖, so ‖v/‖v‖‖ = (1/‖v‖)·‖v‖ = 1 for <em>any</em> nonzero v. (For v = 0 there's nothing to point at — hence the code guard.)</>
+    },
+    {
+      difficulty: "medium",
+      q: <>You walk from (0, 0) to (3, 4) in a city with a perfect street grid. (a) What distance does the crow fly, and what distance does the taxi drive? (b) For which displacements are the two distances <em>equal</em>?</>,
+      hint: <>(b) When does |v₁| + |v₂| equal √(v₁² + v₂²)? Try squaring both.</>,
+      answer: <>(a) Crow (L2): √(9 + 16) = <b>5</b>; taxi (L1): 3 + 4 = <b>7</b> — the grid forces the detour. (b) Squaring: (|v₁| + |v₂|)² = v₁² + v₂² + 2|v₁||v₂|, which equals v₁² + v₂² only when |v₁||v₂| = 0 — i.e. <b>when the walk moves along a single axis</b> (at least one coordinate is zero). Then the street <em>is</em> the straight line. In ℝⁿ: at most one nonzero coordinate.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>A kNN model uses raw features (age in years, income in dollars). Query user q = (35, 60000); candidates u₁ = (36, 60000) and u₂ = (35, 60500). (a) Which is q's Euclidean nearest neighbor on raw features? (b) After standardizing each feature (age std = 10 years, income std = 10000 dollars), which is nearer? (c) What's the lesson?</>,
+      hint: <>Only one feature differs in each candidate — the distances are easy.</>,
+      answer: <>(a) d(q, u₁) = 1 (one year), d(q, u₂) = 500 (five hundred dollars) — <b>u₁ wins</b>, because dollars dominate years by sheer unit size. (b) In std units, u₁ differs by 1/10 = 0.1 and u₂ by 500/10000 = 0.05 — <b>u₂ wins; the ranking flips</b>. (c) A norm happily adds apples and oranges: whichever feature has the largest raw scale owns the distance. Standardize (per-feature mean 0, std 1) before any distance-based method — the flip here was caused by units alone, not by anything about the users.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Show that cosine distance d(a, b) = 1 − cos θ violates the triangle inequality, using a = (1, 0), b = (1/√2, 1/√2), c = (0, 1). Compute d(a, b), d(b, c), d(a, c) and exhibit the violation.</>,
+      hint: <>The angles are 45°, 45°, 90° — you know these cosines.</>,
+      answer: <>cos 45° = √2/2 ≈ 0.707, so d(a, b) = d(b, c) = 1 − 0.707 ≈ <b>0.293</b>. cos 90° = 0, so d(a, c) = <b>1</b>. Triangle inequality demands d(a, c) ≤ d(a, b) + d(b, c) ≈ 0.586 — but 1 &gt; 0.586. <b>Violated.</b> Two "close" pairs chained into a far pair, which a true metric forbids. That's the formal reason cosine distance is a <em>score</em>, not a distance — and why metric-assuming algorithms can misbehave with it. (Fine print: √(2 − 2cos θ) — the unit-vector Euclidean distance — <em>is</em> a metric; it's the un-square-rooted 1 − cos that breaks.)</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Gradient clipping rescales g ← g · min(1, c/‖g‖₂) for a threshold c. (a) Prove homogeneity from the L2 definition: ‖αv‖₂ = |α|·‖v‖₂. (b) Using it, show the clipped gradient never has norm above c and keeps g's exact direction. (c) Why is this preferred over clipping each entry to [−c, c] (an L∞-style clip)?</>,
+      hint: <>(a) Pull α² out of the square root. (b) The interesting case is ‖g‖ &gt; c, where the scalar is α = c/‖g‖.</>,
+      answer: <>(a) ‖αv‖₂ = √(Σ(αvᵢ)²) = √(α² Σvᵢ²) = <b>|α|</b>√(Σvᵢ²) = |α|·‖v‖₂ (the root of α² is |α|). (b) If ‖g‖ ≤ c the min is 1 and nothing changes. If ‖g‖ &gt; c, the update is (c/‖g‖)·g, whose norm by homogeneity is (c/‖g‖)·‖g‖ = <b>exactly c</b>; and multiplying by a <em>positive</em> scalar never turns the arrow — direction preserved. (c) Per-entry clipping shrinks only the large coordinates, which <em>rotates</em> the gradient — you step in a different direction than the loss asked for. Norm-clipping shortens the stride but keeps the walk pointed downhill, which is why it's the standard in RNN/transformer training.</>
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "The L1 norm of (2, −5) is:",
+      choices: [
+        { text: "7", correct: true },
+        { text: "√29 ≈ 5.39" },
+        { text: "5" },
+        { text: "−3" },
+      ],
+      explanation: <>L1 sums <em>absolute</em> entries: |2| + |−5| = 7. (√29 is the L2 norm, 5 is the L∞ norm, and −3 is what you get if you forget the absolute values — a norm can never be negative.)</>
+    },
+    {
+      q: "Which unit ball is a diamond with corners on the axes?",
+      choices: [
+        { text: "L2" },
+        { text: "L1", correct: true },
+        { text: "L∞" },
+        { text: "They all look the same" },
+      ],
+      explanation: <>|x| + |y| = 1 traces a diamond; its corners sit where one coordinate is zero — the geometric seed of L1-induced sparsity. L2 gives the circle, L∞ the square.</>
+    },
+    {
+      q: "The Euclidean distance between a and b is:",
+      choices: [
+        { text: "‖a‖ − ‖b‖" },
+        { text: "‖a − b‖₂ — the L2 norm of the displacement", correct: true },
+        { text: "a · b" },
+        { text: "The number of differing entries" },
+      ],
+      explanation: <>Distance is always the norm of the displacement a − b. ‖a‖ − ‖b‖ compares lengths of two arrows from the origin (it can even be negative); the dot product measures alignment, not separation.</>
+    },
+    {
+      q: "Why is cosine distance (1 − cos θ) not a true metric?",
+      choices: [
+        { text: "It can be negative" },
+        { text: "It isn't symmetric" },
+        { text: "It violates the triangle inequality", correct: true },
+        { text: "It's undefined for unit vectors" },
+      ],
+      explanation: <>It's symmetric and non-negative (for angles up to 90° and beyond it stays ≥ 0), but two small cosine distances can chain into a big one — the triangle inequality fails, so it's a ranking score rather than a distance.</>
+    },
+    {
+      q: "On normalized (unit-length) embeddings, ranking neighbors by smallest Euclidean distance versus largest cosine similarity gives:",
+      choices: [
+        { text: "Identical rankings — d² = 2 − 2cos θ links them monotonically", correct: true },
+        { text: "Usually different rankings" },
+        { text: "Identical only in 2-D" },
+        { text: "Identical only for orthogonal vectors" },
+      ],
+      explanation: <>On unit vectors, squared distance is 2 − 2cos θ: distance falls exactly as cosine rises, in any dimension. That's why vector databases can expose either mode — and often just compute dot products.</>
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/vectors-space/norms-distances" title="Norms & distances" />

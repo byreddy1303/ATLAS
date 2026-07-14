@@ -375,7 +375,7 @@ const tier1: Tier = {
             "Norm balls and geometric intuition",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "linear-independence-basis",
