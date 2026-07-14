@@ -206,218 +206,110 @@ print(bench)
   { href: "/learn/foundations/python-craft/control-flow-data-model", label: "Control flow & the data model", blurb: "The dunder protocols (`__eq__`, `__len__`, `__iter__`, `__hash__`) — this chapter is where you implement them." },
 ]} />
 
-<StudyDepth
-  intro={<>Modern Python OOP is a handful of load-bearing tools: <code>@dataclass</code>, <code>Protocol</code>, composition. Drill those; the exhaustive dunder catalog and MRO archaeology are look-up-when-needed material.</>}
-  drill={[
-    <><code>@dataclass(frozen=True, slots=True)</code> for every config/record object</>,
-    <><code>field(default_factory=list)</code> for mutable defaults</>,
-    <><code>Protocol</code> for structural typing (duck typing that mypy checks)</>,
-    <>Composition over inheritance — <em>has-a</em> beats <em>is-a</em></>,
-  ]}
-  skim={[
-    <>Every dunder beyond <code>__init__</code>, <code>__repr__</code>, <code>__eq__</code>, <code>__len__</code>, <code>__iter__</code></>,
-    <>C3 MRO — matters if you inherit from three classes, which you shouldn&apos;t</>,
-    <>ABC vs Protocol nuances — <code>Protocol</code> is almost always the right modern choice</>,
-    <>Every <code>field(...)</code> knob — you&apos;ll use <code>default_factory</code>, look up the rest</>,
-  ]}
-/>
-
 <Motivation title="Modern Python OOP is 3 tools, not 30">
 
-Ask a programmer who learned OOP in Java or C++ what a class is, and the answer will involve **inheritance hierarchies**, **abstract base classes**, **interfaces**, **mixins**, `protected` and `private`, and a taxonomy diagram (`Animal → Mammal → Dog → GoldenRetriever`). Do that in Python and your code will become an unreadable maze in six months. **The Python community, over the last ten years, has quietly moved to a much smaller, saner set of tools.**
+Java-style OOP means inheritance hierarchies, abstract base classes, mixins, and a taxonomy diagram. Do that in Python and your code becomes a maze in six months. The Python community has quietly converged on a much smaller kit:
 
-The whole modern kit is three items:
+1. **`@dataclass`** for **value objects** — declare the fields, Python writes `__init__`, `__repr__`, `__eq__`, and (with `frozen=True`) `__hash__` for free.
+2. **`Protocol`** for **structural typing** — say what an object should be *shaped like* ("has a `.predict(X)` method"), not what it must inherit from. Duck typing a type checker can verify.
+3. **Dunder methods** for making your class cooperate with Python's operators and built-ins — `__add__` gives you `+`, `__iter__` gives you `for`, `__len__` gives you `len()`.
 
-1. **`@dataclass`** for **value objects** — you declare the fields, Python writes `__init__`, `__repr__`, `__eq__`, and (with `frozen=True`) `__hash__` for free. Zero boilerplate; the class you write reads like the schema of the data it holds.
-2. **`Protocol`** for **structural typing** — you say what an object should be *shaped like* ("has a `.predict(X)` method"), not what class it should *inherit from*. This is duck typing that a type checker can verify.
-3. **Dunder methods** for **operator overloading** — `__add__` gives you `+`, `__iter__` gives you `for x in v`, `__len__` gives you `len(v)`. Implement these and your class *cooperates* with Python's built-ins as if it were part of the standard library.
-
-That's 90% of modern Python OOP. Deep inheritance is rare in production Python; when it happens, it usually reveals a design that could have been cleaner with **composition** ("has-a") instead of **inheritance** ("is-a"). Real ML libraries — PyTorch, HuggingFace, scikit-learn, LangChain, LangGraph — are all built on this new minimalism: dataclass configs, protocol-typed strategies, small classes that hold other objects rather than inherit from them. Learn the modern kit today and you'll read PyTorch source like plain prose.
+That's 90% of modern Python OOP, tied together by **composition** ("has-a") instead of inheritance ("is-a"). PyTorch, HuggingFace, scikit-learn, LangChain — all built on this minimalism: dataclass configs, protocol-typed strategies, small classes that hold other objects. Learn the kit and you read their source like prose.
 
 </Motivation>
 
 <Intuition title="Value objects vs behavior objects">
 
-Two rough kinds of classes cover most needs, and framing which one you're writing makes the design decisions much easier.
+Two kinds of classes cover most needs, and knowing which one you're writing makes every design decision easier.
 
-- **Value objects** hold *data*. A `Point`, a `Config`, an `HTTPResponse`, an `Embedding`. They should be immutable (so they can be freely shared and hashed), comparable (so equality is by *value*, not identity), and printable (so debugging is pleasant). **`@dataclass(frozen=True)` gives you all three for free.** The class you write becomes essentially a typed record.
+- **Value objects** hold *data*: a `Point`, a `Config`, an `Embedding`. They should be immutable (safe to share and hash), comparable by *value*, and printable. **`@dataclass(frozen=True)` gives you all three for free.**
+- **Behavior objects** *do* things: a `DataLoader`, an `Optimizer`, a `TrainingRun`. Their methods mutate state and orchestrate work; their identity matters (two `DataLoader`s configured the same are still different objects). **Write these as plain classes** whose `__init__` receives their dependencies. If a class is 90% methods and 10% state, don't `@dataclass` it.
 
-- **Behavior objects** *do* things. A `DataLoader`, an `Optimizer`, a `Retriever`, a `TrainingRun`. They have methods that mutate state and orchestrate work. Their identity matters (two `DataLoader`s are different even if configured the same); they usually shouldn't be hashable or compared by fields. **Write these as plain classes** with an `__init__` that receives their dependencies and methods that do the work.
-
-Same syntax; different design goals. When in doubt, ask: *would it be weird if two instances with the same fields were "equal"?* If yes, it's a behavior object. If no, it's a value object.
+When in doubt, ask: *would it be weird if two instances with the same fields were "equal"?* Yes → behavior object. No → value object.
 
 </Intuition>
 
-<Recall term="Dunder method">
-
-"Dunder" = **d**ouble **under**score. Method names like `__init__`, `__eq__`, `__iter__`, `__add__`, `__len__`, `__hash__`, `__repr__`, `__enter__` are the hooks Python's built-ins and operators call through. Implementing a dunder makes your class play nice with the corresponding piece of syntax. `def __add__(self, other): ...` on your class means `x + y` works when `x` is an instance. There is no explicit "operator overloading" declaration — just a specifically-named method. Simple, uniform, and the reason "everything is an object" isn't marketing.
-
-</Recall>
-
 <Recall term="`self`, and why methods take it">
 
-Methods in Python are functions with a first parameter conventionally called `self`. When you call `obj.method(arg)`, Python is *actually* calling `ClassName.method(obj, arg)` — passing the instance in as `self`. This uniformity is why `class.method` and `instance.method` can be used interchangeably in more advanced code, why you can build partially-applied methods with `functools.partial`, and why "unbound methods" (from Python 2 days) no longer exist. Every method is just a function that happens to be defined inside a class body.
+Methods in Python are functions with a first parameter conventionally called `self`. When you call `obj.method(arg)`, Python is *actually* calling `ClassName.method(obj, arg)` — passing the instance in as `self`. Every method is just a function that happens to be defined inside a class body; all the scope and closure rules from the last chapter apply unchanged.
 
 </Recall>
+
+## @dataclass — value objects with no ceremony
+
+<RunnableCode title="frozen + slots, hashability, methods still work" code={dataclassCode} />
+
+Without `@dataclass`, `Point` would take twenty lines of boilerplate. The decorator reads the annotated field list and generates: `__init__` (one parameter per field, defaults honored), `__repr__` (`Point(x=1, y=2, label='origin-ish')` — what makes debugging bearable), and `__eq__` (field-tuple comparison — equality by value). The annotations name the fields; the types themselves are checked by mypy/pyright, not enforced at runtime.
+
+Three switches worth learning:
+
+- **`frozen=True`** — assignment raises, and because state can't change, `__hash__` is auto-generated (non-frozen dataclasses are unhashable by default). The default for config-style objects.
+- **`slots=True`** — fixed named slots instead of a per-instance `__dict__`: ~40% memory savings, and typos like `p.xx = 5` raise instead of silently creating an attribute. One limit: no dynamic attributes, and mixing slots with multiple inheritance is subtle.
+- **`order=True`** — generates `<`, `<=`, `>`, `>=` by field-tuple comparison, for sortable records.
+
+Need validation or derived fields? `__post_init__` runs right after the generated `__init__` — `if self.lr <= 0: raise ValueError(...)` lives there. Every "config" object and every record you'd otherwise stuff in a `dict[str, Any]` should be a dataclass — HuggingFace's `TrainingArguments` and Pydantic's `BaseModel` are essentially this pattern.
+
+## field() — factories for mutable defaults
+
+<RunnableCode title="field(default_factory=list) and other tricks" code={dataclassFieldsCode} />
+
+The mutable-default trap strikes classes twice. Inside a dataclass, `metrics: list = []` would share one list across every instance — so Python 3.11+ **refuses it with a `ValueError`** at class-creation time. The fix: `field(default_factory=list)` — the generated `__init__` calls the factory once per instance.
+
+The same trap exists in *plain* classes with no guardrail: `class Team: members = []` creates a **class-level attribute** — one list shared by all instances, mutated by all. Per-instance state belongs in `__init__` (`self.members = []`).
+
+Other `field(...)` knobs you'll actually use: `repr=False` (hide noisy fields from `__repr__`), `compare=False` (exclude from `__eq__`/`__hash__`), `init=False` (for fields computed in `__post_init__`), `kw_only=True` (keyword-only in the generated `__init__`).
+
+## Protocol — structural, not nominal, typing
+
+<RunnableCode title="duck typing that a type checker can verify" code={protocolCode} />
 
 <Recall term="Structural vs nominal typing">
 
-**Nominal typing** (Java, C#) asks: "does this object's *declared class* inherit from the required interface?" **Structural typing** (Go, TypeScript, Python's `Protocol`) asks: "does this object have the *methods and attributes* the interface requires?" Structural typing is friendlier — you can make a third-party class satisfy your interface without modifying its code — and it's exactly what "duck typing" has always meant. `Protocol` is the machine-checkable version of duck typing.
+**Nominal typing** (Java, C#) asks: "does this object's *declared class* inherit from the required interface?" **Structural typing** (Go, TypeScript, Python's `Protocol`) asks: "does this object have the *methods and attributes* the interface requires?" Structural is friendlier — a third-party class can satisfy your interface without modification — and it's exactly what "duck typing" has always meant. `Protocol` is the machine-checkable version.
 
 </Recall>
 
-<Angles intro={<>Five angles on modern Python OOP. Each shows one tool at work — dataclass, protocol, dunder, composition, mutable-default pitfalls — and how they add up to a small, powerful, readable design vocabulary.</>}>
+This is what makes scikit-learn pipelines accept your custom estimator without inheriting from `sklearn.base.BaseEstimator` — anything with `.fit()` and `.predict()` in the right shape counts. Two ways to use a Protocol:
 
-  <Angle type="code" title="`@dataclass` — value objects with no ceremony">
-    <RunnableCode title="frozen + slots, hashability, methods still work" code={dataclassCode} />
+- **As a type hint**: `def print_length(x: HasLen):` — mypy/pyright accept anything with `__len__`. Static-only, zero runtime cost.
+- **As a runtime check**: decorate with `@runtime_checkable`, and `isinstance(obj, HasLen)` inspects the object's methods. Coarser (checks *presence*, not signatures) but useful for dispatch and clear error messages.
 
-    Without `@dataclass`, writing `Point` would take twenty lines: manual `__init__` for each field, a `__repr__` that includes each field, `__eq__` that compares fields tuple-by-tuple, `__hash__` derived from them. `@dataclass` writes all of them from the type-annotated field list — Python reads the annotations at class-creation time and generates the boilerplate.
+**The rule:** `Protocol` for open contracts anyone can satisfy; `ABC` (abstract base class, enforcing inheritance and refusing to instantiate incomplete subclasses) for closed hierarchies where you own every implementation. Modern Python leans Protocol.
 
-    Three switches worth learning:
+## Dunder methods — make your class feel native
 
-    - **`frozen=True`** — instances are immutable (`p.x = 999` raises); Python also auto-generates `__hash__` because the class is now safe to hash (values can't change under it). This is the default for config-style objects. Set once, use everywhere.
-    - **`slots=True`** — instances use fixed named slots instead of a `__dict__`. Saves memory (roughly 40% for typical objects), makes attribute access slightly faster, and catches typos (`p.xx = 5` raises `AttributeError` instead of silently creating a new attribute).
-    - **`order=True`** — auto-generates `<`, `<=`, `>`, `>=` by field-tuple comparison. Useful for sortable records; skip when equality is enough.
+<RunnableCode title="__add__, __mul__, __rmul__, __iter__, __len__, __eq__, __hash__" code={dunderCode} />
 
-    Every "config" object in modern Python should be a `@dataclass`. Every "record" you'd otherwise write with a `dict[str, Any]` should be a `@dataclass`. HuggingFace's `TrainingArguments`, Pydantic's `BaseModel`, PyTorch Lightning's `TrainerArgs` — all essentially dataclasses or supersets of them.
+The pattern repeats endlessly: **pick a piece of syntax you want, look up its dunder, add a method with that name.** `+` → `__add__` (and `__rmul__`/`__radd__` for when your object is on the *right*), `for x in obj` → `__iter__`, `len(obj)` → `__len__`, `obj[k]` → `__getitem__`, `with obj:` → `__enter__`/`__exit__`, `obj()` → `__call__` (which is how `model(batch)` runs a PyTorch forward pass). That's *all* of operator overloading — no declarations, just method names.
 
-  </Angle>
+Two rules when hand-writing dunders:
 
-  <Angle type="pitfall" title="`field()` — factories for mutable defaults">
-    <RunnableCode title="field(default_factory=list) and other tricks" code={dataclassFieldsCode} />
+- **`__eq__` and `__hash__` must agree**: if `a == b`, then `hash(a) == hash(b)`. Override `__eq__` alone and Python disables hashing on your class. `@dataclass(frozen=True)` handles this; by hand, you must remember (`__hash__ = hash(self.xs)`-style, from the same fields `__eq__` compares).
+- **`__repr__` is for developers** (unambiguous, ideally a reconstructor string like `Vector(1, 2, 3)`); `__str__` is for `print()` and may be prettier. Define `__repr__` first — `str()` falls back to it.
 
-    The classic Python bug — mutable defaults shared across instances — is even more insidious inside dataclasses, because you might think `@dataclass` handles it. It doesn't (fully): Python actually raises a `ValueError` if you write `metrics: list[float] = []` inside a dataclass. The fix is `field(default_factory=list)` — this tells the generated `__init__` to *call* the factory once per instance, giving each a fresh empty list.
+## Composition over inheritance
 
-    `field(...)` also has other useful knobs: `repr=False` hides a field from the auto-generated `__repr__` (useful for verbose internal caches), `compare=False` excludes a field from `__eq__` / `__hash__`, `init=False` prevents it from appearing in `__init__` (useful for fields computed in `__post_init__`), and `kw_only=True` (3.10+) makes it keyword-only in the generated `__init__`.
+<RunnableCode title="a class that owns its dependencies, not one that inherits their behaviors" code={compositionCode} />
 
-    Once you know these three or four idioms, you have all the dataclass machinery you'll ever need.
+The biggest design taste in modern Python: instead of `class GPUSampler(Sampler, GPUMixin, LoggingMixin)` — three parents, method resolution by C3 linearization, behaviors bleeding across the hierarchy — write a class that *has-a* logger and *has-a* model. Three wins:
 
-  </Angle>
+1. **Readability.** `run.logger.info(...)` says where logging goes; `self.info(...)` from a mixin makes you trace the MRO.
+2. **Testability.** Pass fakes in: `TrainingRun(model=ConstantPredictor(0.5), logger=FakeLogger())` — fully testable, no mocking framework.
+3. **Flexibility.** Reconfigure at runtime (`run.logger = FileLogger(...)`); inheritance is fixed at class-creation time.
 
-  <Angle type="contract" title="`Protocol` — structural, not nominal, typing">
-    <RunnableCode title="duck typing that a type checker can verify" code={protocolCode} />
+This is how real ML libraries are shaped: `Adam(model.parameters(), lr=1e-3)` composes parameters with an optimizer rather than inheriting from Model; `Trainer(model=..., args=..., train_dataset=...)` is pure composition. Inheritance isn't evil — it's right for true *is-a* relationships (`SGDMomentum(SGD)`) — but if you're inheriting just to share code, a composed object or a plain function is cleaner.
 
-    In Java, if a function accepts a `HasLen` interface, only classes that *inherit from* `HasLen` are accepted. Python's `Protocol` takes the opposite approach: any class that *has* the methods `HasLen` declares is accepted — even classes you didn't write, even classes from libraries you can't modify. This is what makes `sklearn.pipeline.Pipeline` work with your custom estimator without you having to inherit from `sklearn.base.BaseEstimator` — as long as your class has `.fit()`, `.predict()`, and (for classifiers) `.predict_proba()` in the right shape, it counts.
-
-    Two ways to use `Protocol` in practice:
-
-    - **As a type hint.** `def print_length(x: HasLen):` tells mypy/pyright to accept anything with `__len__`. Static-only; no runtime overhead.
-    - **As a runtime checker.** Decorate the Protocol with `@runtime_checkable`, and `isinstance(obj, HasLen)` will inspect the object's methods at runtime. Slower and coarser than static checks (only checks *presence*, not signature/types), but useful for dispatch tables and adapters.
-
-    The rule: **use `Protocol` for open contracts anyone can satisfy** (the "callable that takes a float returns a float" pattern). **Use `ABC` (abstract base class) for closed hierarchies** where you own all the implementations and want a formal enforce-me-at-class-creation-time contract. In modern Python, Protocol is the more common choice.
-
-  </Angle>
-
-  <Angle type="runtime" title="Dunder methods — make your class feel native">
-    <RunnableCode title="__add__, __mul__, __rmul__, __iter__, __len__, __eq__, __hash__" code={dunderCode} />
-
-    The pattern in the cell is small and repeats endlessly: **identify a piece of syntax you want your class to support, look up the dunder that implements it, add a method with that name.** `+` needs `__add__` (and optionally `__radd__` for the case when your object is on the right). `*` needs `__mul__` (and `__rmul__`). `for x in obj` needs `__iter__`. `len(obj)` needs `__len__`. `obj[k]` needs `__getitem__`. `obj[k] = v` needs `__setitem__`. `with obj:` needs `__enter__` and `__exit__`. `obj()` (calling like a function) needs `__call__`.
-
-    That is *all* of "operator overloading." No `operator` keyword, no `overload` declaration — just a specifically-named method. Once you implement a few of them consistently (like the `Vector` above), your custom class becomes a first-class citizen of Python's built-ins: it can be summed, iterated, hashed, printed, and compared with idiomatic syntax.
-
-    The **`__eq__` / `__hash__` consistency rule** is critical: if `a == b`, then `hash(a) == hash(b)`. Override `__eq__` without also handling `__hash__` and Python will *disable* `__hash__` on your class — instances become unhashable. `@dataclass(frozen=True)` handles this correctly; when you write dunders by hand, you must remember it.
-
-  </Angle>
-
-  <Angle type="taste" title="Composition over inheritance — the design taste that saves you">
-    <RunnableCode title="a class that owns its dependencies, not one that inherits their behaviors" code={compositionCode} />
-
-    The single biggest OOP design taste, and the one that separates modern Python from 2005-era Python: **prefer composition over inheritance**. Instead of `class GPU_Sampler(Sampler, GPUMixin, LoggingMixin):` — a class inheriting from three parents, with method resolution order determined by C3 linearization, and behaviors bleeding across the hierarchy — write `class TrainingRun:` that *has-a* logger, *has-a* model, *has-a* optimizer.
-
-    Three big wins:
-
-    1. **Readability.** `run.logger.info(...)` says exactly where the logging goes. `self.info(...)` from a mixin is ambiguous — you have to trace the MRO to find the source.
-    2. **Testability.** Composition means you can pass in test-only fakes: `TrainingRun(model=ConstantPredictor(0.5), logger=FakeLogger())` gives you a fully-testable object with no mocking framework. With inheritance-based mixins, faking a "logging capability" often means monkey-patching or subclassing again.
-    3. **Flexibility.** Composition can be reconfigured at runtime (`run.logger = FileLogger("out.log")`); inheritance is fixed at class-creation time. In ML pipelines this matters — swapping optimizers, changing loggers, hot-swapping data loaders — all easy with composition.
-
-    Real ML libraries lean this way. PyTorch's `torch.optim.Adam(model.parameters(), lr=1e-3)` composes a model's parameters with an optimizer, rather than making `Adam` inherit from `Model`. HuggingFace's `Trainer(model=..., args=..., train_dataset=...)` is pure composition. When you see a Python repo with three-level-deep inheritance hierarchies, it's usually a code smell — either "translated from Java" or "younger design."
-
-  </Angle>
-
-</Angles>
-
-<Convergence>
-
-Three tools, one goal: **make objects that other Python code understands without needing to be taught.** `@dataclass` handles value shapes with zero boilerplate. `Protocol` describes behavior shapes without forcing inheritance. Dunder methods wire your class into Python's operators and built-ins. And **composition** ties them together — a small class that holds a few well-typed collaborators and does one thing well. Together they let you build APIs that read as if they belonged to the standard library — which is exactly the effect that PyTorch, HuggingFace, and scikit-learn achieve.
-
-</Convergence>
-
-<Derivation title="What `@dataclass` actually generates">
-
-The `@dataclass` decorator inspects your class body and generates methods based on the annotated fields. Here is what it does, step by step. Trace it once and the whole tool stops being magical.
-
-<Step n={1} math={<span>Read the class body and collect all fields with type annotations, in order.</span>}>
-For `Point(x: float, y: float, label: str = "?")`, that's three fields: `x`, `y`, `label`. Their annotations are used only to know *what* the fields are called; the types themselves aren't enforced at runtime (they're checked by mypy/pyright, remember). Defaults are recorded per field.
-</Step>
-
-<Step n={2} math={<span>Generate <code>__init__</code> with one parameter per field, in the same order, honoring defaults.</span>}>
-The generated `__init__(self, x: float, y: float, label: str = "?"):` sets `self.x = x`, `self.y = y`, `self.label = label`. That's it. This is why writing `p = Point(1, 2, "origin-ish")` works — Python is invoking the generated `__init__`.
-</Step>
-
-<Step n={3} math={<span>Generate <code>__repr__</code> that formats the class name and every field.</span>}>
-Returns something like `"Point(x=1, y=2, label='origin-ish')"`. Good `__repr__` is one of the most under-appreciated pieces of Python — it's what makes debugging bearable, because when you print an instance, you see its full shape.
-</Step>
-
-<Step n={4} math={<span>Generate <code>__eq__</code> that compares field tuples.</span>}>
-`(self.x, self.y, self.label) == (other.x, other.y, other.label)`. This gives you *equality by value*, which is what a Point should have. Without this, `Point(1, 2) == Point(1, 2)` would be `False` (comparing memory addresses).
-</Step>
-
-<Step n={5} math={<span>If <code>frozen=True</code>, override <code>__setattr__</code> to raise, and generate <code>__hash__</code>.</span>}>
-Frozen instances raise `FrozenInstanceError` on any attribute assignment. Because the state can't change, hashing is now safe — Python auto-generates `__hash__` from the field tuple. Non-frozen dataclasses have `__hash__ = None` by default (because their values can change, hashing them would break sets/dicts).
-</Step>
-
-<Step n={6} math={<span>If <code>slots=True</code>, replace the class with a rebuilt version that has <code>__slots__ = ("x", "y", "label")</code>.</span>}>
-This is a somewhat elaborate dance because `__slots__` must be set at class-creation time, but `@dataclass` runs after the class exists. The mechanism: Python 3.10+ dataclass with `slots=True` builds a fresh class with the same name and `__slots__` set, replacing the original. The effect: instances have no per-instance `__dict__`, saving memory and catching typos.
-</Step>
-
-<Step n={7} math={<span>Optionally generate <code>__lt__</code>, <code>__le__</code>, <code>__gt__</code>, <code>__ge__</code> if <code>order=True</code>.</span>}>
-Comparison methods compare field tuples in order. So `Point(1, 2) < Point(1, 3)` is true (`(1,2) < (1,3)` tuple-wise). Useful for sortable records; often unnecessary.
-</Step>
-
-</Derivation>
-
-<Example title="Composition and protocols in an ML mini-project">
+## Putting it together — a benchmark harness
 
 <RunnableCode title="a benchmark harness — protocol-typed strategy, composed by field" code={modelZooCode} />
 
-Read the cell as a design showcase:
+All three tools in one design: `Regressor` is a **Protocol** (behavioral contract, no inheritance); `MeanRegressor`/`MedianRegressor` implement it without declaring anything; `Benchmark` is a **dataclass** holding a name and a `field(default_factory=dict)` of scores; `bench.score(model, X, y)` accepts anything protocol-compatible — including a real `sklearn.linear_model.LinearRegression`, unchanged.
 
-- **`Regressor` is a Protocol.** It defines a behavioral contract (`fit`, `predict`) with no inheritance. Any class that has those two methods can be passed anywhere a `Regressor` is expected.
-- **`MeanRegressor` and `MedianRegressor` don't inherit from anything.** They just implement the protocol. This means they'd also work as scikit-learn estimators (which use the same `.fit`/`.predict` shape), as JAX-style trainable objects, as ONNX exporters — all without ever declaring "I am a Regressor."
-- **`Benchmark` is a `@dataclass`.** It holds a name and a dict of scores. `field(default_factory=dict)` gives each Benchmark instance its own scores dictionary.
-- **`bench.score(model, X, y)` accepts anything protocol-compatible.** Pass in a `MeanRegressor`, get one score. Pass in a real `sklearn.linear_model.LinearRegression`, get another. The harness doesn't care.
-
-The output shows the actual difference between mean and median regressors: the mean is dragged toward the 100.0 outlier, the median is robust to it. This is a real ML lesson, packaged in a design pattern you can extend. Add `RidgeRegressor`, `NeuralRegressor`, `RandomForestRegressor` — all under 20 lines each — and the harness works with each of them, unchanged.
-
-**This is what modern OOP-in-Python looks like: small classes, protocol-typed collaborators, dataclass-driven configuration, composition holding it all together.**
-
-</Example>
-
-<Nuance>
-
-**Don't `@dataclass` behavior-heavy classes.** If your class is 90% methods and 10% state, a plain class is clearer. Reserve `@dataclass` for record-like objects where the fields are the point.
-
-**Class-level mutable defaults are a bug generator.** `class Cfg: items = []` — `items` is *shared across all instances*. Mutating it on one instance mutates it on all. Assign in `__init__` for per-instance state, or use `field(default_factory=list)` on a dataclass. Python 3.11+ dataclasses raise a `ValueError` if you write a mutable default literally in the class body, so the fix is not optional.
-
-**`Protocol` vs abstract base class (`ABC`).** ABCs (`from abc import ABC, abstractmethod`) enforce inheritance — subclasses that don't implement all `@abstractmethod`s can't be instantiated. Protocols check shape — anything shaped right satisfies. Use ABCs when you own all the implementations and want a strict "you MUST subclass this" contract. Use Protocols for open contracts anyone can satisfy. In modern Python codebases, Protocols are more common.
-
-**`__slots__` limitations.** No `__dict__` means you can't dynamically add attributes at runtime (usually a good thing), and mixing `__slots__` with multi-inheritance where some parents don't use slots is subtle. Great default for value classes; use with care on classes intended to be extended.
-
-**`__init__` versus `__new__`.** `__init__` initializes an already-created instance. `__new__` *creates* the instance. Almost always you override `__init__`. `__new__` is for exotic cases: singletons, immutable types with custom construction, metaclass tricks.
-
-**`__post_init__` on dataclasses** runs right after the auto-generated `__init__`. Useful for validation (`if self.age < 0: raise ValueError`) or derived fields (`self.total = self.subtotal + self.tax`). Use it for anything you'd want to happen "after the fields are set."
-
-**Class hierarchies aren't evil, they're just often overkill.** Inheritance is the right tool when you're modeling a real *is-a* relationship (`class SGDMomentum(SGD)` where SGDMomentum truly extends SGD's behavior). It's the wrong tool when you're just trying to share code — for that, prefer a helper function or a composed object.
-
-**`__str__` vs `__repr__`.** `__repr__` should return an unambiguous representation, usually a reconstructor string (`Point(x=1, y=2)`). `__str__` (used by `print()`) can be prettier (`"(1, 2)"`). If you only define one, define `__repr__` — `str()` falls back to it.
-
-**Mixins are the middle ground.** A mixin is a small class designed to be inherited from, providing one specific capability (`LoggingMixin`, `SerializableMixin`). Used sparingly, they're fine. Used everywhere, they produce hard-to-follow class diagrams. Rule of thumb: at most one mixin per class.
-
-</Nuance>
+The output also teaches a real ML lesson: the mean regressor's error is dragged up by the `100.0` outlier; the median regressor barely notices. Robust statistics, demonstrated by a design pattern.
 
 <RealWorldML title="A model registry with protocol dispatch">
 
-Here's a scenario that shows up in every serious ML platform: a **model registry** that can hold many kinds of models, load them by name, and serve them through a uniform interface. The trick is that different model types (a scikit-learn LinearRegression, an XGBoost booster, a PyTorch Module) have wildly different classes but a *common surface*: `predict(X) -> y`. Protocol + dataclass + composition solve it cleanly.
+Every serious ML platform has a **model registry**: many kinds of models (sklearn, XGBoost, PyTorch — wildly different classes), loaded by name, served through one uniform surface: `predict(X) -> y`. Protocol + dataclass + composition solve it cleanly.
 
 <RunnableCode title="a tiny model registry using Protocol dispatch" code={`from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
@@ -458,108 +350,53 @@ print("registered:", reg.list_models())
 print("mean-3:", reg.predict("mean-3", [[1,2], [3,4]]))
 print("first :", reg.predict("first",  [[1,2], [3,4]]))`} />
 
-**Line by line, how this is a genuine production pattern:**
+**Line by line:**
 
-1. `@runtime_checkable class Predictor(Protocol)` declares the smallest possible contract: any class with a `.predict(X)` method counts. No inheritance required.
-2. `@dataclass class ModelRegistry` gives us auto-generated `__init__`, `__repr__`, `__eq__` with zero effort. The `field(default_factory=dict)` avoids the "shared mutable default" bug.
-3. `register(...)` uses `isinstance(model, Predictor)` — a runtime protocol check — to fail fast if the caller passes something that doesn't have `.predict`. Alternative: skip the check and let the `AttributeError` bubble up at predict time. Both are defensible; the former gives clearer error messages.
-4. `MeanModel` and `FirstFeatureModel` are utterly unrelated by inheritance. Both work because they both have `.predict(X)`. Add a `sklearn.linear_model.LinearRegression` and it works too — same interface.
+1. `@runtime_checkable class Predictor(Protocol)` declares the smallest possible contract: anything with `.predict(X)` counts.
+2. `@dataclass class ModelRegistry` — free `__init__`/`__repr__`, and `field(default_factory=dict)` dodges the shared-mutable-default bug.
+3. `register(...)` uses `isinstance(model, Predictor)` to fail fast with a clear error instead of an `AttributeError` deep inside predict-time.
+4. `MeanModel` and `FirstFeatureModel` share no ancestry — both work because both have `.predict`. A real sklearn model drops in identically.
 
-**Where you'll see this in real ML platforms:**
-
-- **MLflow** and **Weights & Biases** model registries use the same shape: a protocol-typed contract, a dict of named models, dispatch by name.
-- **HuggingFace's `pipeline("...", model="...")`** looks up the model by name and returns a callable. Predictor protocol in disguise.
-- **Ray Serve's `serve.deployment`** wraps any Python class with a `.predict` method into a distributed service. Protocol matching all the way down.
-- **FastAPI dependency injection** works this way too — declare the *protocol* your handler needs, register a concrete implementation at app startup, and the framework injects it.
-
-Once you see one protocol-typed registry, they're everywhere. That's the modern-Python style.
+MLflow's registry, HuggingFace's `pipeline("...", model="...")`, and Ray Serve deployments are this exact shape: protocol contract, dict of named models, dispatch by name.
 
 </RealWorldML>
 
-<CodeItYourself
-  title="Design a Money class"
-  spec={<>Build a <code>@dataclass(frozen=True)</code> called <code>Money(amount, currency)</code>. Implement <code>__add__</code> so <code>Money(10, "USD") + Money(5, "USD") == Money(15, "USD")</code>, but raises <code>ValueError</code> if currencies differ. Make it hashable so it can be a dict key. Add a <code>__mul__</code> that scales by an int/float (<code>Money(10, "USD") * 3 == Money(30, "USD")</code>). Ensure it also handles <code>3 * Money(10, "USD")</code> with <code>__rmul__</code>.</>}
-  hints={[
-    "frozen=True gives you __hash__ automatically — no need to write it.",
-    "In __add__, check `self.currency == other.currency` first. Return NotImplemented if `other` isn't a Money instance (Python will then try the reflected operation).",
-    "Return `type(self)(...)` so subclasses (if any) get the right class back.",
-    "__rmul__ lets `3 * money` work by delegating to `money.__mul__(3)`."
+<StudyDepth
+  intro={<>Modern Python OOP is a handful of load-bearing tools: <code>@dataclass</code>, <code>Protocol</code>, composition. Drill those; the exhaustive dunder catalog and MRO archaeology are look-up-when-needed material.</>}
+  drill={[
+    <><code>@dataclass(frozen=True, slots=True)</code> for every config/record object</>,
+    <><code>field(default_factory=list)</code> for mutable defaults</>,
+    <><code>Protocol</code> for structural typing (duck typing that mypy checks)</>,
+    <>Composition over inheritance — <em>has-a</em> beats <em>is-a</em></>,
   ]}
-  solution={<CodeBlock language="python" title="Money" code={`from dataclasses import dataclass
-
-@dataclass(frozen=True, slots=True)
-class Money:
-    amount: float
-    currency: str
-
-    def __add__(self, other):
-        if not isinstance(other, Money):
-            return NotImplemented       # let Python try other.__radd__
-        if self.currency != other.currency:
-            raise ValueError(f"currency mismatch: {self.currency} vs {other.currency}")
-        return type(self)(self.amount + other.amount, self.currency)
-
-    def __mul__(self, k):
-        if not isinstance(k, (int, float)):
-            return NotImplemented
-        return type(self)(self.amount * k, self.currency)
-
-    def __rmul__(self, k):
-        return self.__mul__(k)
-
-a = Money(10, "USD")
-b = Money(5, "USD")
-print(a + b)                      # Money(amount=15, currency='USD')
-print(a * 3)                      # Money(amount=30, currency='USD')
-print(3 * a)                      # Money(amount=30, currency='USD')
-
-wallet = {Money(1, "USD"): "a", Money(1, "EUR"): "b"}
-print(wallet)                     # both keys present, distinct
-
-# and the error case
-try:
-    Money(10, "USD") + Money(5, "EUR")
-except ValueError as e:
-    print("caught:", e)`} />}
+  skim={[
+    <>Every dunder beyond <code>__init__</code>, <code>__repr__</code>, <code>__eq__</code>, <code>__len__</code>, <code>__iter__</code></>,
+    <>C3 MRO — matters if you inherit from three classes, which you shouldn&apos;t</>,
+    <>ABC vs Protocol nuances — <code>Protocol</code> is almost always the right modern choice</>,
+    <>Every <code>field(...)</code> knob — you&apos;ll use <code>default_factory</code>, look up the rest</>,
+  ]}
 />
 
-<LifeLesson title="Composition beats inheritance — a principle for building anything durable">
+<CodeItYourself title="Three drills — a value object, a duck, a registry">
 
-The single most transferable lesson in this chapter isn't syntactic. It's the **design taste** underneath "prefer composition over inheritance." The observation is that when you tie two pieces of a system together by making one *a special kind of* the other (inheritance), you fuse their fates: changing the parent affects every child, and swapping the child for a different implementation gets harder over time. When you tie them together by making one *hold* the other (composition), you keep options open — you can hand-swap the collaborator, mock it in tests, upgrade it without touching the surrounding code.
+**Drill 1 — Money.** Build `@dataclass(frozen=True, slots=True) Money(amount, currency)`. Implement `__add__` so same-currency Money adds and mismatched currencies raise `ValueError`; return `NotImplemented` (not raise!) when `other` isn't Money so Python can try the reflected operation. Add `__mul__` and `__rmul__` for `Money(10, "USD") * 3` and `3 * Money(10, "USD")`. Confirm it works as a dict key — `frozen=True` gave you `__hash__` for free.
 
-The pattern is not just a Python idiom. It's how great teams organize work, how good habits persist, how thoughtful products get built. In organizational design, this is the difference between "these two teams merged" (inheritance — you now inherit each other's obligations forever) versus "these two teams *collaborate* on a shared interface" (composition — clear ownership, clean lines, changeable arrangements). The composed version is durable. The inherited one accumulates baggage.
+**Drill 2 — satisfy a Protocol you didn't inherit.** Define `@runtime_checkable class Sized(Protocol)` requiring `__len__`, then write a `Playlist` class holding a list of song titles that satisfies it *without inheriting anything*. Verify with `isinstance(Playlist(...), Sized)` and pass it to a function typed `def describe(x: Sized)`.
 
-Same in personal systems. When your morning routine is *inherited* from an old identity ("I do the same thing my dad did"), it's brittle — one shift and the whole scaffold cracks. When it's *composed* — of specific practices, each independently swappable ("today I'll journal, meditate, and walk") — you can hot-swap one when it stops serving you without losing the whole. The routine becomes anti-fragile.
+**Drill 3 — extend the registry.** Take the `ModelRegistry` from this chapter and add `unregister(name)`, `alias(new_name, existing_name)` (two names, one model object), and a `__contains__` so `"mean-3" in reg` works. Confirm aliasing doesn't copy the model — both names hit the same object (`is` check).
 
-The tell in code is the same as the tell in life: when you find yourself writing "well, I'll just extend / just add another parent / just add another layer to inherit from" — pause. Ask instead: *what small, well-defined thing can I own and swap?* That's the composition move. It requires slightly more design up front and pays back forever. This chapter's `@dataclass + Protocol + composition` triad is a small language for expressing it in Python. The taste generalizes far beyond.
+</CodeItYourself>
 
-</LifeLesson>
+<Summary>
 
-<MLConnection>
+- **`@dataclass(frozen=True, slots=True)`** is the default for value objects — free `__init__`, `__repr__`, `__eq__`, `__hash__`; slots save memory and catch typos; `__post_init__` for validation.
+- **Mutable defaults need `field(default_factory=list)`** — a literal `[]` is shared (and rejected by 3.11+). In plain classes, `class C: items = []` is the same bug with no guardrail: class-level = shared by every instance.
+- **`Protocol` = structural typing**: describe what an object should *do*, not what it inherits. `@runtime_checkable` enables `isinstance` dispatch; `ABC` only for closed hierarchies you fully own.
+- **Dunders wire your class into the language**: `__add__`/`__rmul__`, `__iter__`, `__len__`, `__getitem__`, `__call__`. Keep `__eq__` and `__hash__` consistent or sets break.
+- **Composition beats inheritance**: pass collaborators into `__init__`, hold them as fields — easier to read, test with fakes, and swap at runtime.
+- **In ML**: configs = dataclasses, model interfaces = protocols, trainers/optimizers = composition. Read PyTorch and HuggingFace with this lens and the source opens up.
 
-Modern ML infrastructure runs on the exact three-tool kit this chapter introduces:
-
-- **Configs are dataclasses.** `TrainingArguments` in HuggingFace, `TrainerArgs` in PyTorch Lightning, `sklearn.pipeline.Pipeline`'s parameter dict — all backed by dataclass-shaped structures. Pydantic `BaseModel` is a *dataclass superset* with runtime validation.
-- **Model interfaces are protocols.** scikit-learn's `.fit`/`.predict`/`.score`/`.transform` isn't enforced by a base class — anything shaped right works. HuggingFace's `PreTrainedModel` is nominally a class hierarchy but the *actual* dispatch (`from_pretrained` picks the right class based on config) treats it protocol-style.
-- **Optimizers are composed with models.** `Adam(model.parameters(), lr=1e-3)` — Adam holds a reference to the parameters, doesn't inherit from Model. This is why the same optimizer works on any nn.Module without changes.
-- **Data loaders are dunder-implementing classes.** `torch.utils.data.Dataset` requires `__len__` and `__getitem__`. `IterableDataset` requires `__iter__`. Nothing else. Dunder methods are the entire interface.
-- **Custom PyTorch Modules use dunders too.** `__call__` is what makes `output = model(input)` work — the module's forward pass hides behind Python's call operator.
-- **Registries dispatch by protocol.** MLflow's model registry, Ray Serve's deployment API, LangChain's `Runnable` interface — all use "does this object have the required method?" checks rather than inheritance.
-- **Config-driven experiments in Hydra and OmegaConf** manage nested dataclasses with CLI overrides. Every research experiment gets a well-typed config object with defaults, overrides, and pretty printing — because it's a dataclass.
-
-Understand `@dataclass + Protocol + dunder + composition` and you can read the source of almost any modern ML framework without stopping.
-
-</MLConnection>
-
-<Summary bullets={[
-  "@dataclass(frozen=True, slots=True) is the default for value objects — free __init__, __repr__, __eq__, __hash__.",
-  "Mutable defaults need `field(default_factory=list)`, not `= []`. Python 3.11+ enforces this.",
-  "Protocol = structural typing. Describe what an object should DO, not what it should INHERIT.",
-  "Use @runtime_checkable Protocol for isinstance() dispatch; plain Protocol for static-only checks.",
-  "Dunder methods (__add__, __iter__, __len__, __eq__, __hash__) make your class cooperate with Python operators and builtins.",
-  "Composition beats inheritance — pass collaborators in via __init__, hold them as fields.",
-  "In ML: configs = dataclasses, model interfaces = protocols, optimizers/trainers = composition. Read the frameworks with this lens."
-]} />
+</Summary>
 
 <ProblemSet
   problems={[
@@ -590,24 +427,6 @@ class Run:
       answer: <>Because `[]` is mutable and would be shared across all `Run` instances (append to one instance's metrics, all instances see it — the classic bug). Python 3.11+ dataclasses reject mutable defaults with a `ValueError` at class-creation time. Fix: <code>metrics: list = field(default_factory=list)</code>.</>
     },
     {
-      difficulty: "easy",
-      q: <>Define a <code>Protocol</code> called <code>Named</code> that requires a <code>.name</code> attribute of type <code>str</code>, and a function <code>greet(x: Named)</code> that prints "hi, x.name".</>,
-      hint: <>Protocols can require attributes too, not just methods.</>,
-      answer: <><CodeBlock language="python" title="Named" code={`from typing import Protocol
-
-class Named(Protocol):
-    name: str
-
-def greet(x: Named) -> None:
-    print(f"hi, {x.name}")
-
-class Cat:
-    def __init__(self, name):
-        self.name = name
-
-greet(Cat("felix"))     # hi, felix`} /> Protocols with data attributes work exactly like protocols with methods — the type checker looks for the required name on the instance.</>
-    },
-    {
       difficulty: "medium",
       q: <>Design a <code>Currency</code> hierarchy where <code>USD</code>, <code>EUR</code>, <code>JPY</code> each know how to <code>.format(amount)</code>. Two ways: (1) inheritance with an ABC, (2) Protocol. Sketch both and explain when each is appropriate.</>,
       hint: <>ABC forces the hierarchy; Protocol allows anyone to satisfy.</>,
@@ -635,31 +454,6 @@ class USD:              # no base class needed
 class EUR:
     def format(self, amount):
         return f"{amount:,.2f} €"`} /> Use <b>ABC</b> when you own all the currencies and want a strict enforce-at-class-definition contract. Use <b>Protocol</b> when third-party classes or user-provided classes might implement the interface, and you don't want to force them to inherit from anything. In a library, Protocol is usually the friendlier choice.</>
-    },
-    {
-      difficulty: "medium",
-      q: <>Write a <code>Vector</code> class that supports <code>+, -, *k, ==, len</code>. Make it immutable (assignments to its fields should raise) using <code>@dataclass(frozen=True)</code>. Then confirm <code>Vector((1,2,3)) + Vector((4,5,6)) == Vector((5,7,9))</code>.</>,
-      hint: <>frozen=True + __add__, __sub__, __mul__, __len__.</>,
-      answer: <><CodeBlock language="python" title="Vector" code={`from dataclasses import dataclass
-
-@dataclass(frozen=True, slots=True)
-class Vector:
-    xs: tuple
-
-    def __add__(self, other):
-        return Vector(tuple(a + b for a, b in zip(self.xs, other.xs)))
-    def __sub__(self, other):
-        return Vector(tuple(a - b for a, b in zip(self.xs, other.xs)))
-    def __mul__(self, k):
-        return Vector(tuple(a * k for a in self.xs))
-    __rmul__ = __mul__
-    def __len__(self):
-        return len(self.xs)
-
-v1 = Vector((1, 2, 3))
-v2 = Vector((4, 5, 6))
-print(v1 + v2)                       # Vector(xs=(5, 7, 9))
-print(v1 + v2 == Vector((5, 7, 9)))  # True — __eq__ from dataclass`} /> Using tuples (not lists) for `xs` keeps the Vector hashable when frozen. `__rmul__ = __mul__` handles `3 * v`. Everything else is stock.</>
     },
     {
       difficulty: "medium",
@@ -773,3 +567,5 @@ print(len(c), c["a"], list(c), "b" in c)   # 2 1 ['a', 'b'] True`} /> By impleme
     explanation: <>Prefer holding a reference to a collaborator (composition) over extending a class hierarchy (inheritance). Composition is easier to test, easier to swap, and reads more clearly.</>
   }
 ]} />
+
+<MarkDone slug="foundations/python-craft/classes-protocols-dataclasses" title="Classes, protocols & dataclasses" />
