@@ -200,6 +200,111 @@ print("final loss history:", [round(h, 3) for h in history])`;
   { href: "/learn/foundations/python-craft/control-flow-data-model", label: "Control flow & the data model", blurb: "Truthiness, iteration protocol, dunders — the foundation this chapter builds on." },
 ]} />
 
+<Motivation title="The one chapter that unlocks decorators, callbacks, and training loops">
+
+If Python has a *master idea*, it is this: **functions are first-class values**. Assign them to variables, put them in dicts, pass them to other functions, return them from other functions. Decorators are functions that take a function and return a modified one. Callbacks — the `on_epoch_end` you register with a trainer, the `key=len` you hand to `sorted`, the loss function you plug into a training loop — are functions passed around like data. Closures are how a returned function keeps private state, which is what makes `functools.lru_cache` and half the standard library work.
+
+Once functions-as-values feels obvious, 80% of what looks "advanced" in Python stops being advanced — and `torch.optim.Adam`, `sklearn.make_pipeline`, `datasets.map`, and `transformers.Trainer` become readable: every one is functions calling functions holding functions.
+
+</Motivation>
+
+<Intuition title="Three ideas that make Python callable magic">
+
+1. **Functions are objects.** `def foo(): ...` is essentially `foo = <function object>`. You can `bar = foo`, store functions in containers, pass them anywhere. That's *first-class functions*.
+
+2. **Scope resolution follows LEGB.** Reading a name searches **L**ocal → **E**nclosing → **G**lobal → **B**uilt-in, first hit wins. Assignment is different: it writes to the current *local* scope unless you say `nonlocal` or `global`.
+
+3. **A closure is a function that remembers.** When an inner function references a variable from its enclosing scope, Python keeps the *cell* containing that variable alive as long as the inner function lives. Each `make_counter()` call gets a fresh cell; two counters never share state.
+
+Every "advanced" Python trick you'll meet is one, two, or all three of these in a costume.
+
+</Intuition>
+
+## Functions as values — dispatch, callback, factory
+
+<RunnableCode title="functions as data — the strategy pattern in one line" code={higherOrderCode} />
+
+Read the cell three ways. **Storage:** functions live in a dict keyed by symbol — behavior picked at runtime, the "strategy pattern" in one line. **Arguments:** `sorted(words, key=len)` passes the builtin `len` as a value; `sorted` calls it per element to decide order. **Return values:** `multiplier(2)` returns a fresh function that has captured `factor=2` — a factory. Dispatch, callback, factory: every serious codebase is built from these three moves.
+
+One note on `lambda`: it's just a short function literal — `lambda x: x*2` is `def <anon>(x): return x*2`. Use it for one-liners passed as arguments; anything longer deserves a named `def`, which is equally fast and vastly more debuggable.
+
+## The five kinds of function arguments
+
+<RunnableCode title="positional / default / *args / keyword-only / **kwargs" code={argsCode} />
+
+Read a signature as a menu of parameter positions:
+
+- **Positional** (`name`): required, in order.
+- **Default** (`greeting="Hello"`): optional; passable by position or name. Beware **mutable defaults** — `out=[]` is evaluated once at definition time and shared across calls; use `out=None` and assign inside.
+- **`*extras`**: captures extra positional arguments into a tuple.
+- **Keyword-only** (`formal=False` *after* `*` or `*args`): must be passed by name — the modern way to keep call sites readable (`greet("Sarath", formal=True)`, never `greet("Sarath", True)`).
+- **`**kwargs`**: captures leftover keyword arguments as a dict.
+
+The markers `/` and `*` split the menu: `def f(a, b, /, c, *, d):` — `a, b` positional-only, `c` either, `d` keyword-only. Real APIs use this deliberately: PyTorch's `Adam(params, lr=1e-3, ...)` makes hyperparameters keyword-only so users can't silently pass them in the wrong order, and FastAPI reads your signature to parse the URL. The signature is a *contract* that tools read.
+
+## LEGB — how Python finds a name
+
+<RunnableCode title="Local / Enclosing / Global / Built-in — step by step" code={legbCode} />
+
+LEGB is a lookup algorithm: to *read* a name, Python walks outward — current function, enclosing functions, module globals, built-ins — and stops at the first hit. To *write* a name, the rule flips: assignment creates or updates a **local**, unless declared `nonlocal` (write to enclosing) or `global` (write to module).
+
+**The asymmetry is the classic gotcha.** `x = x + 1` inside a function makes `x` local *for the whole function body* — so the read on the right-hand side hits an unassigned local and raises `UnboundLocalError`, even though a global `x` exists. If you truly want to rebind an outer name, say so with `nonlocal`/`global` — but reach for them rarely. Returning a value and re-assigning outside is cleaner, and mutable containers dodge the need entirely: with `counts = {"n": 0}` outside, `counts["n"] += 1` inside mutates *contents* without rebinding the name — no declaration required.
+
+## Closures — functions with private state
+
+<RunnableCode title="counter closure — separate state per instance" code={closureCode} />
+
+Each `make_counter` call creates a fresh `count` and a fresh `tick`. Because `tick` references `count`, Python allocates a **cell** for it and stores a reference in `tick.__closure__`. When `make_counter` returns, its frame is gone — but the cell survives, because `tick` still points at it. `a` and `b` were built by separate calls, so they own separate cells: incrementing one never touches the other. This is the functional way to do what OOP does with instance variables, and it's exactly what powers `functools.lru_cache` and every counter/timer/rate-limiter decorator.
+
+<Recall term="Cell">
+
+A **cell** is Python's implementation of a captured variable. When a nested function references an enclosing name, both functions share one cell object holding the value; the cell outlives the outer function's frame. Inspect via `fn.__closure__` (a tuple of cells) and `.cell_contents`. This is why "closures capture *variables*, not values" — they capture a shared cell whose contents can change.
+
+</Recall>
+
+Why is `nonlocal count` required? Without it, `count += 1` inside `tick` would follow the write-locally rule — Python would treat `count` as a new local, and the read before assignment would raise `UnboundLocalError`. `nonlocal` redirects the write into the captured cell. (Read-only captures need no declaration.)
+
+## The late-binding trap
+
+<RunnableCode title="the [2, 2, 2] surprise and three fixes" code={closurePitfallCode} />
+
+Closures capture cells, not values — so every `lambda: i` created in the loop closes over *the same `i` cell*. By the time any lambda runs, the loop has finished and `i == 2`: hence `[2, 2, 2]`. Not a bug; a direct consequence of how cells work. Three fixes, all giving each lambda its own binding:
+
+- `lambda i=i: i` — the default `i=i` evaluates *now*, at definition time.
+- `functools.partial(fn, i)` — freezes the current value into the callable.
+- A helper `def bind(i): return lambda: i` — each call creates a fresh scope with its own cell.
+
+This trap lives in every "why do all my buttons do the same thing" question about GUI/web callback registration. Once you feel *why*, you'll spot it in code review at a glance.
+
+## Type hints — signatures tools can read
+
+<RunnableCode title="Callable, generics, PEP 695 syntax" code={typedCode} />
+
+Type hints are optional annotations with four consumers:
+
+- **Editors** — autocomplete, refactoring, go-to-definition.
+- **Static checkers** (`mypy`, `pyright`) — catch a huge class of bugs before the code runs.
+- **Frameworks at runtime** — Pydantic validates from them, FastAPI parses requests from them (via `inspect.signature`, which turns any signature into inspectable data).
+- **Not the interpreter.** `def add(x: int, y: int) -> int:` happily concatenates strings — hints are documentation, not enforcement. Need runtime enforcement? Pydantic.
+
+Modern spellings are compact and import-free: `list[T]`, `dict[K, V]`, `X | None`, and PEP 695 generics `def first[T](xs: list[T]) -> T:` (3.12+). Adopt hints from day one — a hundred-file project without them is nearly impossible to refactor safely.
+
+<RealWorldML title="A training loop with all four concepts stacked">
+
+<RunnableCode title="a mini trainer with closures, callbacks, and type hints" code={trainingLoopCode} />
+
+**Line by line, how this shows up in production ML code:**
+
+1. `make_trainer(loss_fn, on_epoch_end=...)` is a *factory* returning a customized `train` — the exact shape of `pytorch_lightning.Trainer(callbacks=[...])` and `transformers.Trainer(compute_metrics=...)`: strategies in, configured procedure out.
+2. `loss_fn: Callable[[float, float], float]` says "any function taking two floats, returning a float". The trainer doesn't care if it's squared error or cross-entropy — which is why swapping `nn.MSELoss()` for `nn.CrossEntropyLoss()` is a one-line change.
+3. `history: list[float] = []` lives in the enclosing scope and is captured by closure — every call to `train` appends to the same list. The trainer "remembers" across epochs with no class and no global. (JAX/Flax code leans on exactly this style.)
+4. `on_epoch_end` is a **callback** — a function passed in and invoked at a fixed point. `keras.callbacks.EarlyStopping` and `transformers.TrainerCallback` are the same idea: the framework owns the loop, you supply the "what to do at each checkpoint".
+5. `train_sq` and `train_ab` come from two separate `make_trainer` calls, so their closures hold different cells — two independent trainers, zero shared state.
+
+Every ML framework reduces to this shape: **first-class functions + captured configuration + call at the right moment.**
+
+</RealWorldML>
+
 <StudyDepth
   intro={<>Functions and type hints are daily-use; LEGB internals and closure-cell inspection are debugger-time. Drill the reflexes; skim the mechanics until they bite.</>}
   drill={[
@@ -216,279 +321,27 @@ print("final loss history:", [round(h, 3) for h in history])`;
   ]}
 />
 
-<Motivation title="The one chapter that unlocks decorators, callbacks, and training loops">
+<CodeItYourself title="Three drills — carry state, predict scope, defuse the trap">
 
-If Python has a *master idea*, it is this: **functions are first-class values**. They are objects, just like numbers and strings and lists. You can assign them to variables. Put them in a list. Pass them to other functions. Return them from other functions. Store them as attributes on other objects. Every consequence of that single fact fills the rest of this chapter.
+**Drill 1 — `@counter`.** Write a decorator that attaches a `.calls` attribute to the wrapped function, incremented on every call (functions are objects — `wrapper.calls = 0` is legal). Verify `fn.calls` after three calls, confirm `@wraps` preserved `fn.__name__`, then add a `.reset()` that zeroes the count.
 
-From that idea flow all of Python's most-loved features. Decorators — the `@` you'll see on every FastAPI route, every dataclass, every `torch.no_grad()` — are just functions that take a function and return a modified one. **Callbacks** — the `on_epoch_end` you register with a PyTorch trainer, the `key=len` you pass to `sorted`, the loss function you plug into a training loop — are functions being passed around like data. **Closures** — the way `make_counter` remembers `count` after `make_counter` has returned — are the mechanism that lets a returned function keep private state, which is what makes `functools.lru_cache`, `contextvars`, and half of the standard library work.
+**Drill 2 — the LEGB prediction game.** Write a module-level `x = "global"`, an `outer` that sets `x = "enclosing"`, and three variants of `inner`: one that only reads `x`, one that assigns `x = "local"`, one that does `x += "!"` with no declaration. Predict what each prints (or raises) *before* running. The third one is the `UnboundLocalError` — explain it in one sentence.
 
-Once you *feel* that a function is a first-class citizen — that it can be assigned, returned, closed over, stored, and called later with any context you want — 80% of what looks "advanced" in Python stops being advanced. It becomes obvious. And in ML specifically, this fluency is what lets you read `pytorch.optim.Adam`, `sklearn.pipeline.make_pipeline`, `datasets.map`, and `transformers.Trainer` without frowning. Every one of them is functions calling functions holding functions.
+**Drill 3 — defuse late binding.** Build `buttons = {name: (lambda: print("clicked", name)) for name in ["save", "load", "quit"]}` — call each and watch every button claim to be `quit`. Fix it with default-argument capture, then again with `functools.partial`, and confirm all three buttons report their own name.
 
-</Motivation>
+</CodeItYourself>
 
-<Intuition title="Three ideas that make Python callable magic">
+<Summary>
 
-1. **Functions are objects.** `def foo(): ...` is essentially `foo = <function object>`. You can `bar = foo` and now `bar` is another name for the same object. You can put them in a list, a dict, a set. You can pass them to any other function as arguments. This is called *first-class functions*, and it's what makes higher-order programming possible without ceremony.
+- **Functions are objects** — assign, store, pass, return them. Dispatch tables, callbacks, and factories are all this one fact.
+- **LEGB:** reads walk Local → Enclosing → Global → Built-in; writes stay local unless `nonlocal`/`global`. `x = x + 1` with no local `x` raises `UnboundLocalError` — the asymmetry in action.
+- **Closures capture cells, not values.** The cell outlives the outer function; `nonlocal` lets the inner function write into it. Separate factory calls → separate cells → independent state.
+- **Late-binding trap:** `[lambda: i for i in range(3)]` gives `[2, 2, 2]`. Fix with `lambda i=i:`, `functools.partial`, or a binding helper function.
+- **Arguments:** positional, default (never a mutable one), `*args`, keyword-only after `*`, `**kwargs`; `/` and `*` mark position-only/keyword-only zones.
+- **Type hints** are contracts for editors, checkers, and frameworks — not enforced by the interpreter.
+- **Every trainer/optimizer/callback API** is first-class functions + captured configuration + call at the right moment.
 
-2. **Scope resolution follows LEGB.** When Python reads a name (`x`), it searches four scopes, in order: **L**ocal (this function) → **E**nclosing (the function around this one, if any) → **G**lobal (the module) → **B**uilt-in (Python's own vocabulary, like `print` and `len`). The first scope that has the name wins. Assignment is different: it creates or updates a name in the current local scope, unless you specifically say `nonlocal` or `global`.
-
-3. **A closure is a function that remembers.** When an inner function references a variable from its enclosing scope, Python doesn't just remember the *name* — it remembers the *cell* containing that variable's value, and keeps the cell alive as long as the inner function is alive. This is how `make_counter()` above works: each call creates a fresh `count` cell, and the returned `tick` function carries a reference to *its own* cell. Different counter instances have different cells; they don't share state.
-
-These three ideas — first-class functions, LEGB scope, closures — are the entire toolkit. Every "advanced" Python trick you'll see is one, two, or all three of these in a costume.
-
-</Intuition>
-
-<Recall term="First-class function">
-
-A language has *first-class functions* if functions can be assigned to variables, passed as arguments, returned from other functions, and stored in data structures — just like any other value. Python, JavaScript, Haskell, Lisp, Julia, R, and modern C++ do. Older C famously did not (function pointers exist but aren't full objects). This one language design choice enables higher-order programming: `sorted(xs, key=abs)`, `functools.reduce`, decorators, callbacks. If Python were not first-class-function, none of them would exist.
-
-</Recall>
-
-<Recall term="Scope">
-
-A **scope** is a region of code within which a name refers to a specific binding. Python has four kinds. **Local** is inside the current function. **Enclosing** is inside a directly-outer function (only exists for nested functions). **Global** is the current module's top level. **Built-in** is the names Python itself defines (`print`, `len`, `range`, `dict`, ...). When a name is read, Python searches in L→E→G→B order and stops at the first match. When a name is written (assigned to), it creates or updates in the *local* scope by default — the `nonlocal` / `global` keywords let you deliberately redirect the write to enclosing / global.
-
-</Recall>
-
-<Recall term="Cell">
-
-A **cell** is Python's internal implementation of a captured variable in a closure. When a nested function references a name from its enclosing scope, Python allocates a shared "cell" object holding that name's value, and both the outer function and the inner function reference the same cell. If the outer function returns, the cell survives as long as the inner function does. You can inspect them via `fn.__closure__` — a tuple of cells, one per captured name. This is why "closures capture variables, not values" — they capture a shared cell whose contents can change.
-
-</Recall>
-
-<Angles intro={<>Five lenses on functions in Python. Together they cover: how to accept arguments, how names resolve, what a closure really carries, the trap that catches everyone once, and how type hints turn signatures into machine-readable documentation.</>}>
-
-  <Angle type="code" title="The five kinds of function arguments">
-    <RunnableCode title="positional / default / *args / keyword-only / **kwargs" code={argsCode} />
-
-    Read a Python function signature as a *menu* of parameter positions:
-
-    - **Positional** (`name`): required, must be passed in order.
-    - **Default** (`greeting="Hello"`): optional positional, can also be passed by name.
-    - **`*extras`**: captures any *additional positional* arguments into a tuple.
-    - **Keyword-only** (`formal=False`, *after* `*args`): parameters that appear after `*args` (or after a bare `*`) can *only* be passed by name. This is the modern way to enforce "please pass this by name so the call site is readable" (`greet("Sarath", formal=True)`, not `greet("Sarath", True)`).
-    - **`**kwargs`**: captures any *leftover keyword* arguments as a dict.
-
-    Modern APIs use all five deliberately. In PyTorch's `Adam(params, lr=1e-3, betas=(0.9, 0.999), ...)`, `params` is positional, everything else is keyword-only (in newer versions) so users can't silently pass them in the wrong order. In FastAPI, `def endpoint(path_param: int, query_param: str = "x")`, the type of each parameter tells the framework how to parse it from the URL. The Python signature is a *contract* the framework reads.
-
-    You can also use `/` and `*` as position markers: `def f(a, b, /, c, *, d):` — `a, b` are positional-only, `c` is either, `d` is keyword-only.
-
-  </Angle>
-
-  <Angle type="runtime" title="LEGB scope resolution — how Python finds a name">
-    <RunnableCode title="Local / Enclosing / Global / Built-in — step by step" code={legbCode} />
-
-    LEGB is a **name-lookup algorithm**, not a memory layout. When Python encounters a name it needs to *read*, it walks outward from the current function through enclosing functions, out to the module's globals, and finally to the built-ins — stopping at the first place that has the name. When Python encounters a name being *assigned*, the rule flips: it creates or updates in the current *local* scope, unless you've declared `nonlocal` (assign into the nearest enclosing function's scope) or `global` (assign into the module's globals).
-
-    This asymmetry — read outward, write locally — is the source of most beginner confusion. `x = x + 1` inside a function *reads* the enclosing `x` (LEGB), but *writes* to a local `x`, causing "UnboundLocalError" if there was no local before the read. If you actually want to modify the enclosing binding, say so: `nonlocal x` for enclosing, `global x` for module-level. Reach for these rarely — usually returning a value and re-assigning outside is cleaner and easier to follow.
-
-  </Angle>
-
-  <Angle type="anatomy" title="Closures — functions with private state">
-    <RunnableCode title="counter closure — separate state per instance" code={closureCode} />
-
-    Every call to `make_counter` creates a fresh `count` variable *and* a fresh `tick` function. Python then binds the two together by putting `count` in a **cell**, and giving `tick` a hidden `__closure__` tuple that references the cell. When `make_counter` returns, its local frame is gone — but the cell survives, because `tick` still points to it.
-
-    Two counters (`a` and `b`) built by `make_counter()` and `make_counter(100)` have **different cells** — you can see it in the print. Increment `a` and `b` doesn't change; the two closures each own private state. This is the functional-programming way to do what OOP does with instance variables. And it's exactly what powers `functools.lru_cache` (whose "cache" dict lives in a closure over the decorator factory), `contextvars` (whose per-context values live in closures), and every counter/timer/rate-limiter decorator you'll write.
-
-    Read the cell inspection at the bottom: `a.__closure__` is a tuple of `cell` objects, and each cell has `cell_contents` — the current value. Closures aren't magic; they're a documented data structure you can poke at.
-
-  </Angle>
-
-  <Angle type="pitfall" title="Late-binding — the trap every Python dev hits once">
-    <RunnableCode title="the [2, 2, 2] surprise and three fixes" code={closurePitfallCode} />
-
-    Closures capture *cells*, not values. When you write `lambda: i` inside a `for` loop, every lambda captures a reference to *the same `i` cell*. When you eventually call any of the lambdas, they all look up `i` — and by then the loop has finished and `i == 2`. This produces the notorious `[2, 2, 2]`.
-
-    This trap is not a bug; it's a consequence of *how* closures work. The three fixes each work by giving each lambda its own binding to the current value of `i`:
-
-    - `lambda i=i: i` — the `i=i` in the parameter list *evaluates the right-hand `i` immediately at definition time* and stores it as the default value of the parameter `i`. Each lambda now has its own default.
-    - `functools.partial(fn, i)` — same idea, packaged as a builtin: `partial` freezes the current value of `i` into the returned callable.
-    - Wrap the closure-creating code in its own function (`def bind(i): return lambda: i`); each call to `bind` creates a fresh scope with its own `i`.
-
-    This trap appears in every Flask/Streamlit/Dash callback registration tutorial, every "why don't my Tkinter buttons work" Stack Overflow question, every event-loop code that registers callbacks in a loop. Once you *feel* why it happens, you'll spot it in code review at a glance.
-
-  </Angle>
-
-  <Angle type="contract" title="Type hints — signatures as executable documentation">
-    <RunnableCode title="Callable, generics, PEP 695 syntax" code={typedCode} />
-
-    Since PEP 484 (Python 3.5, 2015), Python has supported optional **type hints** — annotations on parameters and return values. They are:
-
-    - **Read by editors** for autocomplete, refactoring, and go-to-definition (VSCode, PyCharm, Zed).
-    - **Read by static checkers** (`mypy`, `pyright`, `ruff`) that catch a huge class of bugs before you run the code.
-    - **Read by frameworks** at runtime for validation (Pydantic), serialization (FastAPI), and structural typing (Protocols).
-    - **NOT enforced** by the interpreter itself. `def add(x: int, y: int) -> int: return x + y` will happily accept and concatenate strings. If you need runtime enforcement, use `pydantic.BaseModel`.
-
-    Modern hints (`list[T]`, `dict[K, V]`, `X | None`, PEP 695 `def first[T](...)`) are compact and don't require importing from `typing`. Adopt them from day one — a project that grows to a hundred files without type hints is nearly impossible to refactor safely; one that has them from the start is trivially navigable.
-
-  </Angle>
-
-</Angles>
-
-<Convergence>
-
-Functions are values. Scope is a stack of dicts, walked outward on every name read. Closures are what happens when an inner function outlives its parent — Python preserves the captured cells so the inner function can still access them. Type hints turn the signature into documentation the tools read. These four ideas together are enough to read most modern Python — and, more importantly, to write it in a way that scales past two hundred lines without turning into spaghetti.
-
-</Convergence>
-
-<Derivation title="What happens when Python executes `return tick`">
-
-Trace what actually happens step by step when `make_counter` returns `tick`. The magic dissolves once you see the object graph.
-
-<Step n={1} math={<span>Python enters <code>make_counter(start=0)</code> and creates a fresh local frame with <code>count = 0</code>.</span>}>
-The frame is a mapping from local names to values. At this moment, `count` is a plain int, `start` is a plain int, nothing unusual is happening.
-</Step>
-
-<Step n={2} math={<span>Python encounters <code>def tick():</code> and creates a function object.</span>}>
-Because `tick` references `count` (a name in the enclosing scope), Python needs to give `tick` a way to reach it after `make_counter` returns. So it allocates a **cell** object holding `count`, and stores a reference to that cell in `tick.__closure__`. From now on, when `tick`'s body reads or writes `count`, it goes through the cell, not through `make_counter`'s frame directly.
-</Step>
-
-<Step n={3} math={<span>The function object <code>tick</code> is returned to the caller.</span>}>
-Now `make_counter`'s frame is popped — its locals `start` and (the frame's copy of) `count` are gone. But the cell survives, because `tick.__closure__` still points at it. `tick.__closure__[0].cell_contents` is currently `0`.
-</Step>
-
-<Step n={4} math={<span>The caller assigns: <code>a = tick</code>.</span>}>
-`a` and the returned function are the same object. `a.__closure__` is the same cell tuple.
-</Step>
-
-<Step n={5} math={<span>The user calls <code>a()</code>. Python enters <code>tick</code>'s frame.</span>}>
-Because of the `nonlocal count` declaration, when `tick` executes `count += 1`, Python knows the target of the write is the enclosing cell, not a fresh local. It reads the cell (currently `0`), computes `0 + 1 = 1`, writes `1` back into the cell, returns `1`.
-</Step>
-
-<Step n={6} math={<span>Every subsequent <code>a()</code> reads and updates the same cell.</span>}>
-That is how the counter accumulates state without a global, without a class instance, without a database. The state lives in the cell, and the cell lives inside `a`'s closure.
-</Step>
-
-<Step n={7} math={<span><code>b = make_counter(100)</code> creates a <em>separate</em> cell, with initial value <code>100</code>.</span>}>
-Each `make_counter` call has its own frame with its own `count` local, which becomes its own cell for the returned `tick`. That's why `a` and `b` have independent state. If you removed `nonlocal count` and just wrote `count += 1`, Python would create a *fresh local* `count` inside `tick` — and the read would fail with `UnboundLocalError` because you're reading before writing. That is why `nonlocal` is required for closures that modify their captured state.
-</Step>
-
-</Derivation>
-
-<Example title="Functions passed around, everywhere">
-
-<RunnableCode title="functions as data — the strategy pattern in one line" code={higherOrderCode} />
-
-Read the cell three ways. **Storage:** functions live in a `dict` keyed by operator symbol. Every call site just dispatches by string. This is the Python equivalent of the "strategy pattern" — you pick behavior at runtime. **Arguments:** `sorted(words, key=len)` passes the builtin `len` as a *value* to `sorted`, which calls it on each element to decide sort order. **Return values:** `multiplier(2)` returns a function that has captured `factor=2` in its closure. `double = multiplier(2)` gives us a fresh callable that multiplies by 2 forever.
-
-Every one of these three patterns — dispatch, callback, factory — is a corner of "functions as values" that shows up in every serious codebase. The moment they feel obvious to you, real Python starts to open up.
-
-</Example>
-
-<Nuance>
-
-**`global` and `nonlocal` are rare and load-bearing.** By default, assignment inside a function creates a new local variable, even if a name of the same identifier exists outside. `nonlocal` says "modify the enclosing scope's binding"; `global` says "modify the module-level binding". Reach for them only when a class instance would be overkill. In practice, mutable containers dodge the need entirely: `counts = {"n": 0}` outside, then `counts["n"] += 1` inside — the containing dict is bound in the enclosing scope, but its *contents* mutate without a `nonlocal`.
-
-**Lambdas are short function literals, nothing else.** `lambda x: x*2` is exactly `def <anon>(x): return x*2`. Use them for tiny one-liners passed to `sorted(..., key=)`, `map`, `filter`. If your lambda body has more than one operation or spans multiple lines, use a named `def`. Named functions are just as fast and vastly more debuggable.
-
-**Type hints don't enforce at runtime.** They're inspected by tools, not by the interpreter. `add(x: int, y: int) -> int` will happily accept strings and concatenate. Use `pydantic.BaseModel` (or write manual `isinstance` checks at the boundary) if you need actual runtime enforcement.
-
-**Positional-only and keyword-only markers.** `def f(a, b, /, c, *, d):` — `a`, `b` positional-only; `c` either; `d` keyword-only. Modern stdlib uses these deliberately to keep API surfaces stable: `dict.get(key, default=None)` has `key` positional-only so a future rename won't break code that passes it by name.
-
-**Mutable default arguments** are a scope trap that catches everyone once. `def append(x, out=[]):` — the `[]` is created *once* at definition time and shared across all calls. Use `out=None` and set inside.
-
-**Function attributes.** Functions are objects, so you can set attributes on them: `fn.calls = 0`, `fn.metadata = {...}`. Useful for decorators that want to expose bookkeeping alongside the wrapped function.
-
-**Recursion depth.** Python's default recursion limit is around 1000. If you're writing a recursive algorithm on deep data (a tree traversal, a `fib(50)` without memoization), either rewrite iteratively or use `sys.setrecursionlimit()` — but the iterative version is almost always clearer.
-
-**Signature inspection.** `inspect.signature(fn)` gives you a programmatic view of a function's parameters, types, and defaults. It's how Pydantic, FastAPI, and Click implement their magic. Type hints + `inspect` = the metaclass of modern Python frameworks.
-
-</Nuance>
-
-<RealWorldML title="A training loop with all four concepts stacked">
-
-<RunnableCode title="a mini trainer with closures, callbacks, and type hints" code={trainingLoopCode} />
-
-**Line by line, how this shows up in production ML code:**
-
-1. `make_trainer(loss_fn, on_epoch_end=...)` is a *factory* function that returns a customized `train`. This is the exact shape of `pytorch_lightning.Trainer(callbacks=[...])`, `transformers.Trainer(compute_metrics=...)`, and `sklearn.pipeline.make_pipeline(...)` — a factory takes strategy functions and returns a configured procedure.
-
-2. `loss_fn: Callable[[float, float], float]` uses a **type hint** to say: I accept any function that takes two floats and returns a float. The trainer doesn't know or care whether that's squared error, absolute error, cross-entropy — it just calls the callable. This is why you can swap `torch.nn.MSELoss()` for `torch.nn.CrossEntropyLoss()` in a single line.
-
-3. `history: list[float] = []` is a variable in the *enclosing* scope of `train`. It gets captured by closure — `train` holds a reference to it, and every call to `train` appends to the same list. This is how the trainer "remembers" losses across epochs without needing a class. `Trainer` objects use classes for this by tradition, but the closure version is equally valid — and used heavily in Jax/Flax.
-
-4. `on_epoch_end` is a **callback** — a function passed in from outside and called at a specific point. This is exactly how `pytorch_lightning.Callback.on_epoch_end`, `keras.callbacks.EarlyStopping`, and `transformers.TrainerCallback` all work. The framework provides the training procedure; the user provides the "what to do at each checkpoint" via callable objects.
-
-5. Two `train` invocations demonstrate two independent trainers, each with its own captured `history` list. `train_sq` and `train_ab` don't share state because they were built by two separate `make_trainer` calls — their closures reference different cells.
-
-**Why this is the pattern, not one pattern among many.** Every ML framework you'll ever use is built on top of this exact shape: *a training procedure receives functions (losses, callbacks, hooks, optimizers) and closes over configuration state.* Get the mental model here and PyTorch Lightning, Keras, Trainers, Flax, Ray Tune — they all become variations on one theme.
-
-</RealWorldML>
-
-<CodeItYourself
-  title="Write your own @counter decorator"
-  spec={<>Write a decorator <code>@counter</code> that attaches a <code>.calls</code> attribute to the wrapped function, incremented by one on every call. Test that <code>fn.calls</code> reflects the number of calls made. Bonus: also add a <code>.reset()</code> method on the wrapper that sets <code>.calls</code> back to 0.</>}
-  hints={[
-    "Functions in Python can carry attributes: `fn.calls = 0` is legal.",
-    "Return the wrapper; set attributes on the wrapper.",
-    "Use `functools.wraps` to preserve `fn.__name__` and `fn.__doc__`.",
-    "For .reset(), assign a nested function: `wrapper.reset = lambda: setattr(wrapper, 'calls', 0)` or a small def."
-  ]}
-  solution={<CodeBlock language="python" title="@counter" code={`from functools import wraps
-
-def counter(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        wrapper.calls += 1
-        return fn(*args, **kwargs)
-    wrapper.calls = 0
-    def reset():
-        wrapper.calls = 0
-    wrapper.reset = reset
-    return wrapper
-
-@counter
-def add(a, b):
-    "Add two numbers."
-    return a + b
-
-add(1, 2); add(3, 4); add(5, 6)
-print(add.calls)         # 3
-print(add.__name__)      # 'add' — preserved by @wraps
-print(add.__doc__)       # 'Add two numbers.'
-add.reset()
-print(add.calls)         # 0`} />}
-/>
-
-<LifeLesson title="First-class is a design principle — not a Python feature">
-
-The single most transferable idea in this chapter is not syntactic. It's *first-class-ness itself*: the observation that once you allow a concept to be a value — assigned to variables, passed around, stored in collections, returned — a huge space of design opens up. In Python that concept happens to be **functions**. In JavaScript it's the same. In modern web design, it's *components*. In modern org design, it's *processes* (write down your onboarding, your interview loop, your incident response — now they can be passed around, versioned, improved). In modern personal habits, it's *routines* ("the way I journal on Sundays" is a first-class thing you can invoke on demand instead of re-thinking every week).
-
-The trap in life and in code is the same: treating a behavior as a one-off act that you *do* rather than as an object that you *own*. If you can only "give a good talk" by physically preparing each time, you're inline-writing your slides. If you can invoke a well-documented, well-structured *approach to giving a talk*, you've written a function. Functions compose; ad-hoc acts don't.
-
-Notice the second-order lesson too: **closures are how you carry context with a behavior.** Your "give a talk" function only works if it can access "the topic you're speaking on"; its closure is your notes. Same in code — a `send_email` function needs to close over SMTP credentials somewhere. First-class-ness gets you the value; closures let the value carry the context it needs. This is why "senior engineer" often looks like "same job as junior, but with one more year of context they carry"; their functions have richer closures.
-
-Every time you're about to hand-code the same behavior for the third time — in code or in life — ask: *is this thing a value yet?* If not, make it one. Package it. Give it a name. Give it defaults. Then invoke it. That is the practice that turns effort into leverage.
-
-</LifeLesson>
-
-<MLConnection>
-
-Functions, scope, and closures are the mechanical basis of a striking amount of ML infrastructure:
-
-- **Decorators are closures.** `@torch.no_grad()`, `@functools.lru_cache`, `@dataclass`, `@app.get(...)` all use a closure over a captured configuration to produce a wrapper. This entire chapter is the prerequisite for the decorator chapter (which you already read).
-- **Callbacks are first-class functions.** `keras.callbacks.EarlyStopping`, `pytorch_lightning.Callback.on_epoch_end`, `transformers.TrainerCallback.on_step_end` are all callable objects (usually classes with a `__call__`, but the shape is identical to a function). The framework holds a list of them and calls each at the right moment.
-- **Optimizers close over hyperparameters.** `optim.Adam(params, lr=1e-3, betas=(0.9, 0.999))` returns an object whose methods (`.step()`, `.zero_grad()`) reference `lr` and `betas` via captured state. Whether it's implemented as a class or as a closure factory is an implementation detail; the shape is the same.
-- **Loss functions are just callables.** `nn.MSELoss()` returns a callable; passing it to your training loop is the same pattern as `sorted(xs, key=abs)`.
-- **JAX-style functional models.** In JAX, you literally write `params, apply_fn = init(...)` — a returned function that closes over the model structure and applies parameters. Every JAX training step is exactly the pattern in the `make_trainer` example above.
-- **Configurable factories.** `sklearn.pipeline.make_pipeline(...)`, `transformers.pipeline("text-classification", model="...")`, `datasets.load_dataset(...)` — all higher-order factory functions that return a configured object based on argument values.
-- **Higher-order tokenizers.** HuggingFace's `tokenizer.encode` accepts a `text_pair`, `padding`, `truncation`, `return_tensors` — each of which changes the behavior slightly. The tokenizer is really a closure over its vocabulary + normalizer + strategy functions.
-- **Retry and rate-limit decorators** for API calls — everywhere in production ML serving code, because model APIs (OpenAI, Anthropic, HuggingFace) rate-limit and occasionally fail. This chapter's `@retry(times=3)` is the pattern.
-
-Every "sophisticated" pattern in ML frameworks reduces to: **first-class function + captured configuration + call at the right moment.** That's this chapter. All of it.
-
-</MLConnection>
-
-<Summary bullets={[
-  "Functions are objects — you can assign, pass, store, and return them. This is why decorators, callbacks, and higher-order code exist.",
-  "LEGB name resolution: Local → Enclosing → Global → Built-in. Reads walk outward; writes stay local unless `nonlocal` / `global`.",
-  "Closures capture *cells*, not values. Multiple closures over the same variable share the same cell.",
-  "Late-binding trap: `[lambda: i for i in range(3)]` gives `[2, 2, 2]`. Fix with `lambda i=i:` or `functools.partial`.",
-  "Argument styles: positional, default, `*args`, keyword-only (after `*`), `**kwargs`, plus `/` and `*` position markers.",
-  "Type hints are optional documentation the tools read. Not enforced at runtime — use pydantic if you need enforcement.",
-  "Every ML training loop, optimizer, callback, and decorator is functions-as-values + closures + type-hinted signatures."
-]} />
+</Summary>
 
 <ProblemSet
   problems={[
@@ -503,12 +356,6 @@ Every "sophisticated" pattern in ML frameworks reduces to: **first-class functio
       q: <>Predict the output — will this raise or print, and what?<br/><code>x = 1</code><br/><code>def f(): x = x + 1; print(x)</code><br/><code>f()</code></>,
       hint: <>Assignment inside a function makes the name local everywhere in the function body — including on the right-hand side of the first assignment.</>,
       answer: <>Raises <code>UnboundLocalError: cannot access local variable 'x' where it is not associated with a value</code>. Because `f` contains `x = ...`, Python decides `x` is local for the entire function body — including the `x` on the right-hand side of the assignment. So reading `x` before it's assigned raises. Fix: add `global x` at the top of `f`, or (better) receive the value as a parameter.</>
-    },
-    {
-      difficulty: "easy",
-      q: <>Rewrite <code>sorted(words, key=lambda w: (len(w), w))</code> in one sentence of English.</>,
-      hint: <>Tuples compare lexicographically.</>,
-      answer: <>"Sort words primarily by length (shortest first) and, within the same length, alphabetically." Tuples compare lexicographically: `(3, 'ml')` &lt; `(3, 'nn')` &lt; `(4, 'gru')`.</>
     },
     {
       difficulty: "medium",
@@ -535,21 +382,6 @@ for x in [1, 5, 10]:
 print([c() for c in callbacks])   # [10, 10, 10]`} /> All three lambdas close over the same `x` cell. After the loop, `x == 10`. Fixes: (1) <code>lambda x=x: x</code> — default-argument capture at definition time. (2) <code>from functools import partial; callbacks.append(partial(lambda x: x, x))</code>. (3) A helper `def bind(x): return lambda: x` and use `callbacks.append(bind(x))` — each `bind` call has its own scope with its own `x`.</>
     },
     {
-      difficulty: "medium",
-      q: <>Write a function <code>compose(f, g)</code> that returns a new function such that <code>compose(f, g)(x) == f(g(x))</code>. Then use it to build <code>strip_and_upper = compose(str.upper, str.strip)</code> and verify.</>,
-      hint: <>The returned function calls g then f. Type hint: `Callable[[Any], Any]`.</>,
-      answer: <><CodeBlock language="python" title="compose" code={`from typing import Callable
-from functools import wraps
-
-def compose(f: Callable, g: Callable) -> Callable:
-    def composed(x):
-        return f(g(x))
-    return composed
-
-strip_and_upper = compose(str.upper, str.strip)
-print(strip_and_upper("  hello world  "))    # 'HELLO WORLD'`} /> `compose` is a two-argument higher-order function: it takes two functions in and returns one function out. This is a building block of functional programming — `functools.reduce(compose, [str.upper, str.strip, ...])` chains a whole pipeline.</>
-    },
-    {
       difficulty: "hard",
       q: <>What is the difference between these two definitions, and why does <code>Foo</code> print two ones instead of one and two?<br/><CodeBlock language="python" title="the setup" code={`class Foo:
     def __init__(self, items=[]):
@@ -565,29 +397,30 @@ print(f2.add(2))         # ?`} /></>,
     },
     {
       difficulty: "hard",
-      q: <>Implement <code>@once</code>: a decorator such that the wrapped function is called at most once; subsequent calls return the cached first result regardless of arguments. Then explain why using a closure-captured sentinel is cleaner than using a class-based decorator here.</>,
-      hint: <>Use a sentinel object to distinguish "not yet called" from "returned None".</>,
-      answer: <><CodeBlock language="python" title="@once" code={`from functools import wraps
+      q: <>Write <code>@rate_limited(n)</code> — a decorator factory such that the wrapped function raises <code>RuntimeError</code> after its first <code>n</code> calls. Each decorated function must keep its own independent count. Name every concept from this chapter your solution uses.</>,
+      hint: <>Three levels of def: factory → decorator → wrapper. The count lives in a closure cell; assignment to it needs a declaration.</>,
+      answer: <><CodeBlock language="python" title="rate_limited" code={`from functools import wraps
 
-_MISSING = object()
+def rate_limited(n):
+    def decorator(fn):
+        calls = 0
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            nonlocal calls
+            if calls >= n:
+                raise RuntimeError(f"{fn.__name__} exceeded {n} calls")
+            calls += 1
+            return fn(*args, **kwargs)
+        return wrapper
+    return decorator
 
-def once(fn):
-    result = _MISSING
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        nonlocal result
-        if result is _MISSING:
-            result = fn(*args, **kwargs)
-        return result
-    return wrapper
+@rate_limited(2)
+def query(prompt):
+    return f"response to {prompt!r}"
 
-@once
-def load_config():
-    print("actually loading")
-    return {"lr": 0.01}
-
-print(load_config())     # 'actually loading' + dict
-print(load_config())     # just dict — no reload`} /> The closure captures `result` in a cell; the sentinel `_MISSING` distinguishes "not yet computed" (letting `None` be a valid result). Class-based would need an `__init__` and a `__call__`, holding state on the instance — six more lines for the same behavior. The closure is smaller, faster (no `self.` lookups), and reads exactly like the specification: "keep result across calls; call fn only if unset." Use classes when you need multiple methods or complex state; use closures for single-callable objects with captured state — which is most decorators.</>
+print(query("a"))     # works
+print(query("b"))     # works
+# query("c")          # RuntimeError: query exceeded 2 calls`} /> Concepts used: a <b>factory</b> (<code>rate_limited(n)</code> returns a decorator — functions returning functions), a <b>closure</b> (<code>calls</code> and <code>n</code> live in cells captured by <code>wrapper</code>), <b>nonlocal</b> (because <code>calls += 1</code> assigns, the write must be redirected into the enclosing cell or Python would create a local and raise <code>UnboundLocalError</code>), <b>*args/**kwargs</b> (pass-through signature), and <b>first-class functions</b> throughout. Each decorated function gets its own <code>decorator(fn)</code> call, hence its own <code>calls</code> cell — independent budgets. This is the exact shape of real rate limiters guarding LLM API calls in production.</>
     },
   ]}
 />
@@ -636,11 +469,13 @@ print(load_config())     # just dict — no reload`} /> The closure captures `re
   {
     q: "In `def f(x, y=[], /):`, which is TRUE?",
     choices: [
-      { text: "Both x and y are positional-only" },
+      { text: "y is keyword-only because it has a default value" },
       { text: "Both x and y are keyword-only" },
       { text: "y is positional-only AND has a shared mutable default that persists across calls", correct: true },
       { text: "The function is syntactically invalid" },
     ],
-    explanation: <>The <code>/</code> makes everything before it positional-only. The <code>y=[]</code> default list is evaluated once at definition time and shared across every call — a classic bug. Fix: <code>y=None</code> and assign inside.</>
+    explanation: <>The <code>/</code> makes everything before it positional-only (defaults don't change that). The <code>y=[]</code> default list is evaluated once at definition time and shared across every call — a classic bug. Fix: <code>y=None</code> and assign inside.</>
   }
 ]} />
+
+<MarkDone slug="foundations/python-craft/functions-scope-closures" title="Functions, scope & closures" />
