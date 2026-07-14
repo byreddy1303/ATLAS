@@ -1,0 +1,392 @@
+---
+title: Linear independence, span & basis
+tier: 1
+phase: "1.1"
+---
+
+export const spanCode = `import numpy as np
+
+# span of one vector = a LINE through the origin: every scaling of it
+v = np.array([2.0, 1.0])
+for c in [-1, 0, 0.5, 1, 2]:
+    print(f"{c:>4} * v =", c * v)
+
+# span of two independent vectors = the whole plane (any target is reachable)
+a = np.array([1.0, 0.0])
+b = np.array([0.0, 1.0])
+target = np.array([3.0, 5.0])
+c1, c2 = np.linalg.solve(np.column_stack([a, b]), target)
+print()
+print("recipe for", target, ":", c1, "* a +", c2, "* b   ->  reachable")`;
+
+export const dependenceCode = `import numpy as np
+
+# THREE vectors in 2-D — three arrows on a page. Can ALL three be independent?
+v1 = np.array([1.0, 0.0])
+v2 = np.array([0.0, 1.0])
+v3 = np.array([2.0, 3.0])         # a redundant hitchhiker
+
+# proof of dependence: solve v3 = c1 v1 + c2 v2 (one non-trivial recipe)
+c1, c2 = np.linalg.solve(np.column_stack([v1, v2]), v3)
+print("v3 =", c1, "* v1 +", c2, "* v2")
+print("check:", c1 * v1 + c2 * v2, "== v3")
+
+# rank of the stacked matrix reveals it: 3 columns, rank 2 -> ONE redundancy
+M = np.column_stack([v1, v2, v3])
+print("rank(M) =", np.linalg.matrix_rank(M), "  columns:", M.shape[1])`;
+
+export const basisCode = `import numpy as np
+
+# standard basis of R^3: the three coordinate axes
+e1 = np.array([1.0, 0.0, 0.0])
+e2 = np.array([0.0, 1.0, 0.0])
+e3 = np.array([0.0, 0.0, 1.0])
+
+x = np.array([4.0, -2.0, 7.0])
+print("x =", x[0], "e1 +", x[1], "e2 +", x[2], "e3")
+
+# a DIFFERENT basis of R^3 — three independent, but non-standard, vectors
+b1 = np.array([1.0, 1.0, 0.0])
+b2 = np.array([1.0, 0.0, 1.0])
+b3 = np.array([0.0, 1.0, 1.0])
+B  = np.column_stack([b1, b2, b3])
+print("det(B) =", round(float(np.linalg.det(B)), 3), " (nonzero -> basis)")`;
+
+export const changeBasisCode = `import numpy as np
+
+# Cameras in the plane: two orthonormal frames
+# standard frame: e1 = (1,0), e2 = (0,1)
+# 45-degree frame: q1 = (1/sqrt2, 1/sqrt2), q2 = (-1/sqrt2, 1/sqrt2)
+s = 1 / np.sqrt(2)
+Q = np.column_stack([[s, s], [-s, s]])     # new basis in old coords
+
+x_std = np.array([3.0, 1.0])               # the vector, in old coords
+
+# coordinates in the NEW frame: solve Q c = x_std   ==   c = Q^{-1} x_std
+c_new = np.linalg.solve(Q, x_std)
+print("x in std frame :", x_std)
+print("x in 45deg frame:", c_new)
+
+# same object, different labels
+print("rebuild in old coords:", Q @ c_new)`;
+
+export const featureSelectCode = `import numpy as np
+
+# 200 samples, 5 features. Feature 4 (col 3) is a copy of feature 0.
+rng = np.random.default_rng(0)
+X = rng.normal(size=(200, 5))
+X[:, 3] = X[:, 0].copy()                    # perfectly redundant feature
+
+r = np.linalg.matrix_rank(X)
+print("shape :", X.shape, "  rank(X) =", r)   # 5 columns, rank 4
+
+# what happens when linear regression tries to fit weights?
+# normal equations invert X^T X — which is SINGULAR when columns are dependent
+XtX = X.T @ X
+print("det(X^T X) =", round(float(np.linalg.det(XtX)), 8), " (~0 -> uninvertible)")
+
+# lstsq handles it but the individual coefficients are meaningless
+# (any (w0, w3) with w0 + w3 fixed fits equally well)
+y = X @ np.array([1.0, 2.0, 3.0, -1.0, 4.0]) + 0.01 * rng.normal(size=200)
+w, *_ = np.linalg.lstsq(X, y, rcond=None)
+print("fitted weights:", np.round(w, 2))
+print("but w[0] + w[3] is well-determined:", round(w[0] + w[3], 3))`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/vectors-space/vector-addition-scaling", label: "Vector addition & scaling", blurb: "Linear combinations c₁v₁ + … + c_kv_k — the recipes we now ask about existence and uniqueness for." },
+  { href: "/learn/mathematics/vectors-space/norms-distances", label: "Norms & distances", blurb: "The 'no direction' meaning of the zero vector — the vanishing point for dependence." },
+]} />
+
+<Motivation title="How many coordinates does your world need?">
+
+An LLM embedding says a token lives in ℝ¹²²⁸⁸, but studies keep finding models actually use far fewer axes than that — the interesting motion happens on a lower-dimensional slab inside the space. The word for that slab is a **subspace**; the word for its true axis count is **dimension**; the tool for finding both is **linear independence**.
+
+The same concept catches bugs one step from your notebook. Two features in a table that are perfectly correlated (say, "height in cm" and "height in inches") aren't two features — they're one, wearing two hats. A linear model handed both will refuse to invert its normal equations; a neural net will learn a random split between them. The formal name for this pathology — features that can be built from each other — is **linear dependence**, and it's why libraries expose `matrix_rank`.
+
+Later chapters lean on this hard. PCA finds a low-dimensional basis that captures the variance. Attention outputs live in the span of the value vectors. Neural-network initialization worries about the *rank* of weight matrices. Learning independence, span, and basis now unlocks all of that vocabulary — and closes the "why is my regression singular?" bug forever.
+
+</Motivation>
+
+<Intuition title="Independent = adds a new direction, redundant = doesn't">
+
+Imagine you're placing arrows in the plane, one at a time, and asking after each: *did the last arrow open up a genuinely new direction, or could I have gotten there already by scaling and adding what I had?*
+
+- **Arrow 1** (say (1, 0)): trivially new — from nothing, you can now reach a whole **line**.
+- **Arrow 2** (say (0, 1), not parallel to arrow 1): also new — you can now reach the entire **plane**.
+- **Arrow 3** (any vector in the plane): **not new**. Every point in ℝ² is already reachable from the first two; the third is a recipe of them wearing a hat.
+
+That's the whole idea. A set of vectors is **linearly independent** when every one of them adds a direction you couldn't previously build; **span** is the set of everything you can reach with them; a **basis** is an *efficient* generating set — enough vectors to reach everything, no wasted redundancies. The zero vector is the vanishing point: any set containing it is automatically dependent (you can scale it by anything without moving).
+
+</Intuition>
+
+<Recall term="Linear combination">
+
+From two chapters ago: c₁v₁ + c₂v₂ + … + c_kv_k — scale each vector by its own coefficient and add them. Every question in this chapter is really about linear combinations: *which* points can be reached (span), and are the recipes *unique* (independence).
+
+</Recall>
+
+## Span — everywhere you can reach
+
+The **span** of a set of vectors is the set of all their linear combinations — every point you can get to by scaling and adding them:
+
+$$
+\mathrm{span}\{ \mathbf{v}_1, \dots, \mathbf{v}_k \} = \big\{\, c_1 \mathbf{v}_1 + \cdots + c_k \mathbf{v}_k \;:\; c_i \in \mathbb{R} \,\big\}
+$$
+
+The shapes are memorable:
+
+- **One vector** (nonzero): its span is a **line** through the origin — all its scalings.
+- **Two vectors** (not parallel): their span is a **plane** through the origin.
+- **Two parallel vectors**: their span *collapses* back to a line — the second added no new direction.
+- **The zero vector alone**: its span is just \{**0**\} — a single point.
+
+Notice all spans pass through the origin — c = 0 for every vector produces **0**, always in the span. That's why span-based objects are called **subspaces**: closed under addition and scaling, always anchored at the origin.
+
+<RunnableCode title="Span of one vector = a line; span of two = a plane" code={spanCode} packages={["numpy"]} />
+
+## Linear independence — no free riders
+
+A set \{v₁, …, v_k\} is **linearly independent** when the only recipe that produces the zero vector is the boring one:
+
+$$
+c_1 \mathbf{v}_1 + \cdots + c_k \mathbf{v}_k = \mathbf{0} \quad\Longrightarrow\quad c_1 = c_2 = \cdots = c_k = 0
+$$
+
+If any *non-trivial* recipe (not all zeros) sums to **0**, the set is **linearly dependent** — you can isolate one vector as a combination of the others. Two equivalent readings, both worth carrying:
+
+- **Every reachable point has a unique recipe** (independence) — versus multiple recipes reaching the same point (dependence).
+- **No vector is redundant** — no v_j can be written using the others.
+
+Two quick reflexes: if a set contains the **zero vector**, it's dependent (multiply **0** by 999 and add zero times everything else — a nontrivial recipe for **0**). In ℝⁿ, more than **n vectors** are always dependent — you can only fit n directions before repetition sets in. This is the ceiling behind the punchline of the next section.
+
+<RunnableCode title="Detecting a redundant vector" code={dependenceCode} packages={["numpy"]} />
+
+## Basis — a minimal, efficient frame
+
+A **basis** for a subspace is a set of vectors that is both
+
+1. **spanning** — every point in the subspace is some linear combination of them, and
+2. **linearly independent** — no vector is redundant.
+
+The magic follows: with a basis \{b₁, …, b_d\}, every vector x in the subspace has **exactly one** recipe
+
+$$
+\mathbf{x} = c_1 \mathbf{b}_1 + c_2 \mathbf{b}_2 + \cdots + c_d \mathbf{b}_d
+$$
+
+and the coefficients (c₁, …, c_d) are called the **coordinates** of x in that basis. This is the whole reason coordinates exist — a chosen basis is what turns "an abstract point" into "a specific list of numbers you can type into a computer."
+
+The count d — the number of vectors in a basis — is called the **dimension** of the subspace. A remarkable theorem: *every* basis of the same subspace has the same size. This makes dimension an honest invariant of the space, not an artifact of which basis you chose.
+
+**Standard basis of ℝⁿ.** The everyday basis of ℝⁿ is e₁ = (1, 0, …, 0), e₂ = (0, 1, 0, …, 0), …, e_n = (0, 0, …, 1) — one 1 in each slot, zeros elsewhere. In this basis, the *coordinates* of x = (x₁, …, xₙ) are just x₁, …, xₙ themselves; every array indexing operation you write is a coordinate lookup in the standard basis. Dimension of ℝⁿ = n.
+
+<RunnableCode title="The standard basis of ℝ³ — and a different one" code={basisCode} packages={["numpy"]} />
+
+<Derivation title="Uniqueness — why a basis gives coordinates, not just any recipe">
+
+Independence isn't just "no redundancy" — it's *the* property that makes coordinates well-defined. Here's the two-line argument.
+
+<Step n={1} math={<span>Suppose x had two recipes: <code>x = c₁b₁ + ⋯ + c_d b_d</code> and <code>x = c₁' b₁ + ⋯ + c_d' b_d</code></span>}>
+    We want to show the two recipes are the same — i.e., cᵢ = cᵢ' for every i. Assume, for contradiction, that they're different; we'll derive a violation of independence.
+</Step>
+
+<Step n={2} math={<span>Subtract them: <code>0 = (c₁ − c₁') b₁ + ⋯ + (c_d − c_d') b_d</code></span>}>
+    Same x minus same x is <b>0</b>; on the right, subtract the two recipes term by term. Every coefficient of bᵢ becomes cᵢ − cᵢ'. So this is a recipe for the zero vector — and we know exactly one kind of recipe reaches <b>0</b> when the bᵢ are independent.
+</Step>
+
+<Step n={3} math={<span>Independence forces every difference to be zero: <code>cᵢ − cᵢ' = 0</code>, hence <code>cᵢ = cᵢ'</code></span>}>
+    By the definition of independence, the only way c₁b₁ + ⋯ + c_d b_d = <b>0</b> is <em>all coefficients zero</em>. So each cᵢ − cᵢ' = 0, so cᵢ = cᵢ' for every i, and the two recipes were the same all along. This is the guarantee that turns "there exists a recipe" (spanning) into "there is <em>exactly one</em> recipe" (coordinates), and it's why bases — not just spanning sets — are the objects worth having.
+</Step>
+
+</Derivation>
+
+<Example title="Working it by hand — one full trace">
+
+Question: is the set v₁ = (1, 2), v₂ = (2, 4), v₃ = (0, 1) independent, and what's its span?
+
+**Step 1 — spot the dependence.** v₂ = 2·v₁: same direction, doubled length. So among *just* v₁, v₂, the second is a free rider — the recipe 2·v₁ + (−1)·v₂ = **0** proves it (non-trivial, sums to zero).
+
+**Step 2 — check what remains.** v₁, v₃ = (1, 2), (0, 1): are these independent? The recipe c₁v₁ + c₂v₃ = **0** reads (c₁, 2c₁ + c₂) = (0, 0). Slot 1 forces c₁ = 0; slot 2 then forces c₂ = 0. Only the trivial recipe — independent.
+
+**Step 3 — span.** Two independent vectors in ℝ² span *all* of ℝ² (dimension 2, two directions, done). Adding v₂ back adds no new directions — the full set still spans ℝ², just with one redundancy.
+
+**Step 4 — dimension and rank.** The dimension of the span is **2** (rank of the matrix with these columns is 2, even though there are three columns). A basis for it is the pair v₁, v₃ (or v₁, v₂/2, or v₂, v₃ — any independent pair from the set). Bases aren't unique — but their *size* is.
+
+</Example>
+
+## Change of basis — the same vector, two coordinate lists
+
+If a basis gives you coordinates, then **choosing a different basis relabels every vector's coordinates without touching the vector itself**. Think of it as swapping cameras: point stays put, its numeric address depends on which frame you photograph it in.
+
+Concretely, let the columns of a matrix B be a basis \{b₁, …, b_d\}. A coordinate vector c in that basis represents the actual vector `x = B c` (a linear combination — the coordinates are the coefficients). To go the other way — from an actual vector x to its coordinates in the new basis — solve for c:
+
+$$
+\mathbf{x} = B\,\mathbf{c} \quad\Longleftrightarrow\quad \mathbf{c} = B^{-1} \mathbf{x}
+$$
+
+The next chapter derives a clean special case: when the basis is **orthonormal** (perpendicular unit vectors), inverting isn't needed at all — you just take dot products.
+
+<RunnableCode title="Rotating the camera — the same point in two frames" code={changeBasisCode} packages={["numpy"]} />
+
+**Why this matters in ML.** PCA finds a new basis of your feature space whose first axis captures the most variance, the second captures the next-most, etc. — you then keep only the first k coordinates and throw away the rest, going from d features to k without losing much. That's dimensionality reduction, and it's *literally* a change of basis followed by a truncation. When Tier 3 introduces PCA, this section is the language it speaks.
+
+## The traps that matter
+
+**"Independent" is a property of the whole set, not one vector.** Asking "is v₃ independent?" is meaningless in isolation — the question is always "is the set v₁, …, v_k independent?", and the same v₃ can be redundant in one set and essential in another. Read every claim about independence as a claim about the set.
+
+**Numerical vs exact.** Perfect dependence (v₂ = 2v₁) is rare in real data; **near-dependence** is everywhere (two features 0.99 correlated). `matrix_rank` uses a tolerance to decide when a singular value is "effectively zero," and choosing that tolerance matters — set it too tight and you'll declare noisy near-duplicates independent, too loose and you'll drop genuine directions. When it matters, look at the singular values themselves rather than reading the rank as a boolean.
+
+**Multicollinearity in regression.** Feature dependence quietly wrecks linear models. If two columns are exact copies, the normal equations `(XᵀX)w = Xᵀy` have no unique solution — any `(w₀, w₃)` with `w₀ + w₃` fixed fits equally well. `lstsq` still returns *a* solution (the minimum-norm one), but the individual coefficients are meaningless; only sums like `w₀ + w₃` are interpretable. The clean fix is to *drop* redundant columns before fitting — or, for near-dependence, use regularization (ridge/lasso) to break the ambiguity.
+
+**Adding features doesn't add dimension unless they're independent.** Dumping "height in cm" and "height in inches" and "height in feet" into a model gives you three columns but *one* direction of information. The rank of your data matrix — not its column count — is the honest count of features you have.
+
+<RunnableCode title="A redundant feature and a singular normal-equations matrix" code={featureSelectCode} packages={["numpy"]} />
+
+<RealWorldML title="Rank and the dimensions a model actually uses">
+
+Modern LLMs have embedding widths in the thousands (12,288 for GPT-3), but a phenomenon called the **low-rank hypothesis** — sharpened by the LoRA fine-tuning method — observes that the *changes* a model learns during fine-tuning live in a much smaller-dimensional subspace than the full weight matrix. LoRA exploits this ruthlessly: instead of learning a full weight update ΔW ∈ ℝᵈˣᵈ (d² parameters), it learns ΔW = A·B where A ∈ ℝᵈˣʳ and B ∈ ℝʳˣᵈ for a small **rank** r (typically 4–64). By construction, that ΔW has rank at most r — because the span of A·B's columns is contained in the span of A's r columns.
+
+Read that with this chapter's vocabulary:
+
+1. **Independence sets the ceiling.** A d × d matrix can have at most d independent columns. Forcing it to factor through r « d dimensions caps the number of independent directions its updates can point in at r — a hard architectural bound.
+2. **Parameters plummet.** ΔW = A·B has 2dr parameters instead of d². For d = 12,288 and r = 8: about 197k parameters versus 151 million per layer — a ~770× reduction, with quality that often matches full fine-tuning on downstream tasks.
+3. **The empirical claim behind the trick.** The *directions* a task requires the model to move are few. Fine-tuning ChatGPT for legal documents doesn't need 12,288 independent updates per layer — it needs a handful of task-directions, and the low-rank factorization discovers them.
+
+Same idea, other places: PCA is dimensionality reduction by keeping the k top-variance basis directions; embedding-table compression writes E ≈ U·V for U ∈ ℝⱽᵒᶜᵃᵇˣʳ, V ∈ ℝʳˣᵈ. When Tier 5 covers LoRA in full, this chapter is why the trick even exists.
+
+</RealWorldML>
+
+<StudyDepth
+  intro={<>The vocabulary here is the entry ticket to matrices and PCA; grip the definitions tight and the rest of Tier 1 opens up.</>}
+  drill={[
+    <>The three definitions — span, linear independence, basis — and how they interlock (basis = spanning + independent)</>,
+    <>Standard basis of ℝⁿ and the fact that coordinates in it are just the entries</>,
+    <>Dimension = size of any basis — an invariant of the subspace, not the basis</>,
+    <>Detecting dependence: solve c₁v₁ + ⋯ = 0 for a non-trivial recipe; equivalently, check rank &lt; number of vectors</>,
+    <>Change of basis via <code>c = B⁻¹ x</code> — same point, different address</>,
+  ]}
+  skim={[
+    <>Formal proof that all bases have the same size (the exchange lemma) — the fact is what you need, not the proof</>,
+    <>Subspaces beyond spans: null spaces, column spaces, row spaces — arrive with matrices, not now</>,
+    <>Infinite-dimensional bases (Hilbert spaces, Fourier) — beautiful, but ML lives in ℝⁿ</>,
+  ]}
+/>
+
+<CodeItYourself title="Three drills — detect, factor, project">
+
+1. **Write `is_independent(vectors)`** taking a list of NumPy vectors of the same length and returning `True`/`False`. Stack them as columns and compare `matrix_rank` to the column count. Test on the pair (1,2),(2,4) → False, the triple (1,0,0),(0,1,0),(0,0,1) → True, and the triple (1,2),(0,1),(3,7) → False (three vectors in ℝ² can't be independent). *Hint: `np.column_stack(vectors)` then `np.linalg.matrix_rank(...)`.*
+
+2. **Write `to_new_coords(x, B)`** returning the coordinates of x in the basis whose columns are the columns of B. Test on B = [[1,1,0],[1,0,1],[0,1,1]] and x = (2, 3, 1): recover c, then verify `B @ c ≈ x`. What happens if you pass a B whose columns are dependent? *Hint: `np.linalg.solve(B, x)` — and note that it raises `LinAlgError` when B is singular, exactly *because* dependent columns don't form a basis.*
+
+3. **Write `redundant_columns(X, tol=1e-8)`** returning the indices of columns of X that can be written as combinations of earlier ones. Loop through columns left-to-right, tracking a running rank: a column is redundant iff adding it doesn't increase the rank of the accumulated matrix. Test on a random `(50, 4)` matrix where column 3 is set to column 0 + 2·column 1 → should return `[3]`. *Hint: `matrix_rank(X[:, kept + [j]])` vs `matrix_rank(X[:, kept])`.*
+
+</CodeItYourself>
+
+<Summary>
+
+- **Span** \{v₁, …, v_k\} = every linear combination of them — always a subspace anchored at the origin.
+- **Linearly independent** = the only recipe that reaches **0** is all-zeros. Equivalent: no vector is a combination of the others; every reachable point has a unique recipe.
+- **Basis** = spanning + independent. It gives every vector *exactly one* coordinate list — this is why the concept of "coordinates" exists at all.
+- **Dimension** = size of any basis (all bases of the same subspace have the same size). ℝⁿ has dimension n; its standard basis is e₁, …, eₙ.
+- **Change of basis**: choosing a different basis relabels coordinates without moving the vector — `c = B⁻¹x`. PCA, LoRA, and every "new frame" trick lives on this.
+- Traps: independence is a property of the *set* (not one vector); redundant features silently break linear regression's normal equations; rank of a data matrix, not its column count, is the honest feature-direction count.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>Which of the following sets are linearly independent? (a) the pair (1, 2), (3, 6); (b) the triple (1, 0, 0), (0, 1, 0), (0, 0, 1); (c) the pair (1, 1), (0, 0). Justify each in one sentence.</>,
+      hint: <>Look for a scalar multiple, or the zero vector.</>,
+      answer: <>(a) <b>Dependent</b>: (3, 6) = 3·(1, 2) — one is a scalar multiple of the other, so a nontrivial recipe (3, −1) reaches <b>0</b>. (b) <b>Independent</b>: the standard basis of ℝ³ — no coordinate can be built from others; each contributes its own axis. (c) <b>Dependent</b>: contains the zero vector, and any set containing <b>0</b> is automatically dependent (999·<b>0</b> + 0·(1, 1) = <b>0</b> is a nontrivial recipe).</>
+    },
+    {
+      difficulty: "easy",
+      q: <>Give a basis for ℝ² other than the standard pair (1, 0), (0, 1), and write the coordinates of x = (5, 2) in it.</>,
+      hint: <>Any two non-parallel vectors will do; solve a 2×2 system.</>,
+      answer: <>Take b₁ = (1, 1), b₂ = (1, −1) — non-parallel, so independent, and any 2 independent vectors in ℝ² span it. Solve c₁(1, 1) + c₂(1, −1) = (5, 2): c₁ + c₂ = 5 and c₁ − c₂ = 2. Adding: 2c₁ = 7 → c₁ = 3.5. Subtracting: 2c₂ = 3 → c₂ = 1.5. So x has coordinates <b>(3.5, 1.5) in the new basis</b>. Same point, different label — the standard-basis coordinates (5, 2) are just one address among many.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>The vectors v₁ = (1, 2, 3), v₂ = (2, 4, 6), v₃ = (0, 1, 1) live in ℝ³. (a) Is the set v₁, v₂, v₃ independent? (b) What is the dimension of their span, and give a basis for it. (c) Is (1, 0, 0) in the span?</>,
+      hint: <>Spot the scalar multiple; then check the remaining pair for independence.</>,
+      answer: <>(a) <b>Dependent</b>: v₂ = 2·v₁, so the recipe 2v₁ − v₂ = <b>0</b> is non-trivial. (b) Once v₂ is deleted as redundant, v₁, v₃ remains — non-parallel, so independent. Dimension of the span is <b>2</b>; a basis is <b>v₁, v₃ = (1, 2, 3), (0, 1, 1)</b>. (c) The span is a 2-D plane through the origin in ℝ³ — a slab, not the whole space. (1, 0, 0) is in it only if it can be written as c₁v₁ + c₃v₃. Slot 1 forces c₁ = 1, slot 2 gives 2 + c₃ = 0 → c₃ = −2, then slot 3 needs 3 + (−2) = 1 but we want 0 — contradiction, so <b>no, (1, 0, 0) is not in the span</b>.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>You are given data matrix X ∈ ℝ¹⁰⁰ˣ⁵ where column 2 is 3·(column 0) + column 1 (an exact linear combination). What is <code>np.linalg.matrix_rank(X)</code>? What happens when linear regression tries to solve the normal equations <code>(XᵀX)w = Xᵀy</code>?</>,
+      hint: <>One column being a combination of others means one redundancy.</>,
+      answer: <>Rank = <b>4</b>: five columns, one dependency drops the effective count by one. Then <b>XᵀX is singular</b> (not invertible) — its determinant is zero, so the normal equations have infinitely many solutions. Any (w₀, w₁, w₂) satisfying w₀ + 3w₂ = <em>constant</em> and w₁ + w₂ = <em>constant</em> fits the data equally well; only those two <em>combinations</em> are well-determined, not the individual coefficients. Fixes: drop one redundant column, or use ridge regression (which adds λI to XᵀX to guarantee invertibility and break the tie).</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Prove that any set of n + 1 vectors in ℝⁿ is linearly dependent. (You may use, as a black box, the fact that a system of n homogeneous linear equations in n + 1 unknowns always has a non-trivial solution.)</>,
+      hint: <>Ask "does c<sub>1</sub>v<sub>1</sub> + ⋯ + c<sub>n+1</sub>v<sub>n+1</sub> = 0 have a nonzero solution?"</>,
+      answer: <>Let v<sub>1</sub>, …, v<sub>n+1</sub> ∈ ℝⁿ. Independence would demand that the only solution to c<sub>1</sub>v<sub>1</sub> + ⋯ + c<sub>n+1</sub>v<sub>n+1</sub> = <b>0</b> is c<sub>1</sub> = ⋯ = c<sub>n+1</sub> = 0. Reading slot-by-slot, this vector equation is a system of <b>n scalar equations</b> (one per component) in <b>n + 1 unknowns</b> (the c<sub>i</sub>), all with right-hand side 0 — a homogeneous system. By the black-box theorem, such a system always admits a non-trivial solution: not all c<sub>i</sub> are zero. That non-trivial recipe reaches <b>0</b>, so the set is dependent. ∎ The result is why the standard basis of ℝⁿ has exactly n vectors — one more, and independence dies; one fewer, and the set can't span all of ℝⁿ.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>LoRA replaces a weight update ΔW ∈ ℝᵈˣᵈ with a product A·B where A ∈ ℝᵈˣʳ and B ∈ ℝʳˣᵈ. (a) Prove that rank(A·B) ≤ r. (b) For d = 4096 and r = 16, compute the parameter count and the compression ratio versus full-rank fine-tuning. (c) When must ΔW actually have rank higher than r, and what happens then?</>,
+      hint: <>(a) Columns of AB are linear combinations of columns of A. (b) Full: d². Low-rank: 2dr.</>,
+      answer: <>(a) Column j of AB is A·(B_j) — a linear combination of A's r columns with coefficients from B's j-th column. So <em>every</em> column of AB lies in the span of A's r columns, hence <b>rank(AB) ≤ r</b>. (The rank of A itself may be less than r, in which case AB is even more constrained.) (b) Full: 4096² = <b>16,777,216 params</b>. Low-rank: 2·4096·16 = <b>131,072 params</b>. Ratio ≈ 128× smaller — with r = 8, ≈ 256×; with r = 64, ≈ 32×. (c) If the true update needs more than r independent directions, the r-rank product simply <b>cannot represent it</b> — some genuinely useful directions are unreachable, and fine-tuning quality degrades. Empirically, downstream tasks turn out to need remarkably few directions (r = 8–16 often matches full fine-tuning), which is the observed "low intrinsic rank" of fine-tuning that makes the trick work.</>
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "Which pair of vectors is linearly independent?",
+      choices: [
+        { text: "(1, 2) and (2, 4)" },
+        { text: "(1, 0) and (0, 1)", correct: true },
+        { text: "(3, 3) and (−3, −3)" },
+        { text: "(2, 1) and (0, 0)" },
+      ],
+      explanation: <>(1, 0) and (0, 1) point along different axes — no scaling of one produces the other, so they're independent (this is the standard basis of ℝ²). The other three pairs each contain a scalar multiple or the zero vector.</>
+    },
+    {
+      q: "The span of a single nonzero vector v ∈ ℝ² is:",
+      choices: [
+        { text: "The whole plane" },
+        { text: "The line through the origin in v's direction", correct: true },
+        { text: "Just the single point v" },
+        { text: "The zero vector" },
+      ],
+      explanation: <>Span = all scalings of v, which trace the line through the origin along v's direction (positive scalings go one way, negatives the other, zero produces the origin).</>
+    },
+    {
+      q: "How many vectors are in any basis of ℝ⁴?",
+      choices: [
+        { text: "Exactly 4", correct: true },
+        { text: "Any number ≥ 4" },
+        { text: "It depends on the basis" },
+        { text: "3 or 4, either works" },
+      ],
+      explanation: <>Dimension is an invariant: every basis of ℝⁿ has exactly n vectors. Fewer can't span; more can't be independent. This is why the standard basis has exactly n elements.</>
+    },
+    {
+      q: "Adding a redundant feature column (an exact copy of an existing column) to a linear regression's design matrix X causes:",
+      choices: [
+        { text: "Better fit — more features means more expressive power" },
+        { text: "XᵀX to become singular, so the normal equations lose a unique solution", correct: true },
+        { text: "The prediction ŷ = Xw to become 0" },
+        { text: "No effect — regression handles it automatically" },
+      ],
+      explanation: <>Column dependence drops rank of X, which drops rank of XᵀX, which makes it non-invertible. Predictions on training points can still fit (the space of fits is the same), but the individual coefficients are not uniquely determined — an ambiguity ridge regression is designed to break.</>
+    },
+    {
+      q: "LoRA writes ΔW = A·B with A ∈ ℝᵈˣʳ and B ∈ ℝʳˣᵈ for r « d. The upper bound on the rank of ΔW is:",
+      choices: [
+        { text: "d" },
+        { text: "r", correct: true },
+        { text: "d²" },
+        { text: "Unbounded" },
+      ],
+      explanation: <>Every column of A·B is a combination of A's r columns, so the column space of A·B is contained in the span of A's columns — dimension at most r. This <em>architectural</em> rank cap is the source of LoRA's parameter savings.</>
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/vectors-space/linear-independence-basis" title="Linear independence, span & basis" />

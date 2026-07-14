@@ -389,7 +389,7 @@ const tier1: Tier = {
             "Change of basis as a lens swap",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "projections-orthogonality",
