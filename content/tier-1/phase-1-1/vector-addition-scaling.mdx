@@ -1,0 +1,365 @@
+---
+title: Vector addition & scaling
+tier: 1
+phase: "1.1"
+---
+
+export const addCode = `import numpy as np
+
+a = np.array([2.0, 1.0])
+b = np.array([1.0, 3.0])
+
+print("a + b =", a + b)        # slot-by-slot: (2+1, 1+3)
+print("b + a =", b + a)        # same answer — order never matters
+print("a - b =", a - b)        # subtraction is slot-by-slot too
+
+# displacement: the arrow FROM p TO q is q - p
+p = np.array([3.0, 4.0])       # where you are
+q = np.array([5.0, 1.0])       # where you want to be
+step = q - p
+print("step  =", step, "  <- walk this to get from p to q")
+print("check :", p + step, " == q")`;
+
+export const scaleCode = `import numpy as np
+
+v = np.array([2.0, 1.0])
+
+print("3v   =", 3 * v)         # 3x longer, same direction
+print("0.5v =", 0.5 * v)       # half as long, same direction
+print("-v   =", -1 * v)        # same length, opposite direction
+print("0v   =", 0 * v)         # the zero vector — no length, no direction
+
+# additive inverse: walking v then -v puts you back at the origin
+print("v + (-v) =", v + (-v))
+
+# the arithmetic laws you know from numbers survive, slot by slot
+a = np.array([2.0, 1.0]); b = np.array([1.0, 3.0]); c = 4.0
+print("c*(a+b)   =", c * (a + b))
+print("c*a + c*b =", c * a + c * b)     # distributivity: identical`;
+
+export const linearCombCode = `import numpy as np
+
+a = np.array([2.0, 1.0])
+b = np.array([1.0, 0.0])
+
+def combine(c1, c2):
+    return c1 * a + c2 * b      # a linear combination: scale, then add
+
+print("2a + 3b   =", combine(2, 3))
+print("0.5a - b  =", combine(0.5, -1))
+print("0a + 0b   =", combine(0, 0))    # the origin is always reachable
+
+# the REVERSE question — which recipe reaches (7, 2)? — is a linear system
+target = np.array([7.0, 2.0])
+coeffs = np.linalg.solve(np.column_stack([a, b]), target)
+print("recipe for", target, "->  c1 =", coeffs[0], " c2 =", coeffs[1])
+print("check:", combine(coeffs[0], coeffs[1]))`;
+
+export const analogyCode = `import numpy as np
+
+# hand-made 4-d "embeddings" — dims: [royalty, male, female, fruit]
+emb = {
+    "king":  np.array([0.9, 0.8, 0.1, 0.0]),
+    "queen": np.array([0.9, 0.1, 0.8, 0.0]),
+    "man":   np.array([0.1, 0.9, 0.1, 0.0]),
+    "woman": np.array([0.1, 0.1, 0.9, 0.0]),
+    "apple": np.array([0.0, 0.1, 0.1, 0.9]),
+}
+
+# king - man + woman: strip maleness, add femaleness, keep royalty
+result = emb["king"] - emb["man"] + emb["woman"]
+print("king - man + woman =", result)
+print()
+
+# which word landed closest? (squared distance — proper norms next chapter)
+for word, v in emb.items():
+    d2 = np.sum((v - result) ** 2)
+    print(word.ljust(6), "distance^2 =", round(float(d2), 2))`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/vectors-space/scalars-vectors-notation", label: "Scalars, vectors, and notation", blurb: "The three faces of a vector and the (n,) shape discipline this chapter builds on." },
+]} />
+
+<Motivation title="The two moves every model is made of">
+
+Strip any neural network down to its atoms and you find exactly two vector operations: **add** and **scale**. Every layer computes weighted sums — scaled vectors added together. Every residual connection in a transformer is literally `x + f(x)`: vector addition, applied billions of times per forward pass. And the most famous demo in NLP — *king − man + woman ≈ queen* — is nothing but addition and subtraction of embedding vectors.
+
+These two moves also compose into the single most important pattern in linear algebra: the **linear combination**, `c₁v₁ + c₂v₂ + …`. Matrix multiplication, attention outputs, data augmentation (mixup), interpolating between two images in latent space — all of them are linear combinations wearing different costumes.
+
+The mechanics take ten minutes. The payoff is that every formula in the next four chapters — and every layer in Tier 3's neural networks — stops looking like symbols and starts looking like walks and stretches you can picture.
+
+</Motivation>
+
+<Intuition title="A vector is a walk">
+
+Think of a vector as a **walk**: (2, 1) means "2 east, 1 north". Then everything in this chapter is one sentence each. **Addition** = do one walk, then the other — where you end up is the sum. **Scaling** = same direction, different stride: 3v takes the walk three times, −v walks it backwards, 0v stays home. **A linear combination** is an itinerary: "walk a twice, then b three times" reaches 2a + 3b. Every claim below is this picture translated into components.
+
+</Intuition>
+
+<Recall term="The three faces of a vector">
+
+From the last chapter: one vector, three faces — a **list of numbers** (what code stores), an **arrow** from the origin (direction + length), a **point** (the arrow's tip). Addition and scaling are defined on the number-list face, but *understood* on the arrow face. We flip between them constantly here — on purpose.
+
+</Recall>
+
+## Addition — walk one arrow, then the other
+
+Numbers first. Vectors add **slot by slot** — first entry with first entry, second with second — and they must have the **same dimension**:
+
+$$
+\mathbf{a} + \mathbf{b} =
+\begin{bmatrix} a_1 \\ a_2 \\ \vdots \\ a_n \end{bmatrix} +
+\begin{bmatrix} b_1 \\ b_2 \\ \vdots \\ b_n \end{bmatrix} =
+\begin{bmatrix} a_1 + b_1 \\ a_2 + b_2 \\ \vdots \\ a_n + b_n \end{bmatrix}
+$$
+
+Geometrically this is the **tip-to-tail** rule: draw a, then draw b starting *from a's tip*; the sum is the single arrow from the origin to where you ended. Since a + b = b + a (each slot is ordinary number addition, which commutes), walking the two arrows in either order lands on the same spot — the two routes trace out a **parallelogram**, and a + b is its diagonal.
+
+Subtraction needs no new idea: a − b means a + (−b) — walk a, then walk b *backwards*. Its most useful reading in ML is **displacement**:
+
+$$
+\mathbf{q} - \mathbf{p} = \text{the arrow FROM } \mathbf{p} \text{ TO } \mathbf{q}
+$$
+
+Check it with addition: p + (q − p) = q — "start at p, take the step, arrive at q". Every time you see a difference of embeddings in a paper (like king − man), read it as *the direction that takes you from one point to the other*.
+
+<Derivation title="Why tip-to-tail IS slot-by-slot">
+
+The geometric rule and the component formula look like two definitions. They are one — here is the three-line argument.
+
+<Step n={1} math={<span>Walk <code>a = (a₁, a₂)</code> from the origin → you stand at <code>(a₁, a₂)</code></span>}>
+    Reading the arrow face literally: a means "go a₁ east, a₂ north". Starting from (0, 0), you now stand at the point (a₁, a₂) — the tip of a.
+</Step>
+
+<Step n={2} math={<span>Now walk <code>b</code> from there → you stand at <code>(a₁ + b₁, a₂ + b₂)</code></span>}>
+    b says "go b₁ east, b₂ north" — *from wherever you are*. East-distance accumulates: a₁ then b₁ more. North-distance accumulates separately: a₂ then b₂ more. The key fact: east-moves never affect your north position, and vice versa. The slots don't interact.
+</Step>
+
+<Step n={3} math={<span>The origin-to-endpoint arrow is by definition <code>a + b</code>, so <code>a + b = (a₁+b₁, a₂+b₂)</code></span>}>
+    Tip-to-tail defines the sum as "the single arrow from start to finish" — and we just computed that finish point slot by slot. The same argument runs in ℝⁿ unchanged: n independent slots, each accumulating on its own. That independence is *why* the formula is so simple.
+</Step>
+
+</Derivation>
+
+<RunnableCode title="Addition, subtraction, displacement" code={addCode} packages={["numpy"]} />
+
+**The pitfall that matters:** addition is only defined for vectors of the **same dimension** — (2, 1) + (1, 0, 3) is meaningless, and NumPy will (rightly) throw an error. The dangerous case is the one that *doesn't* error: adding shape `(n,)` to shape `(n, 1)` silently broadcasts into an `(n, n)` matrix, as you saw last chapter. Same-dimension check first, always.
+
+## Scaling — stretch, shrink, reverse
+
+Multiplying a vector by a scalar c multiplies **every slot** by c:
+
+$$
+c\,\mathbf{v} = c \begin{bmatrix} v_1 \\ \vdots \\ v_n \end{bmatrix}
+= \begin{bmatrix} c\,v_1 \\ \vdots \\ c\,v_n \end{bmatrix}
+$$
+
+On the arrow face, c is a stride knob — the direction is untouched (or exactly reversed), only the length changes:
+
+- **c > 1** stretches: 3v is three times as long, same direction.
+- **0 < c < 1** shrinks: 0.5v is half as long, same direction.
+- **c < 0** reverses: −v has the same length, opposite direction.
+- **c = 0** collapses: 0v is the **zero vector** 0 = (0, …, 0) — the "stay home" walk, with no length and no direction.
+
+The zero vector is the additive identity (v + 0 = v), and −v is the **additive inverse**: v + (−v) = 0 — walk out, walk back, you're home. And because both operations act slot by slot, the algebra laws you've used since school carry over automatically — each slot is just ordinary number arithmetic:
+
+$$
+c(\mathbf{a} + \mathbf{b}) = c\mathbf{a} + c\mathbf{b} \qquad
+(c + d)\mathbf{v} = c\mathbf{v} + d\mathbf{v} \qquad
+c(d\mathbf{v}) = (cd)\mathbf{v}
+$$
+
+A set of objects where add and scale behave like this is called a **vector space** — that's the formal name behind this phase's title. You don't need the axiom list; you need the reflex that *vectors can be manipulated algebraically like numbers, as long as you never multiply two vectors* (that needs new definitions — the dot product has its own chapter).
+
+<RunnableCode title="Scaling: stretch, shrink, reverse, collapse" code={scaleCode} packages={["numpy"]} />
+
+## Linear combinations — recipes for reaching places
+
+Combine the two moves and you get the pattern that runs all of ML. A **linear combination** of vectors v₁, …, v_k is any expression
+
+$$
+c_1 \mathbf{v}_1 + c_2 \mathbf{v}_2 + \cdots + c_k \mathbf{v}_k
+$$
+
+— scale each vector by its own coefficient, add the results. Read it as a **recipe**: the vectors are the ingredients, the coefficients c₁, …, c_k say how much of each. "Walk a twice, then b three times" is the recipe 2a + 3b.
+
+Two questions about recipes drive the next chapters:
+
+1. **Which points can a set of vectors reach**, given every possible choice of coefficients? That set is called the **span** — the full subject of the *linear independence & basis* chapter.
+2. **Given a target point, which recipe reaches it?** Finding the coefficients means solving a **system of linear equations** — the code below previews `np.linalg.solve` doing exactly that.
+
+Keep one ML anchor in mind: a neural-network layer computing `Wx` produces a linear combination of W's columns, with x's entries as the coefficients. Attention outputs are linear combinations of value vectors, weighted by attention scores. When those chapters arrive, this section is the mental model they'll stand on.
+
+<RunnableCode title="Recipes — and solving for the recipe" code={linearCombCode} packages={["numpy"]} />
+
+<Example title="Working it by hand — one full trace">
+
+Take a = (2, 1) and b = (1, 3). Slot by slot, no shortcuts:
+
+- **a + b** = (2+1, 1+3) = **(3, 4)** — walk a, then b.
+- **a − b** = (2−1, 1−3) = **(1, −2)** — walk a, then b backwards.
+- **3a** = (3·2, 3·1) = **(6, 3)** — the a-walk, three strides.
+- **2a − b** = (4, 2) + (−1, −3) = **(3, −1)** — a full recipe: scale each, then add.
+
+Dimension changes nothing but the slot count. In ℝ⁴: (1, 0, 2, 5) + (0, 3, 1, 1) = **(1, 3, 3, 6)** — you can't draw it, but the arithmetic (and the walk intuition) is identical. That's the quiet superpower of component-wise definitions: they scale to the 12,288 dimensions of a GPT embedding without changing a single rule.
+
+</Example>
+
+<Example title="See it — tip to tail, live">
+
+Drag both tips and watch the machinery: the dashed lines are the *translated copies* of each vector (b re-drawn from a's tip, a re-drawn from b's tip — the parallelogram), and the gold arrow is the sum a + b along its diagonal. Two things to try: line both vectors up in the same direction (the sum's length becomes ‖a‖ + ‖b‖ — walks that agree accumulate), then set b to exactly −a, tip in the opposite corner (the sum collapses to the origin — you walked out and back).
+
+<VectorPlayground mode="sum" />
+
+</Example>
+
+<RealWorldML title="Word analogies — arithmetic on meaning">
+
+In 2013, word2vec made vector addition famous: take real word embeddings and compute **king − man + woman**, and the nearest embedding to the result is *queen*. Read it with displacement eyes: (king − man) is *the arrow from man to king* — the "royalty direction". Adding that arrow to woman walks her the same way: to queen.
+
+<RunnableCode title="king − man + woman, by hand" code={analogyCode} packages={["numpy"]} />
+
+Read the cell:
+
+1. **The embeddings.** Five hand-made vectors in ℝ⁴, one dimension per rough concept (royalty, male, female, fruit). Real embeddings have hundreds of *learned* dimensions that don't come labeled — but the arithmetic is the same.
+2. **The recipe.** `emb["king"] - emb["man"] + emb["woman"]` is a linear combination with coefficients (+1, −1, +1). Slot by slot: royalty stays ≈ 0.9 (king has it, man's cancels out of the subtraction), maleness cancels (0.8 − 0.9 + 0.1 ≈ 0), femaleness gets added in (≈ 0.9).
+3. **The nearest neighbor.** The result (0.9, 0.0, 0.9, 0.0) sits closest to *queen* (0.9, 0.1, 0.8, 0.0) — distance² 0.02 versus 0.65+ for everyone else. We're using squared distance as a stand-in for "closest"; the *norms & distances* chapter makes that rigorous next.
+
+The same add-and-scale arithmetic powers **interpolation**: `(1−t)·a + t·b` slides smoothly from a (at t = 0) to b (at t = 1) — used to morph between two images in latent space, and, as **mixup**, to generate blended training examples (a problem below walks through it). One pattern, many costumes.
+
+</RealWorldML>
+
+<StudyDepth
+  intro={<>These two operations are the substrate everything else in linear algebra is built from — there's not much to memorize, but the reflexes must be instant.</>}
+  drill={[
+    <>Slot-by-slot mechanics for +, −, and c·v — fast enough that you never think about them again</>,
+    <>The pictures: tip-to-tail, the parallelogram, scaling as a stride knob (negative c reverses)</>,
+    <>Reading <code>q − p</code> as "the arrow FROM p TO q" — the displacement reflex behind every embedding difference</>,
+    <>Spotting and forming linear combinations c₁v₁ + … + c_kv_k — the recipe reading</>,
+    <>Zero vector = stay home = additive identity; −v = the walk back</>,
+  ]}
+  skim={[
+    <>The formal 8-axiom vector-space definition — recognize the term, don't memorize the list</>,
+    <>Vector spaces of functions and polynomials — beautiful, but ML lives in ℝⁿ</>,
+    <>Affine vs. linear combinations (coefficients summing to 1) — arrives naturally with interpolation, no need to front-load it</>,
+  ]}
+/>
+
+<CodeItYourself title="Three drills — walks, blends, analogies">
+
+1. **Write `tip_to_tail(vectors)`** that starts at the origin and adds a list of 2-D NumPy vectors one at a time, printing your position after each step, and returns the final position. Run it on `[(2,1), (1,3), (-3,0)]` and verify the result equals `np.sum(np.stack(vectors), axis=0)`. *Hint: `pos = pos + v` inside the loop — you are literally walking the arrows.*
+
+2. **Write `lerp(a, b, t)`** returning `(1 - t) * a + t * b`. Check three anchors: `lerp(a, b, 0)` is exactly `a`, `lerp(a, b, 1)` is exactly `b`, and `lerp(a, b, 0.5)` is the midpoint. Then run t = 0, 0.25, 0.5, 0.75, 1 on two 4-d vectors from the analogy demo and watch one embedding morph into the other. *Hint: the two coefficients always sum to 1 — that's what keeps the result on the segment between a and b.*
+
+3. **Write `analogy(a, b, c, emb)`** that computes `emb[a] - emb[b] + emb[c]` and returns the nearest word by squared distance — **excluding** a, b, and c themselves (with real embeddings, the nearest neighbor of king − man + woman is usually *king*, so real systems exclude the inputs too). Test `analogy("king", "man", "woman", emb)` → `"queen"` on the dictionary from the demo. *Hint: loop over `emb.items()`, skip the inputs, track the smallest `np.sum((v - target)**2)`.*
+
+</CodeItYourself>
+
+<Summary>
+
+- Vectors add **slot by slot** — and only when dimensions match. Geometrically: tip-to-tail; a + b = b + a makes the parallelogram, and the sum is its diagonal.
+- **q − p is the arrow from p to q** (check: p + (q − p) = q). Read every embedding difference this way.
+- Scaling multiplies every slot: c is a stride knob — stretch (c &gt; 1), shrink (0 &lt; c &lt; 1), reverse (c &lt; 0), collapse to the zero vector (c = 0). v + (−v) = 0.
+- Familiar algebra laws (commutativity, distributivity, …) carry over slot by slot — that's what makes ℝⁿ a **vector space**. Just never multiply two vectors without a definition.
+- A **linear combination** c₁v₁ + … + c_kv_k is a recipe: scale each ingredient, add. `Wx`, attention outputs, mixup, and interpolation are all this one pattern.
+- Everything works identically in ℝ² and ℝ¹²²⁸⁸ — component-wise rules don't care how many slots there are.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>For a = (1, 2) and b = (3, 0), compute 2a − 3b by hand, showing the slot-by-slot work.</>,
+      hint: <>Scale first, then add: 2a and −3b are separate walks.</>,
+      answer: <>2a = (2, 4) and −3b = (−9, 0), so 2a − 3b = (2−9, 4−0) = <b>(−7, 4)</b>. Recipe reading: two strides of a, then three strides of b walked backwards.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>What is the additive inverse of v = (4, −2)? Verify your answer with addition, and say what the resulting vector means geometrically.</>,
+      hint: <>The inverse is the walk that undoes v.</>,
+      answer: <>−v = <b>(−4, 2)</b>: same length, opposite direction. Check: (4, −2) + (−4, 2) = (0, 0) — the <b>zero vector</b>, the "stay home" walk with no length and no direction. Walking v then −v returns you to the origin.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>You are at point P = (2, 3) and want to reach Q = (5, 1). (a) What vector must you walk? (b) Express the midpoint of the segment PQ as a linear combination of P and Q, and compute it.</>,
+      hint: <>(a) is a displacement. (b) "half of each" is a recipe.</>,
+      answer: <>(a) The displacement Q − P = (5−2, 1−3) = <b>(3, −2)</b> — check: P + (3, −2) = Q. (b) Midpoint = ½P + ½Q = (1, 1.5) + (2.5, 0.5) = <b>(3.5, 2)</b> — a linear combination with coefficients ½, ½. (Equivalently P + ½(Q − P): walk halfway along the displacement — the two forms are the same expression rearranged.)</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Find coefficients c₁, c₂ so that c₁(1, 2) + c₂(3, 0) = (5, 4) — i.e., find the recipe that reaches (5, 4) from ingredients (1, 2) and (3, 0).</>,
+      hint: <>Write one equation per slot; the second slot has only one unknown.</>,
+      answer: <>Slot equations: c₁ + 3c₂ = 5 and 2c₁ + 0c₂ = 4. The second gives <b>c₁ = 2</b>; substituting: 2 + 3c₂ = 5, so <b>c₂ = 1</b>. Check: 2(1, 2) + 1(3, 0) = (2, 4) + (3, 0) = (5, 4) ✓. You just solved a 2×2 linear system by hand — exactly what <code>np.linalg.solve</code> did in the demo, and the bridge to the <em>linear independence</em> chapter (when does a recipe exist, and is it unique?).</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Using only the component definition a + b = (a₁+b₁, …, aₙ+bₙ) and the laws of ordinary number arithmetic, prove that (a) a + b = b + a and (b) (a + b) + c = a + (b + c) for all vectors in ℝⁿ.</>,
+      hint: <>Look at slot i alone. What kind of objects are aᵢ and bᵢ?</>,
+      answer: <>(a) Slot i of a + b is aᵢ + bᵢ — a sum of two <em>numbers</em>, and number addition commutes: aᵢ + bᵢ = bᵢ + aᵢ, which is slot i of b + a. Every slot agrees, and vectors with identical slots are equal, so a + b = b + a. (b) Same move: slot i of (a+b)+c is (aᵢ+bᵢ)+cᵢ = aᵢ+(bᵢ+cᵢ) by associativity of numbers, which is slot i of a+(b+c). The proof template — <em>reduce a vector law to a number law, one slot at a time</em> — is how all vector-space axioms are verified for ℝⁿ, and it works because slots never interact.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>The <b>mixup</b> augmentation trains on blended examples x̃ = λx₁ + (1−λ)x₂ with λ ∈ [0, 1]. (a) What is x̃ at λ = 1, λ = 0, λ = 0.5? (b) Compute x̃ for x₁ = (2, 6), x₂ = (6, 2), λ = 0.3. (c) Why does λ ∈ [0, 1] keep x̃ on the line segment between x₁ and x₂, and what happens geometrically if λ = 1.5? (d) Mixup blends the labels with the same λ — why is that consistent?</>,
+      hint: <>Rewrite x̃ as x₂ + λ(x₁ − x₂) and read it as a walk along a displacement.</>,
+      answer: <>(a) λ=1 → x̃ = x₁; λ=0 → x̃ = x₂; λ=0.5 → the midpoint. (b) 0.3(2, 6) + 0.7(6, 2) = (0.6, 1.8) + (4.2, 1.4) = <b>(4.8, 3.2)</b>. (c) Rearranged, x̃ = x₂ + λ(x₁ − x₂): start at x₂ and walk a fraction λ of the displacement toward x₁. For λ ∈ [0, 1] you cover between none and all of that arrow — you stay on the segment. λ = 1.5 walks 150% of the way: past x₁, off the segment — <b>extrapolation</b>, no longer "between" the two examples. (d) The label ỹ = λy₁ + (1−λ)y₂ applies the <em>same recipe</em> to the targets: a 30% x₁ / 70% x₂ blend should be answered with 30%/70% confidence — inputs and labels interpolated by one consistent linear combination.</>
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "Geometrically, a + b is:",
+      choices: [
+        { text: "The arrow from a's tip to b's tip" },
+        { text: "The result of walking a, then walking b from a's tip — the parallelogram diagonal", correct: true },
+        { text: "The longer of the two vectors" },
+        { text: "Only defined if a and b are perpendicular" },
+      ],
+      explanation: <>Tip-to-tail: draw a, draw b from a's tip; the sum is the origin-to-endpoint arrow. Because a + b = b + a, both walk-orders land on the same spot — the far corner of the parallelogram. (The arrow from a's tip to b's tip is b − a, not the sum.)</>
+    },
+    {
+      q: "Multiplying v by −2 produces a vector that is:",
+      choices: [
+        { text: "Twice as long, same direction" },
+        { text: "Half as long, opposite direction" },
+        { text: "Twice as long, opposite direction", correct: true },
+        { text: "The zero vector" },
+      ],
+      explanation: <>|c| controls length, the sign controls direction: −2v doubles the length and reverses the arrow. Every slot is multiplied by −2.</>
+    },
+    {
+      q: "For points p and q, the expression q − p is:",
+      choices: [
+        { text: "The arrow from q to p" },
+        { text: "The arrow from p to q", correct: true },
+        { text: "The midpoint between them" },
+        { text: "A scalar distance" },
+      ],
+      explanation: <>Displacement: p + (q − p) = q, so q − p is the step that takes you <em>from p to q</em>. The order trips everyone once — the destination comes first. (The distance is this vector's <em>length</em>, next chapter's topic.)</>
+    },
+    {
+      q: "Can you add a vector in ℝ² to a vector in ℝ³?",
+      choices: [
+        { text: "Yes — pad the shorter one with zeros automatically" },
+        { text: "Yes — NumPy broadcasting handles it" },
+        { text: "No — addition is only defined for vectors of the same dimension", correct: true },
+        { text: "Only if one of them is the zero vector" },
+      ],
+      explanation: <>Slot-by-slot addition needs matching slots; (2, 1) + (1, 0, 3) has no slot 3 on the left. NumPy raises an error here — the sneakier failure is (n,) + (n, 1), which doesn't error but silently broadcasts to (n, n).</>
+    },
+    {
+      q: "Which expression is a linear combination of v₁ and v₂?",
+      choices: [
+        { text: "v₁ · v₂" },
+        { text: "3v₁ − 2v₂", correct: true },
+        { text: "v₁ / v₂" },
+        { text: "‖v₁‖ + ‖v₂‖" },
+      ],
+      explanation: <>A linear combination is scale-then-add: c₁v₁ + c₂v₂ with scalar coefficients (here 3 and −2). Dot products, element-wise division, and sums of norms are different operations — only add and scale are in play.</>
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/vectors-space/vector-addition-scaling" title="Vector addition & scaling" />

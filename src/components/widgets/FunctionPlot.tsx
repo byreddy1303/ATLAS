@@ -112,8 +112,10 @@ export function VectorPlayground({
     { x: 2, y: 1, color: "var(--lime)", label: "a" },
     { x: 1, y: 2, color: "oklch(74% 0.19 340)", label: "b" },
   ],
+  mode = "angle",
 }: {
   initial?: { x: number; y: number; color: string; label: string }[];
+  mode?: "angle" | "sum";
 }) {
   const [vecs, setVecs] = useState(initial);
   const dragging = React.useRef<number | null>(null);
@@ -174,11 +176,20 @@ export function VectorPlayground({
         </span>
         <span className="label-mono">drag the tips</span>
         <div className="ml-auto flex flex-wrap items-center gap-4 text-[12.5px] text-ink-2">
-          <span>a·b = <span className="tabular text-ink">{dot.toFixed(2)}</span></span>
-          <span>‖a‖ = <span className="tabular text-ink">{na.toFixed(2)}</span></span>
-          <span>‖b‖ = <span className="tabular text-ink">{nb.toFixed(2)}</span></span>
-          <span>cos θ = <span className="tabular text-lime">{cos.toFixed(3)}</span></span>
-          <span>θ ≈ <span className="tabular text-lime">{deg.toFixed(1)}°</span></span>
+          {mode === "sum" ? (
+            <>
+              <span>a + b = <span className="tabular text-lime">({(a.x + b.x).toFixed(1)}, {(a.y + b.y).toFixed(1)})</span></span>
+              <span>a − b = <span className="tabular text-ink">({(a.x - b.x).toFixed(1)}, {(a.y - b.y).toFixed(1)})</span></span>
+            </>
+          ) : (
+            <>
+              <span>a·b = <span className="tabular text-ink">{dot.toFixed(2)}</span></span>
+              <span>‖a‖ = <span className="tabular text-ink">{na.toFixed(2)}</span></span>
+              <span>‖b‖ = <span className="tabular text-ink">{nb.toFixed(2)}</span></span>
+              <span>cos θ = <span className="tabular text-lime">{cos.toFixed(3)}</span></span>
+              <span>θ ≈ <span className="tabular text-lime">{deg.toFixed(1)}°</span></span>
+            </>
+          )}
         </div>
       </div>
       <svg
@@ -199,6 +210,18 @@ export function VectorPlayground({
         })}
         <line x1={0} y1={cy} x2={w} y2={cy} stroke="var(--line-2)" />
         <line x1={cx} y1={0} x2={cx} y2={h} stroke="var(--line-2)" />
+
+        {mode === "sum" && (
+          <g>
+            <line x1={sx(a.x)} y1={sy(a.y)} x2={sx(a.x + b.x)} y2={sy(a.y + b.y)} stroke="oklch(74% 0.19 340)" strokeWidth={1.5} strokeDasharray="5 5" opacity={0.6} />
+            <line x1={sx(b.x)} y1={sy(b.y)} x2={sx(a.x + b.x)} y2={sy(a.y + b.y)} stroke="var(--lime)" strokeWidth={1.5} strokeDasharray="5 5" opacity={0.6} />
+            <line x1={sx(0)} y1={sy(0)} x2={sx(a.x + b.x)} y2={sy(a.y + b.y)} stroke="oklch(85% 0.15 95)" strokeWidth={2.5} />
+            <circle cx={sx(a.x + b.x)} cy={sy(a.y + b.y)} r={5} fill="oklch(85% 0.15 95)" />
+            <text x={sx(a.x + b.x) + 12} y={sy(a.y + b.y) + 14} fill="oklch(85% 0.15 95)" fontFamily="var(--font-mono)" fontSize={12}>
+              a+b ({(a.x + b.x).toFixed(1)}, {(a.y + b.y).toFixed(1)})
+            </text>
+          </g>
+        )}
 
         {/* vectors */}
         {vecs.map((v, i) => (

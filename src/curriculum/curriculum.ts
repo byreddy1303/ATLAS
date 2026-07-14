@@ -346,7 +346,7 @@ const tier1: Tier = {
             "Zero vector, additive inverse",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "dot-product-cosine-similarity",
