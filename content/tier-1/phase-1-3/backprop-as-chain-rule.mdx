@@ -1,0 +1,410 @@
+---
+title: Backpropagation as calculus, not magic
+tier: 1
+phase: "1.3"
+---
+
+export const graphForwardCode = `# One expression, five operations, one graph.
+# f(x, y, z) = (x + y) * ReLU(z)   with x=2, y=3, z=-1  (so ReLU(z)=0, f=0)
+# and let's compute at x=2, y=3, z=4 too where things are non-degenerate.
+import numpy as np
+
+def forward(x, y, z):
+    a = x + y            # add node
+    b = max(z, 0.0)      # ReLU node
+    f = a * b            # multiply node
+    return f, {"a": a, "b": b, "z": z, "x": x, "y": y}   # cache intermediates
+
+for point in [(2.0, 3.0, 4.0), (2.0, 3.0, -1.0)]:
+    x, y, z = point
+    f, cache = forward(x, y, z)
+    print(f"x={x}, y={y}, z={z}  ->  f = {f}    (a={cache['a']}, b={cache['b']})")`;
+
+export const graphBackwardCode = `# Backward pass on the same graph, walking nodes in reverse and applying chain rule.
+# f = a * b,   a = x + y,   b = ReLU(z).
+# Goal: compute df/dx, df/dy, df/dz for a given input.
+def backward(cache):
+    # local partials of each node w.r.t. its inputs — pure local computations
+    a, b, z, x, y = cache["a"], cache["b"], cache["z"], cache["x"], cache["y"]
+
+    # start with df/df = 1 (the "upstream" gradient at the output node)
+    df = 1.0
+
+    # node: f = a * b
+    da = df * b           # df/da via chain rule (product rule)
+    db = df * a           # df/db
+
+    # node: a = x + y
+    dx_from_a = da * 1    # ∂a/∂x = 1
+    dy_from_a = da * 1    # ∂a/∂y = 1
+
+    # node: b = ReLU(z)  ->  ∂b/∂z = 1 if z > 0 else 0
+    dz = db * (1.0 if z > 0 else 0.0)
+
+    # each input's total gradient (sum over all paths from it to f — here each input has one path)
+    dx = dx_from_a
+    dy = dy_from_a
+    return dx, dy, dz
+
+def forward(x, y, z):
+    a = x + y; b = max(z, 0.0); f = a * b
+    return f, {"a": a, "b": b, "z": z, "x": x, "y": y}
+
+for point in [(2.0, 3.0, 4.0), (2.0, 3.0, -1.0)]:
+    x, y, z = point
+    f, cache = forward(x, y, z)
+    dx, dy, dz = backward(cache)
+    print(f"input {point}: f={f}, gradients df/dx={dx}, df/dy={dy}, df/dz={dz}")`;
+
+export const mlpBackpropCode = `# A tiny MLP by hand: 2-in, 3-hidden (ReLU), 1-out, MSE loss.
+# Forward AND backward pass, so we compute gradients w.r.t. every weight — this IS backprop.
+import numpy as np
+
+rng = np.random.default_rng(0)
+
+# Parameters
+W1 = rng.standard_normal((2, 3)) * 0.5   # 2 inputs -> 3 hidden
+b1 = np.zeros(3)
+W2 = rng.standard_normal((3, 1)) * 0.5   # 3 hidden -> 1 output
+b2 = np.zeros(1)
+
+# One training example
+x = np.array([1.0, 2.0])                 # input feature vector, shape (2,)
+y = np.array([1.5])                      # target, shape (1,)
+
+# ---- Forward pass, cache every intermediate ----
+z1 = x @ W1 + b1                          # (3,) — pre-activation of hidden layer
+h1 = np.maximum(z1, 0.0)                  # (3,) — ReLU
+z2 = h1 @ W2 + b2                         # (1,) — output (linear)
+loss = 0.5 * float((z2 - y) ** 2)         # MSE (scalar)
+
+print(f"forward: z1={z1}, h1={h1}, z2={z2}, loss={loss:.4f}")
+
+# ---- Backward pass, top-down ----
+# start with dL/dL = 1, dL/dz2 = (z2 - y)  (derivative of 0.5*(z2-y)^2 w.r.t. z2)
+dL_dz2 = (z2 - y)                         # shape (1,)
+
+# node z2 = h1 @ W2 + b2  ->  local partials:
+#   ∂z2/∂h1 = W2.T (this is the Jacobian)
+#   ∂z2/∂W2 = h1 (outer with dL_dz2 to get the gradient tensor)
+#   ∂z2/∂b2 = I  (identity — dL_db2 == dL_dz2)
+dL_dW2 = np.outer(h1, dL_dz2)             # shape (3, 1) — same as W2
+dL_db2 = dL_dz2                            # shape (1,)
+dL_dh1 = W2 @ dL_dz2                       # shape (3,) — chain-rule pull back
+
+# node h1 = ReLU(z1)  ->  ∂h1/∂z1 = 1 where z1 > 0, else 0
+dL_dz1 = dL_dh1 * (z1 > 0)                 # shape (3,) — mask elementwise
+
+# node z1 = x @ W1 + b1  ->  local partials:
+dL_dW1 = np.outer(x, dL_dz1)               # shape (2, 3)
+dL_db1 = dL_dz1                            # shape (3,)
+
+print(f"\\ngradients:")
+print(f"dL/dW1 shape {dL_dW1.shape}:\\n{dL_dW1}")
+print(f"dL/db1 = {dL_db1}")
+print(f"dL/dW2 shape {dL_dW2.shape}:\\n{dL_dW2}")
+print(f"dL/db2 = {dL_db2}")
+
+# ---- Take a step and verify loss decreases ----
+lr = 0.05
+W1 -= lr * dL_dW1; b1 -= lr * dL_db1
+W2 -= lr * dL_dW2; b2 -= lr * dL_db2
+
+z1_new = x @ W1 + b1
+h1_new = np.maximum(z1_new, 0.0)
+z2_new = h1_new @ W2 + b2
+loss_new = 0.5 * float((z2_new - y) ** 2)
+print(f"\\nloss after one step: {loss_new:.4f}  (should be < {loss:.4f})")`;
+
+export const forwardVsReverseCode = `# Forward-mode vs reverse-mode autodiff — compare complexity.
+# Forward mode carries "derivative w.r.t. ONE input variable" through the whole graph.
+# Reverse mode carries "gradient of ONE output w.r.t. every intermediate" backward through the graph.
+
+# For f: R^n -> R (many parameters, one loss), reverse mode wins by a factor of n.
+import numpy as np
+
+def f(w):  # a scalar function of n weights; here we just sum squares
+    return float((w ** 2).sum())
+
+# FORWARD MODE — need one pass per input variable (n passes, each cost = one forward)
+def forward_mode_gradient(w):
+    n = len(w)
+    grads = np.zeros(n)
+    eps = 1e-7
+    for i in range(n):
+        e = np.zeros(n); e[i] = 1.0
+        grads[i] = (f(w + eps * e) - f(w - eps * e)) / (2 * eps)  # 2n forward passes
+    return grads
+
+# REVERSE MODE — one forward pass + one backward pass, cost independent of n
+def reverse_mode_gradient(w):
+    return 2 * w   # analytic; in real autograd this is via reverse chain rule
+
+n = 5
+w = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+print("forward-mode grad:", forward_mode_gradient(w))
+print("reverse-mode grad:", reverse_mode_gradient(w))
+print()
+print(f"For n = {n:>3} params: forward mode needs {2*n} function evaluations, reverse mode needs 1 forward + 1 backward.")
+print("For n = 1,000,000: forward mode = 2,000,000 evals; reverse mode = O(1) passes.")
+print("That factor of a million is why every deep-learning framework uses reverse-mode autodiff.")`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/calculus/chain-rule", label: "The chain rule", blurb: "Backprop is the chain rule walked over a computation graph — this chapter shows the walker." },
+  { href: "/learn/mathematics/calculus/multivariable-partials", label: "Partial derivatives & the gradient", blurb: "The output of backprop is one number per parameter — a gradient vector living in the parameter space." },
+]} />
+
+<Motivation title="loss.backward() is the chain rule, algorithmically">
+
+You call `loss.backward()` in PyTorch. In under a second, gradients appear on every one of hundreds of millions of parameters. Nothing is magic — it's the chain rule, executed as a graph algorithm called **reverse-mode automatic differentiation** (a.k.a. backpropagation).
+
+For a GenAI engineer, understanding backprop mechanically matters for three practical reasons:
+
+1. **Debugging**. When training diverges or gradients vanish/explode, knowing which nodes contribute what to the gradient lets you diagnose *which layer* is the problem — LayerNorm can save you, or activation choice, or initialization.
+2. **Custom operations**. Writing a new PyTorch layer sometimes requires implementing `.backward()` by hand — chain-rule bookkeeping over your op's local Jacobian. Same math, hand-coded.
+3. **Memory and speed**. Backprop's memory cost is *linear in the forward pass* because it stores every intermediate. Gradient checkpointing trades compute for memory by recomputing intermediates. Mixed-precision training relies on gradient magnitudes staying representable. All of these have chain-rule reasoning under the hood.
+
+This chapter shows the algorithm end-to-end. You've already seen the pieces: forward pass caches values, backward pass multiplies local slopes back. Here we put them together on a real (tiny) neural network, watch the shapes flow, and compare hand-written backprop against a torch reference. If you finish this chapter and *still* find `loss.backward()` mysterious, we've failed — because the whole algorithm is the chain rule with careful bookkeeping and nothing more.
+
+</Motivation>
+
+<Intuition title="Forward paints the graph, backward walks it in reverse">
+
+Any computation, no matter how large, can be viewed as a **directed graph**: leaves are inputs (data, parameters), internal nodes are operations, the root is the output (typically a scalar loss). To evaluate the loss you *forward*-walk from leaves to root, computing values at every node.
+
+To compute gradients, walk the graph *backward* from root to leaves. Start with dLoss/dLoss = 1. At each node, use the chain rule to convert "gradient of loss with respect to this node's output" into "gradients of loss with respect to this node's inputs." Multiply by the node's **local partials** (the derivative of its output with respect to each input, evaluated at the values seen during the forward pass). Send those gradients backward to the input nodes. Repeat until every parameter has a gradient.
+
+Two rules cover the whole algorithm:
+
+- **Chain rule along an edge**: if an edge goes from node u to node v, then dLoss/du gets a contribution of (dLoss/dv) · (∂v/∂u).
+- **Sum over incoming contributions**: if node u feeds *multiple* downstream nodes v_1, v_2, …, the gradient at u is the *sum* of contributions from each downstream user (this is the multiple-paths rule from the chain-rule chapter).
+
+That's it. Every deep-learning framework's autograd engine is a graph traversal implementing these two rules with efficient tensor operations.
+
+</Intuition>
+
+<Recall term="Computation graph">
+
+A computation graph is a directed acyclic graph where every node is a value (a scalar, vector, matrix, or tensor) and every edge represents a data-flow dependency ("y depends on x through this operation"). Building it during the forward pass is what makes autograd possible — the graph *records* the operations that produced each value, so the backward pass can retrace them in reverse.
+
+</Recall>
+
+## The algorithm — one forward pass, one backward pass, done
+
+Given a scalar loss L computed from a graph of operations on inputs (x_1, …, x_n) and parameters (w_1, …, w_m):
+
+**Forward pass**:
+1. Walk the graph in topological order (leaves first).
+2. At each node, compute the value using the inputs' values and the node's operation.
+3. Cache the value (and any additional quantities needed by the backward computation of the local partials).
+
+**Backward pass**:
+1. Initialize the gradient at the output node: dL/dL = 1.
+2. Walk the graph in reverse topological order (output first).
+3. At each node u, its gradient dL/du is now known (initialized to zero, then accumulated as downstream nodes send contributions).
+4. For each input v of node u, compute the contribution dL/dv += dL/du · (∂u/∂v). The local partial ∂u/∂v is evaluated at the forward-pass values.
+5. When you've processed every node, the leaves (parameters) have their final gradients.
+
+The total cost is roughly **two forward passes** — one for the actual forward, one for the backward (which has the same operation count as forward, since every node's local partial is roughly as expensive to compute as the node's original value). This is the deep reason deep learning is tractable: computing gradients w.r.t. millions of parameters costs the same as just running the model once, up to a small constant factor.
+
+<RunnableCode title="Forward pass on a tiny graph — cache the intermediates" code={graphForwardCode} packages={["numpy"]} />
+
+<RunnableCode title="Backward pass — chain-rule the gradients back to each input" code={graphBackwardCode} packages={["numpy"]} />
+
+## Backprop on a real (tiny) neural network
+
+Here's a 2-input, 3-hidden-unit, 1-output MLP with ReLU activation and MSE loss — the smallest network with all the operations of a real deep-learning system (matrix multiplication, activation, another matrix multiplication, scalar loss). We compute the forward pass, cache every intermediate, then reverse-walk to compute gradients with respect to every weight and bias. This is *literally* what PyTorch's autograd does for a linear + ReLU + linear + MSE chain.
+
+<RunnableCode title="Backprop for a 2→3→1 MLP by hand" code={mlpBackpropCode} packages={["numpy"]} />
+
+Read the shapes carefully:
+
+- **Forward pass** produces intermediates z1 (shape 3), h1 (shape 3), z2 (shape 1). The MSE loss is scalar. All cached.
+- **Backward pass** starts with dL/dz2 = (z2 − y), shape 1 — the derivative of MSE.
+- The first "matmul-backward" is at the output layer: for z2 = h1 @ W2 + b2, the local partials are ∂z2/∂W2 = h1 (rank-1 gradient tensor via `outer(h1, dL_dz2)`), ∂z2/∂b2 = 1 (dL_db2 = dL_dz2 verbatim), ∂z2/∂h1 = W2.T (chain-rule pullback to h1). Shape story: `dL_dW2` has shape (3, 1) = same as W2; `dL_dh1` has shape (3,) = same as h1.
+- **ReLU-backward** is elementwise: dh1/dz1 = 1 where z1 > 0, else 0. Simple mask.
+- **Second matmul-backward** at the input layer: same pattern, one layer down. `dL_dW1` has shape (2, 3) = same as W1.
+
+Every layer's backward operation has the same shape story: **gradient of a parameter has the same shape as the parameter itself**. Backprop's output is a fresh set of tensors, one per learnable parameter, ready to be consumed by `optimizer.step()`.
+
+## Why REVERSE mode? — the one-output, many-parameters asymmetry
+
+Automatic differentiation has two modes:
+
+- **Forward mode** computes derivatives of *every output* with respect to *one input variable* per pass. To get gradients w.r.t. n parameters, you need n forward passes.
+- **Reverse mode (backprop)** computes gradients of *one output* with respect to *every input variable* in one forward + one backward pass.
+
+For a neural network with n parameters (say 1 billion) and 1 output (the scalar loss), forward mode would need 1 billion passes. Reverse mode needs 1 pass, forward + backward. **That's a factor of 10^9 speedup** — the reason reverse-mode autodiff was so consequential for deep learning.
+
+<RunnableCode title="Forward mode vs reverse mode — why we always use reverse" code={forwardVsReverseCode} packages={["numpy"]} />
+
+The rule of thumb:
+
+- **Many inputs, few outputs → reverse mode** (backprop). This is neural network training: many parameters, one loss.
+- **Few inputs, many outputs → forward mode**. This is rare in DL but appears in scientific computing (e.g., sensitivity analysis of an ODE).
+- **Same number of inputs and outputs → both are roughly equal**; pick whichever is easier to implement.
+
+## The traps that matter
+
+**Forward pass must run before backward pass** — you need the intermediate values to evaluate local partials at. This is why PyTorch's `loss.backward()` errors if you never ran the forward pass, and why setting `torch.no_grad()` context skips saving intermediates (saving memory when you don't plan to call backward).
+
+**Local partials are evaluated at the values seen, not symbolically.** In the MLP above, ReLU-backward is `dL_dh1 * (z1 > 0)` — using the SAVED z1 to decide whether the neuron was active. Change the input, run forward again, get new z1's; that's why "backward" is coupled to the *specific* forward pass that just ran.
+
+**Multiple downstream users → gradients ADD.** If parameter W is used in 5 places in the network (unusual for simple architectures, common for shared embeddings or convolutional weights), its total gradient is the sum of contributions from all 5. Autograd handles this automatically via `.grad += ...` accumulation. If you write custom backward, forget the addition and you'll get wrong gradients on shared parameters.
+
+**Memory blows up with graph depth**. Backprop's memory cost is O(depth of the deepest forward computation), because every intermediate value must be cached until the backward pass consumes it. For 100+ layer networks or long sequences, this is huge. **Gradient checkpointing** trades some compute for memory by dropping some intermediates and recomputing them during backward — same result, more forward passes, less memory. Standard technique for training transformers with long context.
+
+**Non-differentiable operations don't have gradients**. `argmax`, `argmin`, `round`, `if` on tensor values — no gradient can flow through. Workarounds include soft versions (softmax instead of argmax) or **straight-through estimators** (pretend the gradient of round is 1, used in vector-quantized autoencoders).
+
+**PyTorch caches gradients, doesn't overwrite.** After `loss.backward()`, `w.grad` accumulates the new gradient into whatever was there before. Standard training loops call `optimizer.zero_grad()` before every step to clear the previous iteration's gradient. Forget it and gradients grow unboundedly — a top-N debugging mistake for anyone hand-rolling a training loop.
+
+<RealWorldML title="Autograd in one paragraph — how PyTorch actually does it">
+
+Every tensor in PyTorch with `requires_grad=True` carries a hidden pointer to the operation that created it — the "grad_fn." When you do `z = x + y`, z's grad_fn is `AddBackward` and it remembers pointers back to x and y. Chain such operations and you get a graph of grad_fns pointing back to input tensors.
+
+Calling `loss.backward()` triggers a reverse-topological walk of this graph. Each node knows how to compute its own local backward (`AddBackward` sends the incoming gradient equally to both inputs; `MatMulBackward` does the transposed-matmul chain-rule pullback; `ReLUBackward` masks with the forward's activation mask). The walker starts with `dloss = 1.0`, traverses the graph in reverse, and accumulates gradients into each leaf tensor's `.grad` attribute.
+
+That's it. There's no automatic differentiation *by symbolic manipulation* — no rewriting of expressions. Just a graph of operations, each of which knows its own local backward, and a driver that walks the graph. The genius is *not* in the calculus; the genius is in the graph representation and the efficient tensor operations backing each node's local backward. Everything else you learned in this chapter is what PyTorch is doing under the hood, on GPU-accelerated tensors, with 10^9 parameters.
+
+Try it yourself: `w = torch.tensor([1.0, 2.0], requires_grad=True); loss = (w ** 2).sum(); loss.backward(); print(w.grad)` → tensor([2., 4.]) — the analytic ∇(w²) = 2w, matching our hand computation. Now scale to a real model.
+
+</RealWorldML>
+
+<StudyDepth
+  intro={<>Backprop is not a separate topic from calculus — it's the chain rule, applied to a graph, with efficient bookkeeping. Once you can trace the shapes through a forward-then-backward pass on a small MLP by hand, autograd stops being magic.</>}
+  drill={[
+    <>Forward pass = topological walk from leaves to root, caching every intermediate value</>,
+    <>Backward pass = reverse walk from root to leaves, applying chain rule at each edge, summing over multiple paths</>,
+    <>For a matmul <code>y = x @ W</code>: local partials are <code>∂y/∂W = x</code> (outer with upstream), <code>∂y/∂x = W.T</code> (matmul with upstream)</>,
+    <>For ReLU: <code>∂ReLU/∂z = 1 if z &gt; 0 else 0</code>; backward is elementwise mask by the forward mask</>,
+    <>Every parameter's gradient tensor has the SAME shape as the parameter itself — dimensional check for correctness</>,
+    <>Reverse-mode wins when there are many parameters and few outputs — the neural-network case</>,
+    <>Memory cost = O(intermediates cached) → gradient checkpointing trades compute for memory in long networks</>,
+  ]}
+  skim={[
+    <>Symbolic differentiation and its exponential blow-up — the reason we don't use it</>,
+    <>Higher-order derivatives (Hessians) via double backprop — used in some meta-learning setups; call <code>torch.autograd.grad</code> twice</>,
+    <>Straight-through estimators for non-differentiable ops (argmax, sampling) — appears in VQ-VAE and REINFORCE</>,
+    <>Jax's <code>vmap</code>/<code>pmap</code>/<code>jit</code> transforms — same reverse-mode idea, different execution model</>,
+  ]}
+/>
+
+<CodeItYourself title="Three drills — hand-code backprop, verify vs analytic, feel the shapes">
+
+1. **Forward + backward for a single layer.** Take y = ReLU(w · x + b) with scalar y, x = 2.0, w = 0.5, b = -0.1. (a) Compute the forward pass. (b) Assume the "upstream" gradient dL/dy = 1.0 and compute dL/dw, dL/db, dL/dx by hand. (c) Verify with finite differences by perturbing w and b individually. *Expected: dL/dw = x = 2 (if z > 0), dL/db = 1, dL/dx = w = 0.5.*
+
+2. **Backprop for a 2-layer MLP with shared shapes.** Extend the MLP in the cell above to 3-input, 5-hidden, 1-output. Run forward and backward. Verify that `dL_dW1.shape == W1.shape` and `dL_dW2.shape == W2.shape`. This shape check is the fastest sanity check for hand-coded backward passes — if the gradient shape doesn't match the parameter shape, you've made a bug.
+
+3. **PyTorch cross-check.** Take the MLP from drill 2, run your hand-written forward + backward. Then build the same MLP in PyTorch with `torch.nn.Linear`, `torch.nn.ReLU`, and MSE loss; run the equivalent forward and call `loss.backward()`. Compare `layer.weight.grad` against your hand-computed `dL_dW1` (or whatever). They should agree to floating-point precision. This is the moment "autograd is not magic" clicks.
+
+</CodeItYourself>
+
+<Summary>
+
+- **Backpropagation is reverse-mode automatic differentiation** — the chain rule executed as a graph algorithm. Two passes: forward pass caches intermediate values; backward pass walks the graph in reverse, sending gradients from output to inputs via the chain rule.
+- **At each node**: local partial = the derivative of the node's output w.r.t. its inputs, evaluated at the forward-pass values. Upstream gradient × local partial = contribution to the input's gradient.
+- **Multiple downstream users of a node → sum the contributions.** Autograd handles this via gradient accumulation.
+- **Shape check**: a parameter's gradient has the same shape as the parameter itself. Fastest debug.
+- **Reverse mode is chosen for DL because**: many parameters (n), one output (scalar loss). Reverse mode is O(1) passes; forward mode would need n. This is the algorithmic magic that makes training billion-parameter models tractable.
+- **Traps**: forward must run before backward (needs intermediates); memory scales with graph depth (mitigate with gradient checkpointing); non-differentiable ops need soft approximations or straight-through estimators.
+- **Autograd is a graph engine, not calculus wizardry**. Every op knows its own local backward; the driver walks the graph. That's all.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>For f(x) = 3x² and starting with upstream gradient df/df = 1, compute df/dx by hand.</>,
+      hint: <>One node: f = 3x². Local partial ∂f/∂x = 6x.</>,
+      answer: <>Local partial: ∂f/∂x = 6x. Chain rule with upstream df/df = 1: <b>df/dx = 1 · 6x = 6x</b>. That's the entire "backprop" for a one-node graph — matches the ordinary single-variable derivative, as it should.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>Consider f = a + b where a = x and b = x. Compute df/dx via reverse mode, and note how the "sum over paths" rule appears.</>,
+      hint: <>x reaches f via two paths — via a and via b. Sum contributions.</>,
+      answer: <>Forward pass: a = x, b = x, f = a + b = 2x. So df/dx = 2 (analytic). <br /><br />Backward: df/df = 1. At the add node, ∂f/∂a = 1 and ∂f/∂b = 1, so da = 1 and db = 1. <br />Now both a and b flow back to x. Contribution via a: da · (∂a/∂x) = 1 · 1 = 1. Contribution via b: db · (∂b/∂x) = 1 · 1 = 1. <br /><b>Sum: dx = 1 + 1 = 2.</b> ✓ <br /><br /> This is the "sum over paths" rule in action — x's gradient is the sum of contributions from every downstream use. Every parameter-sharing pattern (e.g., weight tying in transformers) relies on this addition.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>For y = sigmoid(w · x) with scalar w, x, compute dy/dw by hand. (Recall sigmoid'(z) = sigmoid(z)(1 − sigmoid(z)).)</>,
+      hint: <>Two-node chain: z = w·x, y = sigmoid(z). Chain rule: dy/dw = dy/dz · dz/dw.</>,
+      answer: <>Forward: z = w · x, y = sigmoid(z). Local partials: ∂y/∂z = sigmoid(z)(1 − sigmoid(z)) = y(1 − y). ∂z/∂w = x. <br /><br /> By the chain rule: <b>dy/dw = y(1 − y) · x</b>. <br /><br /> This is the classic "sigmoid times its complement times the input" formula that dominated pre-ReLU neural networks. Notice that for y near 0 or 1 (saturated sigmoid), the factor y(1 − y) is near 0 — the gradient vanishes. That's the local reason sigmoid neurons get stuck: at saturation, dy/dw ≈ 0, and gradient descent can't update the weight.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Explain how gradient checkpointing works and what tradeoff it makes. Why is it useful for training long-sequence transformers?</>,
+      hint: <>Backprop needs cached intermediates. What if you discard them and recompute?</>,
+      answer: <><b>Mechanism.</b> Instead of caching every intermediate value during the forward pass, gradient checkpointing caches only a sparse subset (say, every k-th layer). When the backward pass needs a non-cached intermediate, it re-runs the forward computation for just that segment to reconstruct the value, then uses it for the backward step. <br /><br /><b>Tradeoff.</b> Memory drops by ~k× (you're caching k× fewer values); compute rises by ~k× (each non-cached segment is computed twice — once in the original forward, once during recomputation). Typical choice k = √L for L layers gives a nice balance (memory √L × smaller, compute √L × larger). <br /><br /><b>Why transformers benefit.</b> Attention layers cache activations of shape (batch, heads, seq, seq) or (batch, seq, d_model) — with long sequences (say 128k tokens), these tensors are enormous. Memory becomes the bottleneck: your GPU can't hold the whole graph's intermediates. Trading compute (which is fast and parallel) for memory (which is fixed per GPU) lets you train models that wouldn't otherwise fit. Every long-context transformer training run uses this. Flash Attention takes it further by recomputing the attention matrix on the fly rather than storing it — same idea, applied inside the attention block.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>For a matrix-multiplication node z = x @ W (with x shape (n,) and W shape (n, m), so z has shape (m,)), derive the local partials ∂z/∂W and ∂z/∂x and describe the shapes of dL/dW and dL/dx in terms of the upstream gradient dL/dz (shape (m,)).</>,
+      hint: <>Think in terms of the outer product for dL/dW, and the transpose of W for dL/dx.</>,
+      answer: <>Component-wise: z_j = Σᵢ xᵢ · W_(ij). <br /><br /><b>Gradient w.r.t. W.</b> ∂z_j/∂W_(ij) = xᵢ (partial derivative w.r.t. the specific entry W_(ij)). By the chain rule, dL/dW_(ij) = Σ_j (dL/dz_j) · (∂z_j/∂W_(ij)) — but each W_(ij) affects only one z_j (namely z_j), so the sum collapses to a single term: <b>dL/dW_(ij) = xᵢ · (dL/dz_j)</b>. In tensor form: <b>dL/dW = outer(x, dL_dz)</b>, shape (n, m) — same as W. ✓ <br /><br /><b>Gradient w.r.t. x.</b> ∂z_j/∂xᵢ = W_(ij). By the chain rule: dL/dxᵢ = Σ_j (dL/dz_j) · W_(ij). In tensor form: <b>dL/dx = W @ dL_dz</b>, shape (n,) — same as x. ✓ <br /><br /> Notice the "transpose" appearing: the *forward* used <code>z = x @ W</code>; the *backward* pullback to x uses <code>dL/dx = W @ dL_dz</code>. In batched form (X of shape (batch, n) instead of (n,)), the pullback becomes <code>dL/dX = dL/dZ @ W.T</code> — this is where the transpose in transformer backward passes comes from. Same math, generalized to batches. Every deep learning library implements exactly this operation as its "MatMulBackward."</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Why is reverse-mode autodiff dramatically more efficient than forward-mode for neural network training? Frame the argument in terms of the number of inputs vs outputs of the loss function.</>,
+      hint: <>Count how many "sensitivity" scalars you need to propagate through the graph in each mode.</>,
+      answer: <>A neural network's loss is a function L : ℝⁿ → ℝ where n is the number of parameters (say 10^9). We want ∇L, a vector in ℝⁿ. <br /><br /><b>Forward mode</b> propagates one directional derivative dLoss/dv_seed at a time through the graph — pick a "seed" input direction, forward-propagate. To get all n partial derivatives (one per input dimension), you need n separate passes, each roughly as expensive as a forward pass. Total cost: <b>n × forward_cost</b>. <br /><br /><b>Reverse mode</b> propagates the gradient of the output back through the graph — one forward pass to cache values, one backward pass to compute all n input gradients. Total cost: <b>~2 × forward_cost</b>, independent of n. <br /><br /><b>Advantage: n / 2</b>. For n = 10^9 (a modest LLM), reverse mode is 500 million times faster. This is a *complexity* result, not a constant-factor optimization — no matter how clever your forward-mode implementation, it *cannot* be as fast as reverse mode for many-input, one-output functions. Backprop's algorithmic superiority is what made large-scale neural network training practical; without it, we would still be stuck in the pre-2010 world of hand-tuned small models. <br /><br /> The dual result: for few-input, many-output functions (say n input variables and m &gt;&gt; n outputs), forward mode wins by a factor of m/n. This case arises in some scientific-computing settings but rarely in ML.</>
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "The forward pass of backpropagation does what?",
+      choices: [
+        { text: "Computes the output loss AND caches every intermediate value for later use", correct: true },
+        { text: "Only computes gradients" },
+        { text: "Only computes the loss; caches nothing" },
+        { text: "Randomly initializes weights" },
+      ],
+      explanation: <>Forward pass evaluates the graph from inputs to output, caching every intermediate value along the way. The backward pass needs these cached values to evaluate local partials at the right points. Setting `torch.no_grad()` skips the caching, saving memory when you don't plan to call `.backward()`.</>
+    },
+    {
+      q: "At each edge in the computation graph, backprop applies:",
+      choices: [
+        { text: "Symbolic differentiation of the entire expression" },
+        { text: "The chain rule: upstream gradient × local partial derivative of this edge", correct: true },
+        { text: "Finite differences with a small step size" },
+        { text: "Automatic simplification of the algebraic expression" },
+      ],
+      explanation: <>Reverse-mode autodiff = chain rule at every edge. dL/du at this node gets contribution (dL/dv) · (∂v/∂u) from each downstream user v. No symbolic manipulation, no numerical approximation — pure chain rule with cached values.</>
+    },
+    {
+      q: "If a parameter W is used in multiple places in the computation graph, its total gradient is:",
+      choices: [
+        { text: "The maximum of all contributions" },
+        { text: "The sum of contributions from every downstream user", correct: true },
+        { text: "The average across users" },
+        { text: "Only the contribution from the first use" },
+      ],
+      explanation: <>Multiple paths in a graph ADD (from the multivariable chain rule). Autograd handles this by accumulating gradients into `.grad` as each downstream backward call contributes. Weight tying (shared embeddings) and shared conv filters rely on this correctness — the same parameter feeds multiple loss paths, and its gradient is the sum.</>
+    },
+    {
+      q: "Why do deep learning frameworks use reverse-mode autodiff instead of forward-mode?",
+      choices: [
+        { text: "Forward mode is unstable numerically" },
+        { text: "Because loss functions have MANY inputs (parameters) and ONE output; reverse mode is O(1) passes, forward mode is O(n) passes", correct: true },
+        { text: "Forward mode can't handle nonlinearities" },
+        { text: "Reverse mode is simpler to implement" },
+      ],
+      explanation: <>The scalar-output/million-parameter asymmetry makes reverse mode dramatically cheaper: one backward pass computes gradients w.r.t. every parameter, while forward mode would need one pass per parameter (millions of passes). This algorithmic difference — not a constant factor — is what makes large-scale neural network training practical.</>
+    },
+    {
+      q: "The gradient of a parameter W has:",
+      choices: [
+        { text: "Shape (1,) — always a scalar" },
+        { text: "The same shape as W itself", correct: true },
+        { text: "Shape (n_params,) — a giant flat vector" },
+        { text: "The shape of the loss (a scalar)" },
+      ],
+      explanation: <>dL/dW has the same shape as W. This is the fastest sanity check for hand-coded backward passes: if your gradient tensor doesn't match the parameter shape, you have a bug (usually a missing transpose or a shape mismatch in the local partial). Optimizers depend on this — they do `W -= lr * W.grad` in place, which requires matching shapes.</>
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/calculus/backprop-as-chain-rule" title="Backpropagation as calculus, not magic" />

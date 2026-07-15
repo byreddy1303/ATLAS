@@ -1,0 +1,399 @@
+---
+title: The chain rule
+tier: 1
+phase: "1.3"
+---
+
+export const composedCode = `# One composed function, two ways of taking its derivative.
+# f(x) = sin(x^2). Let u = x^2 (inner) and h(u) = sin(u) (outer).
+import numpy as np
+
+def f_direct(x):
+    return np.sin(x ** 2)
+
+def df_chain(x):
+    # d/dx sin(x^2)  =  cos(x^2)  *  2x
+    return np.cos(x ** 2) * (2 * x)
+
+def df_numerical(x, h=1e-6):
+    return (f_direct(x + h) - f_direct(x - h)) / (2 * h)
+
+for x in [0.5, 1.0, 1.5]:
+    print(f"x = {x}:  chain-rule = {df_chain(x):.6f}   numerical = {df_numerical(x):.6f}")`;
+
+export const twoLinkCode = `# Two-link chain: y = h(g(f(x))). Watch each local slope multiply.
+import numpy as np
+
+# example: y = ((x + 1)^2 + 3)^0.5
+def f(x):  return x + 1                 # inner
+def g(u):  return u ** 2 + 3            # middle
+def h(v):  return np.sqrt(v)            # outer
+
+# local slopes (derivatives w.r.t. each link's own input)
+def df(x):  return 1.0                  # d(x+1)/dx = 1
+def dg(u):  return 2 * u                # d(u^2 + 3)/du = 2u
+def dh(v):  return 1 / (2 * np.sqrt(v)) # d sqrt(v)/dv = 1/(2 sqrt v)
+
+x = 2.0
+u = f(x)                                # 3
+v = g(u)                                # 12
+y = h(v)                                # sqrt(12) ~ 3.464
+
+# chain rule: dy/dx = dh/dv * dg/du * df/dx, all evaluated at the visited points
+chain = dh(v) * dg(u) * df(x)
+numerical = (h(g(f(x + 1e-6))) - h(g(f(x - 1e-6)))) / 2e-6
+
+print(f"y = {y:.4f}")
+print(f"local slopes: df={df(x)}  dg={dg(u)}  dh={dh(v):.4f}")
+print(f"chain product = {chain:.6f}")
+print(f"numerical     = {numerical:.6f}")`;
+
+export const graphCode = `# Show that the chain rule works over a graph — one input, one output, many intermediates.
+# f: y = (a*b) + sin(c),  where a = x^2, b = x + 1, c = x - 3.  Compute dy/dx by the rule.
+import numpy as np
+
+x = 1.5
+
+# forward pass — save every intermediate you'll need on the backward pass
+a = x ** 2
+b = x + 1
+c = x - 3
+p = a * b            # product
+s = np.sin(c)
+y = p + s
+
+# LOCAL slopes at each node (with respect to its own inputs)
+# a = x^2       -> da/dx = 2x
+# b = x + 1     -> db/dx = 1
+# c = x - 3     -> dc/dx = 1
+# p = a * b     -> dp/da = b, dp/db = a
+# s = sin(c)    -> ds/dc = cos(c)
+# y = p + s     -> dy/dp = 1, dy/ds = 1
+
+# Backward pass: dy/dx = dy/dp * (dp/da * da/dx + dp/db * db/dx) + dy/ds * ds/dc * dc/dx
+dy_dp = 1
+dy_ds = 1
+
+dp_da = b
+dp_db = a
+
+ds_dc = np.cos(c)
+
+da_dx = 2 * x
+db_dx = 1
+dc_dx = 1
+
+dy_dx = dy_dp * (dp_da * da_dx + dp_db * db_dx) + dy_ds * ds_dc * dc_dx
+
+# numerical check
+def f(x):
+    return (x ** 2) * (x + 1) + np.sin(x - 3)
+
+numerical = (f(x + 1e-6) - f(x - 1e-6)) / 2e-6
+
+print(f"y = {y:.6f}")
+print(f"chain-rule dy/dx = {dy_dx:.6f}")
+print(f"numerical  dy/dx = {numerical:.6f}")`;
+
+export const backpropDemoCode = `# The simplest possible neural network: y = ReLU(w * x + b) * v.
+# Compute dLoss/dw, dLoss/db, dLoss/dv by the chain rule — this IS backprop.
+import numpy as np
+
+# Data: one sample
+x, target = 2.0, 1.0
+
+# Parameters (weights)
+w, b, v = 1.5, 0.5, 0.7
+
+# ---- Forward pass, cache every intermediate ----
+z = w * x + b              # affine
+h = max(z, 0.0)            # ReLU
+y = v * h                  # output
+loss = 0.5 * (y - target) ** 2
+
+# ---- Backward pass, top-down ----
+dL_dy = (y - target)                        # d loss / d y
+dy_dv = h                                    # d y / d v
+dy_dh = v                                    # d y / d h
+dh_dz = 1.0 if z > 0 else 0.0                # d ReLU / d z
+dz_dw = x                                    # d z / d w
+dz_db = 1.0                                  # d z / d b
+
+# Chain the local slopes back to each parameter
+dL_dv = dL_dy * dy_dv
+dL_dw = dL_dy * dy_dh * dh_dz * dz_dw
+dL_db = dL_dy * dy_dh * dh_dz * dz_db
+
+print(f"loss  = {loss:.4f}")
+print(f"grads: dL/dw = {dL_dw:.4f}   dL/db = {dL_db:.4f}   dL/dv = {dL_dv:.4f}")
+
+# Take one gradient-descent step and confirm loss goes down
+lr = 0.05
+w2, b2, v2 = w - lr * dL_dw, b - lr * dL_db, v - lr * dL_dv
+loss2 = 0.5 * (v2 * max(w2 * x + b2, 0.0) - target) ** 2
+print(f"loss after one step: {loss2:.4f}  (should be smaller than {loss:.4f})")`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/vectors-space/dot-product-cosine-similarity", label: "Dot product & cosine similarity", blurb: "Chain rule needs a solid feel for multiplication as combining rates — one factor per link." },
+  { href: "/learn/mathematics/calculus/gradient-descent-intuition", label: "Gradient descent — the intuition", blurb: "The chain rule is what lets gradient descent walk through a many-layered function; this chapter is the engine of that walker." },
+]} />
+
+<Motivation title="Every layer of an LLM is a link in one giant chain">
+
+A transformer with 96 layers is a composition of 96 functions: the token embedding is transformed by layer 1, whose output feeds layer 2, whose output feeds layer 3, all the way to the final softmax logits. From the perspective of a single loss value at the top, the model is one enormous nested function of every learnable weight.
+
+Training that model means adjusting every weight to shrink the loss. To do that we need one number per weight: how much would the loss change if we nudged this specific weight by a tiny amount? That's a derivative. And computing derivatives through a composition of 96 functions is exactly what the **chain rule** does. Backprop, the algorithm that trains every neural network in the world, is nothing more than the chain rule applied to a computation graph with clever bookkeeping.
+
+For a GenAI engineer, "chain rule" is not the school-book equation for compound function derivatives — it's the geometric fact that **local slopes multiply along a chain**, and it's the reason gradients flow (or vanish, or explode) through deep networks. This chapter gives you the one identity you need, three visual pictures for what it means, and the smallest possible neural network's backprop worked out entirely by hand — the same math autograd is doing when you call `loss.backward()`.
+
+</Motivation>
+
+<Intuition title="A conversion between units">
+
+Picture a chain of gears. Turning gear A by one degree turns gear B by three degrees (ratio 3). Turning gear B by one degree turns gear C by two degrees (ratio 2). How many degrees does gear C turn per one-degree turn of gear A?
+
+Multiply the ratios: **3 × 2 = 6 degrees per degree**. The composition of two ratios is one bigger ratio, and it's just the product.
+
+That's the chain rule. If y depends on u (rate dy/du) and u depends on x (rate du/dx), then y depends on x with rate:
+
+$$
+\frac{dy}{dx} \;=\; \frac{dy}{du} \cdot \frac{du}{dx}
+$$
+
+The "d" symbols look like they cancel; they *behave* like they cancel because rates compose by multiplication. Chain three functions, three factors multiply. Chain a hundred functions, a hundred factors multiply. That's the entire story.
+
+</Intuition>
+
+<Recall term="Derivative">
+
+The derivative of f at x, written f′(x) or df/dx, is the instantaneous rate at which f changes as x changes — the slope of the tangent line at that point. Formally, it's the limit of the average rate (f(x+h) − f(x))/h as h approaches zero. Small nudge Δx in the input produces a nudge f′(x)·Δx in the output, to first order.
+
+</Recall>
+
+## The chain rule — one identity in three languages
+
+Given a composition y = h(g(x)) — apply g first, then apply h — the derivative of y with respect to x is:
+
+$$
+\frac{d}{dx}\, h(g(x)) \;=\; h'(g(x)) \cdot g'(x)
+$$
+
+Three equivalent phrasings:
+
+- **Leibniz form** (best for chains): if y = h(u) and u = g(x), then dy/dx = (dy/du) · (du/dx). Each link contributes a factor.
+- **Prime form** (best for one composition): if F(x) = h(g(x)), then F′(x) = h′(g(x)) · g′(x). Note the *inside* function is evaluated at x before the outer derivative is evaluated at that value.
+- **Rate composition** (best intuition): "how fast y responds to x" = "how fast y responds to u, at the u you're currently at" × "how fast u responds to x, at the x you're currently at."
+
+The subtlety is what to evaluate where: h′ must be evaluated at u = g(x), not at x. Get this wrong and everything else breaks. In our gear picture: the second gear's "rate" depends on where you are on it, so measure it at the position the first gear actually delivered.
+
+<RunnableCode title="One composition — sin(x^2) = h(g(x))" code={composedCode} packages={["numpy"]} />
+
+## Multiple links — the product of local slopes
+
+Two functions extend to any number. For y = h(g(f(x))):
+
+$$
+\frac{dy}{dx} \;=\; h'(g(f(x))) \cdot g'(f(x)) \cdot f'(x)
+$$
+
+— **one factor per link**, each evaluated at the intermediate value the forward pass produced. For a deep network, the "forward pass" is exactly the process of computing all these intermediate values from the input; the "backward pass" is multiplying together the local slopes, going backward from the output.
+
+<RunnableCode title="Three-link chain — evaluate slopes at the visited points" code={twoLinkCode} packages={["numpy"]} />
+
+Notice the *order* of the product doesn't affect the answer (scalar multiplication is commutative), but the *evaluation point* of each factor does. df is evaluated at x, dg at f(x) = u, dh at g(f(x)) = v. This distinction is invisible for scalars — you just multiply three numbers — but it becomes the whole story once we generalize to vectors (Jacobians) in the multivariable chapter.
+
+## The graph view — one input, many paths
+
+Real networks are not straight chains. Consider a function where two intermediate variables both depend on x, and both feed into the output:
+
+- a = f_a(x), b = f_b(x)
+- y = g(a, b)
+
+The chain rule generalizes: **total derivative = sum over all paths from x to y**, and each path contributes the product of local slopes along it.
+
+$$
+\frac{dy}{dx} \;=\; \frac{\partial y}{\partial a}\, \frac{da}{dx} \;+\; \frac{\partial y}{\partial b}\, \frac{db}{dx}
+$$
+
+The picture: draw a graph where every function is a node and every arrow points to what depends on what. For each variable of interest (x), find every path from x to y. Multiply local slopes along each path, then sum the paths.
+
+<RunnableCode title="Sum-over-paths on a small graph" code={graphCode} packages={["numpy"]} />
+
+This is precisely how autograd works internally. It builds a computation graph during the forward pass (each operation registers itself and the inputs it saw), then during the backward pass walks the graph in reverse, applying the "sum over paths" rule at each node — collecting local slopes and multiplying them by the "upstream" gradient that arrived from the output side.
+
+## The most important consequence — backprop is chain rule + a graph
+
+Here is the smallest possible neural network — one input feature, one hidden unit with ReLU, one output — with backprop worked out entirely by hand. It's a straight application of the chain rule to a computation graph. **Every deep-learning library implements exactly this operation, just with tensors instead of scalars and thousands of layers instead of three.**
+
+<RunnableCode title="Backprop on a one-hidden-unit network — chain rule in disguise" code={backpropDemoCode} packages={["numpy"]} />
+
+Read the cell:
+
+1. **Forward pass** builds every intermediate value (z, h, y, loss) and caches them. Caching matters because the backward pass needs those values to evaluate local slopes at the right points.
+2. **Local slopes.** For each node, compute the derivative with respect to *its own inputs* — a purely local calculation. dz/dw = x (the input) is local to the affine unit; dh/dz depends on whether the ReLU fired (its slope is 1 or 0). You only need to know the operation and its inputs; you never look at the whole network.
+3. **Multiply back to the parameter.** For each parameter (w, b, v), multiply the local slopes along the path from that parameter to the loss. dL/dw = dL/dy · dy/dh · dh/dz · dz/dw — four factors, one per link.
+4. **Take a step.** Subtract lr · gradient from each parameter. Recompute the loss. It should go down. If it doesn't, either the gradient is wrong or the learning rate is too big.
+
+Repeat that for a network with 1B parameters, and you're training GPT-3.
+
+## The traps that matter
+
+**Evaluate each factor at the right point.** In `h′(g(x)) · g′(x)`, the outer derivative h′ is evaluated at `g(x)` — the *output of the inner function*, not the original x. Missing this substitution is the classic beginner mistake and is why the forward pass has to run before the backward pass (to know what values to evaluate at).
+
+**Multiple paths ADD, single paths MULTIPLY.** If x flows to y through two different intermediate nodes a and b, the two contributions **sum**: dy/dx = ∂y/∂a · da/dx + ∂y/∂b · db/dx. The product rule (f·g)′ = f′·g + f·g′ is exactly this: the two paths from x to the product node contribute one term each, and they add. Missing paths (forgetting a term) is the second-most-common bug in hand-derived gradients.
+
+**Vanishing / exploding gradients are the chain rule biting back.** A 100-layer network computes dLoss/d(early parameter) as a product of ~100 local slopes. If each is around 0.9, the product is 0.9^100 ≈ 2.7 × 10^-5 — the gradient vanishes and early layers barely learn. If each is around 1.1, the product is 1.1^100 ≈ 13,780 — the gradient explodes and training diverges. This is a *direct consequence* of the chain rule multiplying factors, and it's the mathematical reason for ReLU (slope 1 on the positive side, preserves magnitude), skip connections (add an identity path with slope 1, keeping the product close to 1), and LayerNorm (rescales activations to keep slopes bounded). The whole modern DL architecture stack exists to keep this product well-behaved.
+
+**Chain rule works for matrices too — with Jacobians and matrix multiplication.** The single-variable rule generalizes to vector-in, vector-out functions via **Jacobians** (the matrix of partial derivatives). The chain then becomes a *product of Jacobians*, and multiplication is matrix multiplication — not commutative, order matters. This is what the next chapter (multivariable partials) starts to unpack, and it's exactly how backprop in PyTorch actually computes gradients on tensors.
+
+<RealWorldML title="Skip connections and ReLU exist to keep the chain-rule product from vanishing">
+
+Consider a stack of 50 fully-connected layers, each applying `y_i = σ(W_i · y_(i-1) + b_i)` for some activation σ. The gradient of the loss with respect to the first layer's weight W_1 is (by the chain rule):
+
+`dLoss/dW_1  =  dLoss/dy_50 · (∂y_50/∂y_49) · (∂y_49/∂y_48) · ... · (∂y_1/∂W_1)`
+
+That's 50 factors — each a matrix (a Jacobian). If each Jacobian's operator norm is around 0.5, the *magnitude* of the product decays by 0.5^50 ≈ 10^-15. In practice this means: whatever loss signal reaches layer 50 gets attenuated by 15 orders of magnitude before it arrives back at layer 1. Layer 1 barely updates. The network fails to train.
+
+Three architectural inventions attack this problem, all with clean explanations in chain-rule terms:
+
+- **ReLU activation** (`max(0, z)`). Its derivative is 1 on the positive side (identity, no attenuation) and 0 on the negative (dead unit). So half the time the local factor is 1 — perfect for chain-rule preservation — and half the time it's 0 (which zeros out that path but doesn't attenuate). Compare to sigmoid, whose derivative peaks at 0.25 and shrinks toward zero at the tails — a product of 50 sigmoid slopes is guaranteed to be tiny.
+- **Skip connections** (as in ResNet, and in every transformer's residual stream). Instead of `y_i = f(y_(i-1))`, use `y_i = f(y_(i-1)) + y_(i-1)`. The Jacobian ∂y_i/∂y_(i-1) = f'(y_(i-1)) + I — always has an identity added, so its operator norm is at least 1. Chain-rule product no longer decays to zero even if f is nearly zero. This one change is why we can train 100+ layer networks; it's the single most important architectural idea in modern deep learning, and its purpose is purely to preserve gradient magnitude through the chain rule.
+- **LayerNorm** rescales activations at every layer so that the Jacobian magnitudes stay in a stable range — no runaway growth, no runaway decay. Without normalization, the product would be at the mercy of the initial weight scale; with it, the pass-through-many-layers stays numerically well-conditioned.
+
+Every one of these is a defense against the chain rule producing an unusable gradient. Understand the chain rule, and the architectural choices of modern DL stop being arbitrary and start being obvious.
+
+</RealWorldML>
+
+<StudyDepth
+  intro={<>The chain rule is the single most important calculus fact for a GenAI engineer. Master the local-slope-multiplication story and its graph generalization; the rest of ML calculus falls out of it.</>}
+  drill={[
+    <>The one identity: <code>d/dx h(g(x)) = h'(g(x)) · g'(x)</code>, and <em>where</em> to evaluate each factor</>,
+    <>Chains of any length: one factor per link, all multiplied together, each at the visited value</>,
+    <>Sum-over-paths for graphs: if x reaches y through multiple routes, add their contributions</>,
+    <>Backprop as chain-rule-on-a-graph: forward pass caches intermediates, backward pass multiplies local slopes back to each parameter</>,
+    <>Why deep networks care: ReLU, skip connections, LayerNorm all exist to keep the chain-rule product well-scaled</>,
+  ]}
+  skim={[
+    <>The formal ε–δ definition of the derivative — you'll trust the operational rules; the epsilontics is for real-analysis courses</>,
+    <>Implicit differentiation — occasionally useful, rarely load-bearing in ML code</>,
+    <>Higher-order chain rule (Faà di Bruno's formula) — an intellectual curiosity, not a working tool</>,
+  ]}
+/>
+
+<CodeItYourself title="Three drills — the whole chapter in your hands">
+
+1. **Verify the chain rule numerically.** For f(x) = exp(sin(x)), compute df/dx three ways: (a) using the chain rule by hand (df/du · du/dx with u = sin(x)), (b) using SymPy or by inspection, (c) using a finite-difference approximation (f(x+h) − f(x−h))/(2h). Print all three at x = 0.7 and verify they agree to ~6 decimal places.
+
+2. **Hand-code backprop for a two-hidden-unit network.** Take y = v_1 · ReLU(w_1 · x + b_1) + v_2 · ReLU(w_2 · x + b_2) and loss = 0.5·(y − target)². For x = 1.5, target = 1.0, and any random small initial weights, run one forward pass (cache all intermediates), then compute dLoss/dw_1, dLoss/dw_2, dLoss/db_1, dLoss/db_2, dLoss/dv_1, dLoss/dv_2 by hand using the chain rule. Take an SGD step with learning rate 0.05 and confirm the loss decreases.
+
+3. **See the vanishing-gradient effect.** Build a chain of N sigmoid nodes: y_i = sigmoid(w · y_(i-1)) for i = 1..N with a fixed w. The gradient dy_N/dy_0 is a product of N terms, each at most 0.25. Plot |dy_N/dy_0| vs N for N = 1..30 on a log scale. Watch it fall by many orders of magnitude — the reason "deep sigmoid networks" never worked.
+
+</CodeItYourself>
+
+<Summary>
+
+- The **chain rule**: if y = h(g(x)), then dy/dx = h'(g(x)) · g'(x). One factor per link in the chain, each evaluated at the value the forward pass produced.
+- **Local slopes multiply along a chain**; local slopes **add over multiple paths from input to output**. Together these two facts extend the chain rule to any computation graph.
+- **Backprop = chain rule + a computation graph**. Forward pass computes and caches every intermediate value; backward pass multiplies local slopes from the loss back to each parameter. Nothing mysterious happens.
+- **Vanishing and exploding gradients are the chain rule biting back** on deep networks. ReLU (slope 1), skip connections (identity term in the Jacobian), and LayerNorm (bounded activations) are the architectural fixes — all justified purely as ways to keep the chain-rule product well-scaled.
+- Everything generalizes to vectors — the chain-rule "factors" become **Jacobian matrices** and the "product" becomes matrix multiplication. Non-commutative, order matters. That's the story of the next few chapters.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>Compute the derivative of f(x) = (2x + 1)³ using the chain rule. Show the intermediate variable.</>,
+      hint: <>Let u = 2x + 1. Then f = u³.</>,
+      answer: <>Let u = 2x + 1. Then f(x) = u³ and: <br />df/du = 3u² <br />du/dx = 2 <br />df/dx = df/du · du/dx = 3u² · 2 = <b>6(2x + 1)²</b>. <br />Sanity at x = 0: f(x) = 1, f'(x) = 6 · 1 = 6. Verify with finite difference on any calculator.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>Given u = sin(x) and y = u², find dy/dx and evaluate it at x = π/2.</>,
+      hint: <>dy/du = 2u, du/dx = cos(x).</>,
+      answer: <>dy/du = 2u = 2 sin(x). du/dx = cos(x). By the chain rule, <b>dy/dx = 2 sin(x) cos(x)</b> (which equals sin(2x) by the double-angle identity). At x = π/2: sin(π/2) = 1, cos(π/2) = 0, so <b>dy/dx = 0</b> — the function y = sin²(x) is at its maximum here, so the tangent is horizontal. Chain rule checks out geometrically.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Take y = f(g(h(x))) with h(x) = x + 1, g(u) = u², f(v) = v/3. Compute dy/dx at x = 2.</>,
+      hint: <>Three links, three local slopes, then multiply.</>,
+      answer: <>Forward pass at x = 2: h(2) = 3, g(3) = 9, f(9) = 3. So y = 3. <br />Local slopes: h'(x) = 1, g'(u) = 2u (evaluated at u = 3 gives 6), f'(v) = 1/3 (constant). <br /><b>dy/dx = f'(v) · g'(u) · h'(x) = (1/3) · 6 · 1 = 2</b>. <br />Verify by substitution: y = ((x + 1)²)/3, so dy/dx = 2(x + 1)/3. At x = 2: dy/dx = 2 · 3/3 = 2 ✓.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Consider the two-path graph: y = a · b, where a = x + 3 and b = 2x. Compute dy/dx using the sum-over-paths form, and verify against the product rule.</>,
+      hint: <>x reaches y through path via a and via b; two contributions add.</>,
+      answer: <>Path 1 (x → a → y): ∂y/∂a = b = 2x, da/dx = 1. Contribution: 2x · 1 = 2x. <br />Path 2 (x → b → y): ∂y/∂b = a = x + 3, db/dx = 2. Contribution: (x + 3) · 2 = 2x + 6. <br />Sum: <b>dy/dx = 2x + (2x + 6) = 4x + 6</b>. <br /><br />Verify via product rule: y = (x + 3)(2x) = 2x² + 6x, so dy/dx = 4x + 6 ✓. This is exactly the product rule (fg)' = f'g + fg' — the two terms are the two paths from x to the product node. This graph view unifies the product rule with the chain rule; you no longer have to memorize them separately.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>For a chain of N identical sigmoid-and-linear operations y_i = sigmoid(w · y_(i-1)) with w = 1 and starting at y_0 = 0, argue why |dy_N/dy_0| decays exponentially in N. Estimate the decay factor per layer.</>,
+      hint: <>The chain-rule product is a product of N local slopes. Each is at most sigmoid'(z) ≤ 1/4.</>,
+      answer: <>Local slope of sigmoid: σ'(z) = σ(z)(1 − σ(z)). Its maximum over all z is at z = 0, where σ = 1/2 and σ' = (1/2)(1/2) = <b>1/4</b>. At y_0 = 0 and w = 1, each layer's local slope is exactly this maximum (or less as z drifts). <br /><br /> By the chain rule, dy_N/dy_0 = product of N slopes, each ≤ 1/4. So |dy_N/dy_0| ≤ (1/4)^N. For N = 30, that's (1/4)^30 = 2^-60 ≈ 10^-18 — well below floating-point precision. Any signal from the output layer that has to travel 30 sigmoid layers back is annihilated before it arrives. <br /><br /> Consequence: deep sigmoid networks *cannot* be trained by gradient descent — the "vanishing gradient" problem, and the reason ReLU replaced sigmoid in hidden layers, is a straight consequence of the chain rule multiplying these small local slopes together. ReLU's local slope is 1 wherever it fires, which keeps the chain-rule product from decaying.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Explain, using the chain rule, why a residual (skip) connection y = f(x) + x helps train deep networks.</>,
+      hint: <>Compute ∂y/∂x for y = f(x) + x and see what happens when it's chained many times.</>,
+      answer: <>For a single residual block y = f(x) + x, the Jacobian (or scalar derivative) is: <br />∂y/∂x = f'(x) + <b>1</b>. <br /><br /> The "+1" is the identity contribution from the skip connection. It guarantees that ∂y/∂x is never much smaller than 1, no matter what f'(x) is — even if f'(x) is very small or zero, the derivative bottoms out at 1. <br /><br /> Now stack N residual blocks: y_N = f_N(y_(N-1)) + y_(N-1). The chain-rule product dy_N/dy_0 is a product of N Jacobians, each of the form (f_i'(y_(i-1)) + I). Each factor is at least 1 in some norm sense (loosely speaking — technically depends on norm), so the product doesn't decay to zero the way a plain-chain product does. <br /><br /> Equivalently, you can write the residual as an *additive* update: y_i = y_(i-1) + f_i(y_(i-1)), so dy_i/dy_(i-1) = I + f_i'(y_(i-1)). Expanding dy_N/dy_0 as a product of these gives a sum of many paths through the graph — including one path that just uses the identity through every skip. That "identity path" ensures the gradient can always flow all the way from layer N back to layer 0 without attenuation. <br /><br /> This is why ResNet was the paper that enabled 100+ layer networks (2015), and why every modern transformer wires layer outputs as x + attention(x) and x + mlp(x) — the entire "residual stream" idea in transformer interpretability is built on this chain-rule observation.</>
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "The chain rule for y = h(g(x)) states:",
+      choices: [
+        { text: "dy/dx = h'(x) · g'(x)" },
+        { text: "dy/dx = h'(g(x)) · g'(x)", correct: true },
+        { text: "dy/dx = h(x) · g(x)" },
+        { text: "dy/dx = h'(g'(x))" },
+      ],
+      explanation: <>The outer derivative h' is evaluated at the value the inner function produced — g(x), not the original x. This substitution is why the forward pass has to run before the backward pass: to know where to evaluate the outer derivatives.</>
+    },
+    {
+      q: "For a three-link chain y = h(g(f(x))), the derivative dy/dx equals:",
+      choices: [
+        { text: "h'(x) · g'(x) · f'(x)" },
+        { text: "h'(g(f(x))) · g'(f(x)) · f'(x)", correct: true },
+        { text: "h'(x) + g'(x) + f'(x)" },
+        { text: "h'(g'(f'(x)))" },
+      ],
+      explanation: <>One local slope per link, evaluated at the *visited value* — h' at g(f(x)), g' at f(x), f' at x. Multiply, not add. Chains extend to any depth with one factor per link. This is exactly the algorithm backprop runs, just with matrix-valued factors (Jacobians).</>
+    },
+    {
+      q: "If y depends on x through two paths (x → a → y and x → b → y), then dy/dx equals:",
+      choices: [
+        { text: "(∂y/∂a · da/dx) · (∂y/∂b · db/dx)" },
+        { text: "(∂y/∂a · da/dx) + (∂y/∂b · db/dx)", correct: true },
+        { text: "max of the two paths' contributions" },
+        { text: "min of the two paths' contributions" },
+      ],
+      explanation: <>Multiple paths ADD; a single path MULTIPLIES. Sum over paths from x to y, each path a product of local slopes along it. The product rule (fg)' = f'g + fg' is this identity for a two-path graph, and this generalization unifies the product rule with the chain rule under one graph-theoretic picture.</>
+    },
+    {
+      q: "Backpropagation is fundamentally:",
+      choices: [
+        { text: "A new algorithm invented for neural networks in 2012" },
+        { text: "The chain rule applied to a computation graph, walked backward from output to inputs", correct: true },
+        { text: "A form of numerical differentiation using finite differences" },
+        { text: "Only applicable to networks with two hidden layers or fewer" },
+      ],
+      explanation: <>Backprop is chain rule + graph + bookkeeping — invented in the 1970s (reverse-mode automatic differentiation), rediscovered for neural nets in 1986. Nothing about it is neural-network-specific; it's a general algorithm for computing gradients through any composition of differentiable operations.</>
+    },
+    {
+      q: "The vanishing-gradient problem in deep networks is a direct consequence of:",
+      choices: [
+        { text: "Floating-point rounding errors accumulating over many layers" },
+        { text: "The chain rule multiplying many small local slopes together, producing a tiny product", correct: true },
+        { text: "The GPU running out of memory" },
+        { text: "Weight initialization being too small" },
+      ],
+      explanation: <>The gradient of the loss with respect to an early parameter is a *product* of local slopes over every subsequent layer. If those slopes have magnitude less than 1 (like sigmoid, max slope 1/4), the product decays exponentially in depth. This is why ReLU (slope 1 in the active region), skip connections (identity term in the Jacobian), and LayerNorm (bounded activations) exist — each defends against the chain-rule product either decaying or exploding.</>
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/calculus/chain-rule" title="The chain rule" />

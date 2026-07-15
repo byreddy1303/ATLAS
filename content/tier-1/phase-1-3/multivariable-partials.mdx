@@ -1,0 +1,367 @@
+---
+title: Partial derivatives & the gradient
+tier: 1
+phase: "1.3"
+---
+
+export const partialCode = `import numpy as np
+
+# f(x, y) = x^2 + 3xy + y^2
+# analytic partials:
+#   ∂f/∂x = 2x + 3y   (treat y as constant)
+#   ∂f/∂y = 3x + 2y   (treat x as constant)
+
+def f(x, y):
+    return x ** 2 + 3 * x * y + y ** 2
+
+def grad_f(x, y):
+    return np.array([2 * x + 3 * y, 3 * x + 2 * y])
+
+def finite_partial(f, i, x, h=1e-6):
+    "Numerical partial derivative w.r.t. the i-th coordinate of x."
+    x_plus  = x.copy(); x_plus[i]  += h
+    x_minus = x.copy(); x_minus[i] -= h
+    return (f(*x_plus) - f(*x_minus)) / (2 * h)
+
+for point in [(1.0, 2.0), (-1.0, 0.5)]:
+    x = np.array(point)
+    g = grad_f(*x)
+    g_num = np.array([finite_partial(f, 0, x), finite_partial(f, 1, x)])
+    print(f"point {tuple(x)}: analytic grad = {g}  numerical = {np.round(g_num, 5)}")`;
+
+export const gradientPlotCode = `import numpy as np, matplotlib.pyplot as plt
+
+# Level sets of f(x, y) = x^2 + y^2 with gradient arrows.
+def f(x, y): return x ** 2 + y ** 2
+def grad(x, y): return np.array([2 * x, 2 * y])
+
+# grid for contours
+xs = np.linspace(-2.2, 2.2, 200)
+ys = np.linspace(-2.2, 2.2, 200)
+X, Y = np.meshgrid(xs, ys)
+Z = f(X, Y)
+
+plt.figure(figsize=(6.5, 6.0))
+plt.contour(X, Y, Z, levels=[0.25, 1, 2.25, 4, 6.25], colors="teal", linewidths=1.2, alpha=0.8)
+
+# gradient arrows at a few sample points — should point OUTWARD (away from origin)
+for xp, yp in [(1.0, 0.5), (-0.6, 1.4), (1.5, -1.0), (-1.5, -1.5), (0.0, 1.8)]:
+    g = grad(xp, yp)
+    g = g / np.linalg.norm(g)  # normalize for display
+    plt.arrow(xp, yp, 0.55 * g[0], 0.55 * g[1],
+              head_width=0.09, head_length=0.09, color="crimson", lw=2)
+
+plt.gca().set_aspect("equal")
+plt.grid(alpha=0.3)
+plt.xlabel("x"); plt.ylabel("y")
+plt.title("Gradient arrows are perpendicular to level circles")
+plt.tight_layout()`;
+
+export const directionalCode = `import numpy as np
+
+# f(x, y) = x^2 + 3xy + y^2, gradient computed by hand above
+def f(x, y): return x ** 2 + 3 * x * y + y ** 2
+def grad(x, y): return np.array([2 * x + 3 * y, 3 * x + 2 * y])
+
+x0 = np.array([1.0, 2.0])
+g  = grad(*x0)
+
+# directional derivative in unit direction u is g · u — a scalar
+def dir_deriv(u):
+    u = np.array(u) / np.linalg.norm(u)   # normalize to unit
+    return float(g @ u)
+
+for name, u in [("+x-axis", (1, 0)),
+                ("+y-axis", (0, 1)),
+                ("diagonal (1, 1)", (1, 1)),
+                ("gradient direction", g),
+                ("opposite gradient", -g),
+                ("perpendicular to grad", (-g[1], g[0]))]:
+    print(f"{name:>25}: {dir_deriv(u):+.4f}")
+
+print()
+print(f"gradient norm ||g|| = {np.linalg.norm(g):.4f}  <- the LARGEST directional derivative")`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/calculus/chain-rule", label: "The chain rule", blurb: "Multivariable derivatives extend the chain rule to functions of many inputs; the gradient is where those local slopes are collected." },
+  { href: "/learn/mathematics/vectors-space/dot-product-cosine-similarity", label: "Dot product & cosine similarity", blurb: "Directional derivative = gradient · unit direction — the geometric statement is that the gradient tells you all directional slopes via a single dot product." },
+  { href: "/learn/mathematics/vectors-space/projections-orthogonality", label: "Projections & orthogonality", blurb: "The gradient is perpendicular to the level set at every point — orthogonality is the geometric heart of gradient descent." },
+]} />
+
+<Motivation title="Every parameter of an LLM is one axis in a giant space">
+
+A modern LLM has hundreds of billions of parameters. The loss L is a scalar function of all of them: give the model a set of weights, it computes a loss. The optimization job is: **for each weight, how much does the loss change if I nudge just this one weight by a tiny amount?**
+
+That "how much does L change per unit nudge of weight w_i, holding all other weights fixed" is exactly the **partial derivative** ∂L/∂w_i. There are as many of them as there are weights — hundreds of billions. Bundle all those partials into a vector (with one entry per weight) and you get the **gradient** ∇L — a single vector in the same space as the parameters. That's the object every optimizer takes a step against.
+
+The chain rule taught us how derivatives compose. This chapter teaches how they *bundle*: how derivatives with respect to many inputs live in a single vector object, how you can extract "the slope in this direction" from that bundle via a dot product, and how gradient descent, second-order methods, natural gradients, and the entire optimizer toolkit boil down to operations on this vector object.
+
+</Motivation>
+
+<Intuition title="One slope per axis, all at once">
+
+Picture a hilly landscape: elevation z is a function of position (x, y). Stand at a specific point and ask three questions:
+
+- **"How steep is it if I walk east?"** That's the slope in the +x direction — the **partial derivative** ∂z/∂x.
+- **"How steep is it if I walk north?"** That's the slope in the +y direction — the **partial derivative** ∂z/∂y.
+- **"How steep is it if I walk northeast?"** That's the slope in the (1, 1)/√2 direction — a **directional derivative**.
+
+The **gradient** at your point is the vector (∂z/∂x, ∂z/∂y): the eastward slope and northward slope bundled together into one vector. That vector has two magical properties (proved below): (1) it points in the direction of **steepest ascent**, and (2) its magnitude is that steepest slope. So you can read the whole hill's local behavior off a single vector.
+
+For any *other* direction u, the slope in u is just the dot product of the gradient with u (normalized). One vector, all directional slopes for the price of a dot product.
+
+</Intuition>
+
+<Recall term="Partial derivative notation">
+
+∂f/∂xᵢ (read "partial f with respect to xᵢ") is the derivative of f treating all other variables as constants — the rate at which f changes if you nudge only xᵢ. In code: it's the finite-difference (f(x + hεᵢ) − f(x − hεᵢ))/(2h) as h → 0, where εᵢ is the standard basis vector in the i-th direction. Sometimes written ∂ᵢf or fₓᵢ. All identical.
+
+</Recall>
+
+## Partial derivatives — hold everything else still
+
+For a function f(x_1, …, x_n) of many variables, the partial derivative with respect to x_i is:
+
+$$
+\frac{\partial f}{\partial x_i}(a) \;=\; \lim_{h \to 0} \frac{f(a_1, \ldots, a_i + h, \ldots, a_n) - f(a_1, \ldots, a_n)}{h}
+$$
+
+Read: **wiggle only x_i by h, freeze every other coordinate, see how f responds**. This is a scalar quantity, one per input coordinate. Computing it is mechanical: treat every other variable as a constant, differentiate as if only x_i is a variable, apply the usual single-variable rules.
+
+Concrete example: f(x, y) = x² + 3xy + y².
+
+- ∂f/∂x: treat y as constant. d(x²)/dx = 2x, d(3xy)/dx = 3y, d(y²)/dx = 0. So **∂f/∂x = 2x + 3y**.
+- ∂f/∂y: treat x as constant. d(x²)/dy = 0, d(3xy)/dy = 3x, d(y²)/dy = 2y. So **∂f/∂y = 3x + 2y**.
+
+<RunnableCode title="Partial derivatives, analytic and numerical" code={partialCode} packages={["numpy"]} />
+
+Nothing new mathematically: partials are single-variable derivatives with the other variables held fixed. But *bundling* them into a vector opens up all the geometry below.
+
+## The gradient — all partials at once
+
+The **gradient** of f at a point, written ∇f (nabla-f) or grad f, is the column vector of all partial derivatives:
+
+$$
+\nabla f \;=\; \begin{pmatrix} \partial f / \partial x_1 \\ \partial f / \partial x_2 \\ \vdots \\ \partial f / \partial x_n \end{pmatrix}
+$$
+
+Same dimension as the input space — one entry per input variable. In our example, ∇f(x, y) = (2x + 3y, 3x + 2y). At the point (1, 2): ∇f = (2 + 6, 3 + 4) = (8, 7).
+
+The gradient is not a scalar (that's the individual partials) and not a matrix (that's the Hessian, next chapter). It's a **vector living in the input space** — the same space where you're free to move around. This means you can *add* the gradient (scaled) to your current position to move, which is exactly what gradient descent does: `x_new = x_old − learning_rate · ∇f(x_old)`.
+
+## The gradient points in the direction of steepest ascent — and its length IS that slope
+
+Here's the payoff geometric fact. Among all unit-length directions u you could walk from a point, the direction that increases f the fastest is **u = ∇f / ‖∇f‖**, and the corresponding rate of increase (the directional derivative in that direction) is **‖∇f‖** — the gradient's length.
+
+This is why gradient descent works: to *decrease* f as fast as possible, walk in the direction of *negative* gradient, and the magnitude of the loss decrease per unit distance is proportional to ‖∇f‖. When the gradient's norm is small, you're near a critical point (flat region, minimum, maximum, or saddle). When it's large, you're on a steep slope and should be moving fast — or the learning rate is too big.
+
+<Derivation title="Why ∇f points in the steepest-ascent direction">
+
+We ask: among all unit vectors u, which direction u maximizes the directional derivative D_u f = "rate at which f changes when we walk in the direction u"?
+
+<Step n={1} math={<span>Directional derivative formula: <code>D_u f = ∇f · u</code> (dot product)</span>}>
+    This is proved in the next section as a consequence of the multivariable chain rule. For now, take it as: the slope in direction u is the projection of the gradient onto u. Small nudge in direction u produces change (∇f · u) · Δs in f, to first order.
+</Step>
+
+<Step n={2} math={<span>Bound via dot-product identity: <code>∇f · u = ‖∇f‖ · ‖u‖ · cos θ</code></span>}>
+    From the dot-product chapter (a · b = ‖a‖ ‖b‖ cos θ). Here u is a unit vector, so ‖u‖ = 1, and: <code>D_u f = ‖∇f‖ cos θ</code>, where θ is the angle between u and ∇f.
+</Step>
+
+<Step n={3} math={<span>Maximize over θ: cos θ is largest (=1) when θ = 0, i.e. <b>u aligned with ∇f</b>.</span>}>
+    So the maximum directional slope is achieved when u points in the same direction as ∇f. Its value at that direction is ‖∇f‖ · cos 0 = <b>‖∇f‖</b>.
+</Step>
+
+<Step n={4} math={<span>Consequences: steepest descent is u = −∇f / ‖∇f‖; level-set direction is u ⊥ ∇f</span>}>
+    The minimum of cos θ is at θ = 180°, giving D_u f = −‖∇f‖ — walk opposite to ∇f to descend fastest. And when u is perpendicular to ∇f (θ = 90°, cos = 0), the directional derivative is <b>zero</b> — you're walking along a level set (contour line) of f. This is the geometric fact that <b>the gradient is perpendicular to every level set at every point</b>.
+</Step>
+
+</Derivation>
+
+<RunnableCode title="Gradient arrows point outward, perpendicular to level circles" code={gradientPlotCode} packages={["numpy", "matplotlib"]} captureFig={true} />
+
+In the plot, the level sets of f(x, y) = x² + y² are circles centered at the origin. The gradient at each point is (2x, 2y) — the position vector — pointing radially outward, exactly perpendicular to the circle passing through that point. This is a universal fact: **at every point of every smooth function, the gradient is perpendicular to the level set**.
+
+## Directional derivatives — the gradient handles every direction at once
+
+Given a unit vector u, the **directional derivative** of f in the direction u at a point is:
+
+$$
+D_u f \;=\; \nabla f \cdot u
+$$
+
+— just a dot product. This is enormously useful: with the *one* gradient vector, you get the slope in every possible direction, for the price of one dot product per direction of interest. No need to redo any calculus.
+
+Special cases:
+
+- u = ε_i (i-th standard basis) → D_u f = ∂f/∂x_i (the i-th partial derivative — the gradient's i-th component).
+- u = ∇f/‖∇f‖ → D_u f = ‖∇f‖ (the maximum, from the derivation above).
+- u = −∇f/‖∇f‖ → D_u f = −‖∇f‖ (the minimum — steepest descent).
+- u ⊥ ∇f → D_u f = 0 (the level-set direction — walking without changing f).
+
+<RunnableCode title="Directional derivatives from one gradient" code={directionalCode} packages={["numpy"]} />
+
+The identity D_u f = ∇f · u is not magic — it's a consequence of the **multivariable chain rule**, which says that if you parametrize your walk as γ(t) = x + t · u (a straight line through x in direction u), then df(γ(t))/dt = ∇f(γ(t)) · γ'(t) = ∇f(γ(t)) · u. At t = 0, this equals ∇f(x) · u. Same construction, one line of chain rule.
+
+## The traps that matter
+
+**Partial derivatives are not "derivatives with a coordinate mixed in"** — they're single-variable derivatives with everything else held fixed. ∂f/∂x means: change x only, everything else is treated as a *number*, apply the ordinary d/dx rules. Beginners sometimes try to differentiate y as a "function of x" when it isn't — the whole point of a *partial* is that other variables are independent.
+
+**The gradient is not a scalar, and its "magnitude" is meaningful.** ‖∇f‖ tells you the steepest slope at your location; near critical points (minima, maxima, saddles) it goes to zero. Optimization libraries stop when ‖∇f‖ falls below a tolerance — the "gradient norm" is the natural quantity to monitor. If your loss is stuck but ‖∇f‖ is huge, you have a learning-rate problem, not a critical point problem.
+
+**Gradient perpendicular to level sets extends to every dimension.** In 2-D you get perpendicular-to-a-curve; in 3-D perpendicular-to-a-surface; in n-D perpendicular-to-an-(n-1)-dimensional-hypersurface. The rule "cross a level set going against its steepest slope" is the geometric heart of gradient descent in any dimension. This is why constrained optimization uses **Lagrange multipliers**: at a constrained optimum, ∇f must be parallel to the gradient of the constraint (both perpendicular to the same constraint surface).
+
+**The gradient depends on the choice of coordinates.** ∇f as a vector has entries that depend on which basis you use. Under a change of coordinates, the *components* transform (via the Jacobian of the coordinate change), but the *geometric vector* it represents stays the same. In deep learning this rarely bites — we work in one basis (the parameter basis) — but in physics and differential geometry the distinction matters. **Natural gradient methods** (used in some RL algorithms and in second-order optimization) explicitly correct for this by applying an inverse Fisher-information matrix, effectively making the gradient basis-invariant.
+
+**Gradient of vector-valued function → Jacobian.** If f produces a vector instead of a scalar (say f : ℝⁿ → ℝᵐ), the "gradient" generalizes to the **Jacobian matrix** (m rows, n columns), where entry (i, j) is ∂f_i/∂x_j. The gradient is the special case m = 1. Chain rule for vector-in vector-out functions is Jacobian multiplication, which is exactly matrix multiplication. That's the next chapter.
+
+<RealWorldML title="Gradient descent on a real loss surface">
+
+For a linear regression model y_pred = w_1·x_1 + w_2·x_2 with mean squared error loss L(w) = (1/N) Σᵢ (y_pred − y_true)², the loss depends on 2 parameters w_1, w_2 (plus a bias if we include one). The gradient ∇L is a 2-vector telling you the direction of steepest ascent in loss.
+
+Concretely, for a single training example (x, y_true), the loss is L = (w_1 x_1 + w_2 x_2 − y_true)². By the chain rule:
+
+- ∂L/∂w_1 = 2 (y_pred − y_true) · x_1
+- ∂L/∂w_2 = 2 (y_pred − y_true) · x_2
+
+The gradient is ∇L = 2 (y_pred − y_true) (x_1, x_2) = 2 (residual) x. In code, `grad = 2 * (X @ w - y) @ X / N` for a batch. One line: computes the gradient of the loss with respect to every weight simultaneously, using matrix operations that push the work onto BLAS. That's the entire content of "gradient computation" for linear regression, and for every layer of a neural network it's the same skeleton — just chained through many layers via backprop.
+
+The gradient descent update: `w ← w − learning_rate · ∇L`. The negative sign takes us in the direction of steepest *descent*; the learning rate controls step size. For big learning rate, we may overshoot the minimum; for tiny, we crawl. Adam, RMSprop, and other adaptive optimizers modify the step direction and per-coordinate scale, but they all consume this same gradient vector as input. The next chapter (Jacobian & Hessian) develops the machinery for the "adaptive" and "second-order" pieces; this chapter's job is to make sure the raw ∇L object is second nature.
+
+</RealWorldML>
+
+<StudyDepth
+  intro={<>Partial derivatives and gradients are the bread and butter of optimization. Once the "one slope per axis, bundled into one vector" idea clicks, the entire ML optimizer literature reads as variations on the same theme.</>}
+  drill={[
+    <>Take partial derivatives of any polynomial in two or three variables — mechanical, treat other vars as constants</>,
+    <>Bundle partials into the gradient vector ∇f; recognize that it lives in the input space</>,
+    <>Direction of steepest ascent = ∇f / ‖∇f‖; steepest slope value = ‖∇f‖</>,
+    <>Directional derivative in unit direction u = ∇f · u; every direction's slope for one dot product</>,
+    <>Gradient is perpendicular to level sets — geometric heart of gradient descent</>,
+    <>Compute the gradient of MSE loss for linear regression by the chain rule; recognize the "2 · residual · x" pattern</>,
+  ]}
+  skim={[
+    <>Formal ε–δ multivariable limits — mathematically important, rarely load-bearing in practice</>,
+    <>Total derivative vs partial derivative distinction — matters in physics, less in ML</>,
+    <>Coordinate-free / basis-invariant gradient (natural gradient) — comes back in advanced RL, defer</>,
+    <>Fréchet vs Gâteaux derivatives — pure-math technicalities</>,
+  ]}
+/>
+
+<CodeItYourself title="Three drills — analytic partials, numerical check, gradient step">
+
+1. **Compute the gradient of f(x, y, z) = x² y + y³ z at the point (1, 2, 3).** Write out ∂f/∂x, ∂f/∂y, ∂f/∂z by hand. Then verify numerically using central differences with h = 1e-6. *Hint: analytical answer is (4, 25, 8).*
+
+2. **Verify D_u f = ∇f · u.** Take f(x, y) = 3x² − 2xy + y² at (1, 1). Compute ∇f = (6x − 2y, −2x + 2y) = (4, 0). Now pick five unit directions u (angles 0°, 30°, 90°, 180°, 315°) and compute the numerical directional derivative as (f(x + h·u) − f(x − h·u))/(2h) with h = 1e-6. Confirm each matches ∇f · u to 4+ decimal places.
+
+3. **Take a single gradient-descent step on a quadratic.** For f(x, y) = (x − 3)² + (y + 2)², start at (0, 0). Compute ∇f = (2(x − 3), 2(y + 2)) = (−6, 4). Take a step with learning rate 0.1: x_new = (0, 0) − 0.1 · (−6, 4) = (0.6, −0.4). Verify f(x_new) < f(x_old). Iterate the update 20 times and print the trajectory — it should converge to the minimum (3, −2).
+
+</CodeItYourself>
+
+<Summary>
+
+- The **partial derivative** ∂f/∂x_i is the rate at which f changes with respect to x_i alone, holding all other variables fixed. Compute it by treating the others as constants and applying single-variable rules.
+- The **gradient** ∇f is the vector of all partials, one entry per input dimension. Same dimension as the parameter space — you can add it (scaled) to your position and move.
+- **Directional derivative** in unit direction u = ∇f · u — one dot product answers "how steep is f in this direction?" for every u you care about.
+- **∇f points in the direction of steepest ascent**; ‖∇f‖ is that steepest slope. **−∇f is steepest descent** (basis of gradient descent). **∇f is perpendicular to level sets** at every point.
+- Optimization uses these facts constantly: `x ← x − η · ∇f(x)` is the vanilla update; adaptive methods (Adam, RMSprop) rescale the step per-coordinate but still consume the gradient as input.
+- **Vector-valued generalization**: if f produces a vector, the gradient becomes the **Jacobian matrix** — one row of partials per output component. Chain rule for vector functions becomes Jacobian multiplication (next chapter).
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>Compute ∂f/∂x and ∂f/∂y for f(x, y) = 4x² + 5xy − y³.</>,
+      hint: <>Treat y as constant for ∂f/∂x; treat x as constant for ∂f/∂y.</>,
+      answer: <>∂f/∂x: d(4x²)/dx = 8x, d(5xy)/dx = 5y (treating y constant), d(−y³)/dx = 0. So <b>∂f/∂x = 8x + 5y</b>. <br /> ∂f/∂y: d(4x²)/dy = 0, d(5xy)/dy = 5x, d(−y³)/dy = −3y². So <b>∂f/∂y = 5x − 3y²</b>. <br /> The gradient is ∇f = (8x + 5y, 5x − 3y²).</>
+    },
+    {
+      difficulty: "easy",
+      q: <>Given ∇f(1, 2) = (3, 4), what is the directional derivative of f at (1, 2) in the +x direction? In the direction u = (1, 1)/√2?</>,
+      hint: <>D_u f = ∇f · u for unit vector u.</>,
+      answer: <>+x direction: u = (1, 0). D_u f = 3·1 + 4·0 = <b>3</b> (which is just ∂f/∂x). <br /> Direction (1, 1)/√2: D_u f = 3·(1/√2) + 4·(1/√2) = 7/√2 ≈ <b>4.95</b>. <br /> Note this is larger than the +x-only slope (3) because we're partly aligned with the y-direction which had a bigger partial (4).</>
+    },
+    {
+      difficulty: "medium",
+      q: <>For f(x, y) = x² + y², at the point (3, 4), find (a) the direction of steepest ascent, (b) the steepest slope value, (c) a unit direction with directional derivative 0.</>,
+      hint: <>Steepest is ∇f/‖∇f‖. Zero directional derivative = perpendicular to ∇f.</>,
+      answer: <>∇f = (2x, 2y) = (6, 8) at (3, 4). ‖∇f‖ = √(36 + 64) = <b>10</b>. <br /> (a) Steepest ascent direction: (6, 8)/10 = <b>(0.6, 0.8)</b>. <br /> (b) Steepest slope value = ‖∇f‖ = <b>10</b>. <br /> (c) Perpendicular to (6, 8) — flip and negate one: <b>(−0.8, 0.6)</b> (or +0.8, −0.6). Verify: (6, 8) · (−0.8, 0.6) = −4.8 + 4.8 = 0 ✓. Walking in this direction stays on the level set x² + y² = 25 (a circle of radius 5).</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Compute the gradient of the linear-regression loss L(w) = (1/2)·(w · x − y)² with respect to w = (w_1, w_2, w_3), for a fixed data point x = (1, 2, 3) and target y = 4. Evaluate at w = (0.5, 0.5, 0.5).</>,
+      hint: <>The loss is a function of 3 variables; the gradient will be a 3-vector.</>,
+      answer: <>Prediction: w · x = 0.5 + 1 + 1.5 = 3. Residual: r = w · x − y = 3 − 4 = −1. <br /> L = (1/2) r². By the chain rule, ∂L/∂w_i = r · x_i (the residual times the i-th feature — from the "2·r·x" pattern with the 1/2 out front). <br /> ∇L = r · x = (−1) · (1, 2, 3) = <b>(−1, −2, −3)</b>. <br /> A gradient-descent step with learning rate 0.1: w_new = (0.5, 0.5, 0.5) − 0.1 · (−1, −2, −3) = (0.6, 0.7, 0.8). New prediction: 0.6 + 1.4 + 2.4 = 4.4 (overshoots — try smaller learning rate). This is the entire gradient computation for linear regression on one sample.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Prove that ∇f is perpendicular to the level set of f at every point where ∇f is nonzero.</>,
+      hint: <>Consider a curve γ(t) that stays on the level set. Differentiate f(γ(t)) with respect to t and use the multivariable chain rule.</>,
+      answer: <>Let c = f(x_0) be the level value, and let γ(t) be any smooth curve on the level set with γ(0) = x_0 — meaning f(γ(t)) = c for all t. Then <br /><br /> d/dt f(γ(t)) = 0 (constant function has zero derivative). <br /><br /> By the multivariable chain rule, d/dt f(γ(t)) = ∇f(γ(t)) · γ'(t). Evaluating at t = 0: <br /> <b>∇f(x_0) · γ'(0) = 0.</b> <br /><br /> But γ'(0) is a tangent vector to the level set at x_0 (any tangent direction can be realized by some curve on the level set, by the implicit function theorem when ∇f ≠ 0). So ∇f(x_0) is perpendicular to *every* tangent vector at x_0 — perpendicular to the entire tangent space of the level set. That's the definition of "perpendicular to the level set." ∎ <br /><br /> Geometric intuition: to stay on the level set, you must walk in a direction where f doesn't change — which is a direction where the directional derivative ∇f · u = 0, i.e., perpendicular to ∇f. That's the "gradient descent takes the steepest downhill path" story from the other angle.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>For a scalar loss L(w) and parameters w in ℝⁿ, explain why steepest-descent takes the direction −∇L/‖∇L‖ and not just −∇L. Then explain why in practice we use −η · ∇L (with learning rate η), not the normalized version.</>,
+      hint: <>Steepest is a question about unit directions. Gradient descent uses a fixed step size.</>,
+      answer: <><b>Why the normalized negative gradient is "steepest."</b> "Steepest" is a question about UNIT directions — among all unit vectors u, which one maximizes |D_u L|? From the derivation, the answer is u = −∇L/‖∇L‖. The magnitude of the loss decrease per unit distance walked is ‖∇L‖. This is a purely geometric fact about slopes, independent of learning rates. <br /><br /><b>Why we use −η · ∇L in practice (unnormalized).</b> The update step must actually get us somewhere. Using u = −∇L/‖∇L‖ (a unit vector) means we take a step of size η in that direction — reaching w_new = w − η · (∇L/‖∇L‖), same as before but scaled differently. In practice we use w_new = w − η · ∇L, which is: take a step *proportional* to the gradient magnitude. Where the gradient is big (steep slope), we take a bigger step; where it's small (near a critical point), we take a small step. This is a helpful adaptive behavior — the gradient's magnitude carries useful information about how far to move. If we normalized, we'd take equally-sized steps everywhere, potentially oscillating around minima. So "unnormalized" trades a tiny bit of "true" steepest-descent geometry for the practical benefit of gradient-magnitude-aware step sizes. Adam and second-order methods build even more elaborate scaling schemes on top of this idea.</>
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "The partial derivative ∂f/∂x is computed by:",
+      choices: [
+        { text: "Setting f to zero and solving for x" },
+        { text: "Differentiating f treating every other variable as a constant", correct: true },
+        { text: "Integrating f from 0 to x" },
+        { text: "Taking the sum of derivatives with respect to every variable" },
+      ],
+      explanation: <>∂f/∂x means: change x only, everything else is a number. Apply the single-variable d/dx rules. That's what "partial" means — you're looking at f's response to a single-coordinate wiggle.</>
+    },
+    {
+      q: "The gradient ∇f of a scalar function f : ℝⁿ → ℝ is:",
+      choices: [
+        { text: "A scalar — the maximum partial derivative" },
+        { text: "A vector of length n, with the i-th entry being ∂f/∂xᵢ", correct: true },
+        { text: "A matrix of size n × n (the Hessian)" },
+        { text: "Undefined for n > 1" },
+      ],
+      explanation: <>The gradient bundles all n partial derivatives into a vector, one per input coordinate. Same dimension as the input space. It's not a scalar (that's the individual partials) and not a matrix (that's the Hessian — the matrix of second derivatives, next chapter).</>
+    },
+    {
+      q: "The direction of steepest ascent of f at a point is:",
+      choices: [
+        { text: "The direction of the largest component of ∇f" },
+        { text: "The gradient direction ∇f / ‖∇f‖; the steepest slope value is ‖∇f‖", correct: true },
+        { text: "Perpendicular to ∇f" },
+        { text: "Random — depends on the coordinate system" },
+      ],
+      explanation: <>By the dot-product identity, the directional derivative D_u f = ∇f · u = ‖∇f‖ cos θ is maximized when θ = 0, i.e., u aligned with ∇f. The maximum value is ‖∇f‖. Steepest descent is the opposite direction, −∇f / ‖∇f‖, with slope value −‖∇f‖.</>
+    },
+    {
+      q: "The directional derivative of f in unit direction u is:",
+      choices: [
+        { text: "‖∇f‖ · ‖u‖" },
+        { text: "∇f · u (a single dot product)", correct: true },
+        { text: "The largest partial derivative of f" },
+        { text: "f(x + u) − f(x)" },
+      ],
+      explanation: <>D_u f = ∇f · u — one dot product gives you the slope in any direction, for the cost of a single vector operation. This is why the gradient is such a powerful object: it encodes every directional slope simultaneously.</>
+    },
+    {
+      q: "The gradient ∇f at a point is perpendicular to:",
+      choices: [
+        { text: "The gradient of every other function at that point" },
+        { text: "The level set (contour) of f passing through that point", correct: true },
+        { text: "The x-axis" },
+        { text: "The tangent to the level set of a different function" },
+      ],
+      explanation: <>Walking along a level set means f doesn't change, so the directional derivative in that direction is zero — meaning ∇f is perpendicular to the level-set tangent direction. In 2-D this is "gradient perpendicular to contour curve"; in n-D it's "gradient perpendicular to (n-1)-dimensional level hypersurface." This is the geometric picture that makes gradient descent's "walk downhill across contours" intuitive.</>
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/calculus/multivariable-partials" title="Partial derivatives & the gradient" />
