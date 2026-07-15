@@ -425,7 +425,7 @@ const tier1: Tier = {
             "Non-square matrices as dimension changers",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "matrix-multiplication",
@@ -481,7 +481,7 @@ const tier1: Tier = {
             "Where eigen-analysis shows up: PCA, PageRank, dynamics",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "svd-decomposition",
@@ -495,7 +495,7 @@ const tier1: Tier = {
             "Compression: rank-k approximation & Eckart–Young",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "matrix-factorization-menagerie",
@@ -587,7 +587,7 @@ const tier1: Tier = {
             "Preview: how backprop uses it",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "gradient-descent-intuition",
@@ -615,7 +615,7 @@ const tier1: Tier = {
             "Directional derivatives",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "jacobian-hessian",
@@ -643,7 +643,7 @@ const tier1: Tier = {
             "Vanishing/exploding gradient preview",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "integration-basics",

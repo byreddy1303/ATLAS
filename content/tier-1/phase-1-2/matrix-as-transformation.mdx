@@ -1,0 +1,396 @@
+---
+title: Matrix as linear transformation
+tier: 1
+phase: "1.2"
+---
+
+export const basisCode = `import numpy as np
+
+# A matrix IS its action on the standard basis — columns are Ae1, Ae2, ...
+A = np.array([[2.0,  1.0],
+              [0.0,  3.0]])
+
+e1 = np.array([1.0, 0.0])
+e2 = np.array([0.0, 1.0])
+
+print("A e1 =", A @ e1, "  <- first column of A")
+print("A e2 =", A @ e2, "  <- second column of A")
+
+# so applying A to ANY vector is just a weighted mix of A's columns:
+v = np.array([3.0, 4.0])                    # v = 3*e1 + 4*e2
+print()
+print("A v (direct)             =", A @ v)
+print("3*(A e1) + 4*(A e2)      =", 3 * A[:, 0] + 4 * A[:, 1])`;
+
+export const catalogCode = `import numpy as np
+
+theta = np.pi / 6                                    # 30 degrees
+c, s  = np.cos(theta), np.sin(theta)
+
+Rot   = np.array([[c, -s], [s, c]])                 # rotate CCW by theta
+Scale = np.diag([2.0, 0.5])                          # x by 2, y by 1/2
+Shear = np.array([[1.0, 1.5], [0.0, 1.0]])          # push top-right, bottom-left
+Refl  = np.array([[1.0, 0.0], [0.0, -1.0]])         # reflect across x-axis
+Proj  = np.array([[1.0, 0.0], [0.0, 0.0]])          # squash y to zero (drop to x-axis)
+
+square = np.array([[0, 1, 1, 0, 0],                 # unit square, corners as columns
+                   [0, 0, 1, 1, 0]])
+
+for name, M in [("Rotate 30", Rot), ("Scale", Scale),
+                ("Shear",     Shear), ("Reflect", Refl), ("Project", Proj)]:
+    print(name, "-> corners:", np.round(M @ square, 2).tolist())`;
+
+export const composeCode = `import numpy as np
+
+R1 = lambda t: np.array([[np.cos(t), -np.sin(t)],
+                         [np.sin(t),  np.cos(t)]])
+
+A = R1(np.pi / 4)       # rotate 45
+B = R1(np.pi / 6)       # rotate 30
+
+# apply B then A to a vector v:
+v = np.array([1.0, 0.0])
+step_by_step = A @ (B @ v)                          # do B first, then A
+combined     = (A @ B) @ v                          # matrix product does BOTH at once
+
+print("A(Bv)   =", np.round(step_by_step, 4))
+print("(AB)v   =", np.round(combined,     4))
+
+# and the product IS itself a rotation by 45+30 = 75 degrees:
+print("AB      =", np.round(A @ B, 4))
+print("R(75)   =", np.round(R1(np.pi / 4 + np.pi / 6), 4))
+
+# order matters — BA vs AB (here they happen to match since rotations commute in 2-D;
+# but scale-then-rotate != rotate-then-scale):
+S = np.diag([2.0, 1.0])
+print()
+print("R S v =", np.round(R1(np.pi / 4) @ S @ v, 3))    # scale first, then rotate
+print("S R v =", np.round(S @ R1(np.pi / 4) @ v, 3))    # rotate first, then scale`;
+
+export const nonSquareCode = `import numpy as np
+
+# A 4x3 matrix is a function R^3 -> R^4 (3 inputs -> 4 outputs)
+A = np.array([[1.0, 0.0, 0.0],
+              [0.0, 1.0, 0.0],
+              [0.0, 0.0, 1.0],
+              [1.0, 1.0, 1.0]])                          # last row = sum-of-inputs feature
+
+x = np.array([2.0, 5.0, -1.0])
+y = A @ x                                                # lives in R^4 now
+print("input x (R^3) =", x)
+print("output y (R^4) =", y, "  <- last entry is 2+5-1=6")
+
+# a 2x3 matrix collapses R^3 down to R^2 (dimension reduction — the shape PCA has)
+P = np.array([[1.0, 1.0, 0.0],                          # feature 1: x + y
+              [0.0, 0.0, 1.0]])                          # feature 2: z alone
+print()
+print("P x (R^2) =", P @ x, "  <- projected to 2 features")`;
+
+export const attentionProjCode = `import numpy as np
+
+# Real GenAI pattern: attention takes token embeddings of dimension d_model
+# and projects them into a lower-dim query space (per head) via a matrix W_Q.
+# For a tiny toy model, d_model = 6, d_k = 2 (two heads would each get 2 dims).
+
+rng = np.random.default_rng(0)
+d_model, d_k = 6, 2
+W_Q = rng.standard_normal((d_model, d_k)) * 0.4          # the learned projection
+
+# three token embeddings (rows are tokens, columns are d_model features)
+tokens = rng.standard_normal((3, d_model))
+
+# project every token into query space in one matrix product
+Q = tokens @ W_Q                                          # shape (3, 2)
+
+print("tokens shape =", tokens.shape, " -> Q shape =", Q.shape)
+print("Q (per-token query vectors):")
+print(np.round(Q, 3))
+
+# what W_Q "does": columns of W_Q are the two query-space basis directions
+# expressed in the ORIGINAL feature space. Q[i] = tokens[i] . W_Q[:, 0] , tokens[i] . W_Q[:, 1]
+print()
+print("Q[0] recomputed as dot products:",
+      round(tokens[0] @ W_Q[:, 0], 3), round(tokens[0] @ W_Q[:, 1], 3))`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/vectors-space/dot-product-cosine-similarity", label: "Dot product & cosine similarity", blurb: "Matrix-vector product is just d dot products stacked into a column — the geometric anchor for everything below." },
+  { href: "/learn/mathematics/vectors-space/linear-independence-basis", label: "Linear independence, span & basis", blurb: "The standard basis {e1, …, en} is the runway matrices take off from — their columns are the images of these vectors." },
+  { href: "/learn/mathematics/vectors-space/projections-orthogonality", label: "Projections & orthogonality", blurb: "Projections are a specific family of matrices — the ones that squash space onto a subspace." },
+]} />
+
+<Motivation title="Every transformer layer is a matrix acting on vectors">
+
+Open the source of any GPT-style model and count the operations that actually shape the answer: **`x @ W`**, **`Q @ K.T`**, **`attn @ V`**, **`h @ W_out`**. That's it. Layer norm, softmax, and ReLU do the nonlinear seasoning — but the *shape* of an LLM's computation is a chain of matrix multiplications acting on batches of token vectors.
+
+For a GenAI engineer, "matrix" is not "grid of numbers you push through a solver." It's a **function you learn** — a map that pulls an embedding into a query space, or mixes 512-dim residuals into 2048-dim MLP activations, or averages value vectors weighted by attention scores. Every learned parameter tensor in a transformer is a matrix and every matrix is a linear map. This chapter builds the one mental model that turns matrix code into geometry you can picture — then every subsequent chapter (multiplication, eigen, SVD, LoRA) is just refinements of the same picture.
+
+The picture: **a matrix is a verb**. It takes vectors from one space and puts them somewhere. The columns tell you exactly where the standard-basis vectors land, and everything else follows.
+
+</Motivation>
+
+<Intuition title="A matrix is where the basis vectors land">
+
+Picture an m×n matrix A. It's a machine with n input dials (one per column) and m output wires (one per row). Feed it a vector x with n numbers; it hands back a vector Ax with m numbers.
+
+The trick: **you don't need to know what A does to *every* input to know everything about A** — you only need to know what it does to the n standard-basis vectors e₁ = (1, 0, …, 0), e₂ = (0, 1, 0, …), …, eₙ.
+
+Because every x can be written as x = x₁e₁ + x₂e₂ + … + xₙeₙ, and A is *linear* (A(u+v) = Au + Av, A(cv) = cAv), we get
+
+Ax = x₁(Ae₁) + x₂(Ae₂) + … + xₙ(Aeₙ) — **a weighted sum of the images of the basis vectors**.
+
+And the images `Ae₁, Ae₂, …, Aeₙ` are literally the columns of A (proved in the derivation below). So A is fully determined by "where does each standard basis vector go?" — n arrows sketched on paper, and the whole map lives in them.
+
+</Intuition>
+
+<Recall term="Linear map">
+
+A function T : ℝⁿ → ℝᵐ is **linear** if it respects addition and scaling: T(u + v) = T(u) + T(v) and T(cv) = c·T(v) for all vectors u, v and scalars c. Combined, this means T(a·u + b·v) = a·T(u) + b·T(v). Every linear map from ℝⁿ to ℝᵐ can be written as x ↦ Ax for exactly one m×n matrix A — this is the fundamental correspondence the chapter turns on.
+
+</Recall>
+
+## The one identity that unlocks matrices — Ae_j = column j of A
+
+Given a matrix A with columns a₁, a₂, …, aₙ, the product with the j-th standard basis vector e_j is:
+
+$$
+A e_j = a_j
+$$
+
+That's it. **Applying a matrix to a standard basis vector plucks out the corresponding column** — no calculation required, just look at column j. Every other formula in this chapter falls out of this one.
+
+Consequences:
+
+- The image of the standard basis under A is exactly the set of A's columns: `{Ae₁, Ae₂, …, Aeₙ} = {a₁, a₂, …, aₙ}` — the columns are the *arrows* the map draws in the output space.
+- For general x = Σⱼ xⱼ eⱼ, linearity gives Ax = Σⱼ xⱼ (Aeⱼ) = **Σⱼ xⱼ aⱼ** — every matrix-vector product is a **linear combination of the columns of A, using x as coefficients**. This is the "column view" of matrix-vector multiplication; next chapter fleshes out three of these views.
+
+<RunnableCode title="A matrix IS its action on the basis — columns are the images" code={basisCode} packages={["numpy"]} />
+
+<Derivation title="Why the columns of A ARE Ae_1, …, Ae_n">
+
+We prove the identity Aeⱼ = column j of A directly from the row-column definition of the matrix-vector product. This is the one paragraph in this chapter that's pure symbol-pushing — memorize it once, and every other formula in linear algebra becomes visible.
+
+<Step n={1} math={<span>Setup: A is m×n with entries A<sub>ij</sub>; e<sub>j</sub> is n×1 with a 1 in slot j and zeros elsewhere.</span>}>
+    Concretely: e_j = (0, …, 0, 1, 0, …, 0) with the 1 in position j. The i-th entry (e_j)_k is 1 if k = j and 0 otherwise — the <b>Kronecker delta</b> δ<sub>jk</sub>.
+</Step>
+
+<Step n={2} math={<span>(Ae<sub>j</sub>)<sub>i</sub> = Σ<sub>k=1..n</sub> A<sub>ik</sub> (e<sub>j</sub>)<sub>k</sub></span>}>
+    The definition of the matrix-vector product: the i-th entry of Ax is the dot product of row i of A with x. Here x is e_j, so we sum A<sub>ik</sub> · (e<sub>j</sub>)<sub>k</sub> as k ranges over 1..n.
+</Step>
+
+<Step n={3} math={<span>Only the k=j term survives: (Ae<sub>j</sub>)<sub>i</sub> = A<sub>ij</sub></span>}>
+    (e<sub>j</sub>)<sub>k</sub> is zero except when k=j, so the entire sum collapses to a single term: A<sub>ij</sub> · 1 = A<sub>ij</sub>. Ae<sub>j</sub>'s i-th entry is A<sub>ij</sub> — <b>exactly</b> the i-th entry of column j of A.
+</Step>
+
+<Step n={4} math={<span>Assembling all i together: Ae<sub>j</sub> = (A<sub>1j</sub>, A<sub>2j</sub>, …, A<sub>mj</sub>) = column j of A. ∎</span>}>
+    That's the whole proof. Every row-i entry of Ae<sub>j</sub> is A<sub>ij</sub>, so stacking them all up gives column j of A. The consequence — Ax = Σ x<sub>j</sub> a<sub>j</sub> for any x — follows by linearity.
+</Step>
+
+</Derivation>
+
+## Building any matrix by specifying where the basis lands
+
+Because A is fully determined by its columns, **you can design any linear map you want by choosing where you want the basis vectors to land**. Pick target arrows a₁, …, aₙ in the output space, put them side by side, and the resulting matrix has exactly the map you asked for. This is how every geometric transformation is constructed.
+
+The five moves every engineer should be able to write by hand:
+
+- **Scale by (s_x, s_y)** — e₁ → (s_x, 0), e₂ → (0, s_y). Matrix: `diag(s_x, s_y)`.
+- **Rotate by θ (counter-clockwise)** — e₁ → (cos θ, sin θ), e₂ → (−sin θ, cos θ). Matrix: `[[cos θ, −sin θ], [sin θ, cos θ]]`.
+- **Shear (x by k times y)** — e₁ → e₁ (untouched), e₂ → (k, 1). Matrix: `[[1, k], [0, 1]]`.
+- **Reflect across the x-axis** — e₁ → e₁, e₂ → (0, −1). Matrix: `[[1, 0], [0, −1]]`.
+- **Project onto the x-axis** — e₁ → e₁, e₂ → (0, 0). Matrix: `[[1, 0], [0, 0]]` (a projection is a matrix that squashes one direction to zero — an idempotent that satisfies P² = P).
+
+<RunnableCode title="Five transformations applied to a unit square" code={catalogCode} packages={["numpy"]} />
+
+The corners of the transformed square are exactly the columns of `M @ square` — one column per corner. Rotation preserves shape; scale stretches it; shear tilts it; reflection flips it; projection flattens it onto a line. **The action on the corners is the action on the whole shape** because linearity extends any map on the basis to the entire space.
+
+## Composition = matrix product (order matters)
+
+If A maps ℝⁿ → ℝᵐ and B maps ℝᵖ → ℝⁿ, then "first apply B, then apply A" is the composite map (A ∘ B) : ℝᵖ → ℝᵐ. The matrix that computes this composite map is the **product AB** — an m×p matrix. Applied to a vector:
+
+$$
+(A B)\, x = A (B x)
+$$
+
+Left-hand side: one matrix multiplication. Right-hand side: two. They agree by design — matrix multiplication is *defined* to be composition of the underlying linear maps. That's why the inner dimensions must match (A's columns = B's rows = n): B outputs vectors in ℝⁿ, and A needs ℝⁿ vectors as input.
+
+**Order is fatal**. AB and BA are usually different matrices — often not even the same shape. Even when both products make sense (both square, same size), they generally give different maps: "rotate then scale" is not "scale then rotate."
+
+<RunnableCode title="Compose transformations by multiplying matrices" code={composeCode} packages={["numpy"]} />
+
+Two rules to burn in:
+
+- **Read chains right-to-left.** `A @ B @ C @ x` means: apply C first (rightmost, closest to x), then B, then A. The rightmost matrix touches the vector; each next one wraps the previous output.
+- **Matrix multiplication is associative but non-commutative.** `(AB)C = A(BC)` — you can regroup — but `AB ≠ BA` in general. This is why neural network layer order matters (you can't swap two learned linear layers).
+
+## Non-square matrices — the dimension-changer
+
+Square matrices (n×n) shuffle ℝⁿ into itself — rotate, scale, shear. **Non-square** matrices change the dimension of the space:
+
+- **m×n with m > n** (tall matrix): embeds ℝⁿ into a larger ℝᵐ. Example: an *embedding layer* that takes 1-hot token indices (in a vocab-size dimensional space, but only one active) and produces a d_model-dimensional dense embedding — mathematically that's a `d_model × vocab_size` matrix. In the other direction, `d_model × d_ff` in an MLP up-projection.
+- **m×n with m < n** (wide matrix): projects ℝⁿ down to a smaller ℝᵐ. Example: the attention head projections W_Q, W_K, W_V in transformers are `d_model × d_k` matrices with d_k = d_model / n_heads — they take the full residual stream and squeeze it down to per-head query/key/value spaces. LoRA's low-rank updates ΔW = A B are wide × tall — two rectangular matrices whose product is a rank-r approximation of a full square weight update.
+
+<RunnableCode title="Non-square matrices as dimension changers" code={nonSquareCode} packages={["numpy"]} />
+
+The mental model doesn't change with shape: the columns of an m×n matrix are still n vectors in ℝᵐ — n arrows saying "here's where each input-space basis vector lands." What changes is whether that map is invertible: a wide matrix (m < n) *must* have a nullspace (inputs that map to zero) because the output space isn't big enough to hold n independent images. That's a chapter on its own; for now, the intuition is enough.
+
+## The traps that matter
+
+**"Rows or columns?" pick one and stick to it.** Some texts write vectors as row vectors and use xA (right-multiplication); ML libraries almost universally use column vectors and Ax. NumPy is agnostic — both `A @ x` (with x as (n,)) and `x @ A.T` compute the same thing. **In this course, and in almost every ML paper: columns are inputs, matrix is on the left, `Ax` is the standard**. Read every formula through this convention.
+
+**Matrix multiplication is not commutative — but it IS associative.** `A(BC) = (AB)C`, so you can compute either grouping. This associativity is why "fuse two learned matrices into one" is a real optimization: two consecutive linear layers `y = W₂(W₁ x)` = `(W₂ W₁) x` — you can precompute the composed matrix once at inference time. LoRA's ΔW = A B is stored as two thin matrices during training (cheap) and can be materialized as one full matrix at inference time (free).
+
+**Only *linear* maps have matrices.** T(x) = x + 3 (shifting by a constant) is *not* linear — T(0) = 3 ≠ 0. Neural networks use **affine** maps (Wx + b) followed by nonlinearities; the +b piece isn't matrix multiplication, it's a separate translation. Similarly, a nonlinearity like ReLU or softmax is not a matrix. The linear-map/matrix correspondence covers only the linear pieces; the rest of the network is deliberately non-matrix nonlinearity.
+
+**Applying the same matrix to a batch is one matmul.** In code, if `X` is shape `(batch, features)` and `W` is shape `(features, out)`, then `X @ W` applies the linear map to every row in one shot. This is the **fused, vectorized** form the GPU actually executes — never loop over rows. The mental model above (columns as images of basis) still holds row-wise: each row of `X @ W` is a linear combination of the rows of W (because in this convention the *rows of W* are what act on features).
+
+<RealWorldML title="Attention's Q projection is a linear map you can visualize">
+
+Every transformer builds Q, K, V matrices by projecting token embeddings through learned matrices W_Q, W_K, W_V. The Q projection is `Q = tokens @ W_Q` — one matrix, one product, one shape change. Here's the whole operation in eight lines, with the same interpretation you'd give any linear map:
+
+<RunnableCode title="A tiny attention Q-projection" code={attentionProjCode} packages={["numpy"]} />
+
+Read the cell:
+
+1. **Shape story.** `tokens` is `(3 tokens, 6 features)` — three residual-stream vectors in the model's 6-dimensional latent space. `W_Q` is `(6, 2)` — a wide matrix that projects 6 dims down to 2 (a tiny toy head; real models use 64 or 128 per head). The output `Q = tokens @ W_Q` is `(3, 2)` — three query vectors, one per token, living in the 2-dim query space.
+2. **What W_Q *is*, geometrically.** Its 2 columns are two vectors in ℝ⁶ — the two query-space "basis directions" expressed in the model's feature vocabulary. Column 0 says "this direction of query space is *this* mixture of the 6 embedding features"; column 1 says the same for the other query dimension. The projection Q[i] just measures how much of each direction is present in token i — literally two dot products (right-hand side of the print).
+3. **Learned, not designed.** In a real model, W_Q is initialized randomly and adjusted by gradient descent so that the projections `Q_i` produce *high* dot products with the right K_j — encoding "this token wants to look at that token." No one specifies the columns of W_Q; they emerge. But whatever they end up as, the map they define is the same construction as this chapter's: pick columns, get a linear map.
+4. **Why the shape matters.** Small d_k (= 2 here, = 64 in real models) means the head can only track a low-dimensional slice of the residual — perfect for specializing (some heads track syntax, some track long-range coreference, etc.). Multi-head attention runs many such maps in parallel and concatenates — a linear map factory. The chapter you're reading is the entire underlying vocabulary.
+
+Every learned matrix in a transformer is *some* linear map like this one — the columns saying where the basis vectors of the input space are being sent. Understand those columns, and you can start reading model weights the way you read code.
+
+</RealWorldML>
+
+<StudyDepth
+  intro={<>This chapter is one week of your life well spent — matrix-as-function is the single mental unlock that makes DL papers stop being math and start being <em>geometry with weights</em>.</>}
+  drill={[
+    <>The identity <code>A e_j = column j of A</code> — memorize it, and derive Ax = Σ x_j a_j from it in your sleep</>,
+    <>Design a matrix by specifying where each basis vector should land (rotate, scale, shear, project by hand)</>,
+    <>Composition = product; read chains right-to-left; matrix product is associative but not commutative</>,
+    <>Rectangular matrices as dimension-changers — recognize <code>W_Q</code>, embedding tables, MLP up/down-projections as this pattern</>,
+    <>Vectorized batch application: <code>X @ W</code> applies the same map to every row without a Python loop</>,
+  ]}
+  skim={[
+    <>Row-vector conventions used by some textbooks — recognize <code>x A</code> vs <code>A x</code>, translate to columns-are-inputs</>,
+    <>Change of basis and similarity transforms — introduced in the eigen chapter, not here</>,
+    <>Projectors as idempotent matrices (P² = P) — a special family, treated in more depth with orthogonal projections</>,
+  ]}
+/>
+
+<CodeItYourself title="Three drills — build maps, verify columns, chain them">
+
+1. **Write `build_from_images(images)`** that takes a list of n vectors in ℝᵐ (the desired images of e₁, …, eₙ) and returns the m×n matrix that realizes that map. *Hint: it's `np.column_stack(images)` — that's the entire body.* Test: given `images = [(1, 2), (3, 4)]`, apply the resulting A to `x = (5, 6)` and verify Ax = 5·(1, 2) + 6·(3, 4) = (23, 34).
+
+2. **Confirm the basis identity** for a random 4×3 matrix A: assert that `A @ e_j` equals `A[:, j]` for j = 0, 1, 2, using `np.eye(3)[:, j]` for e_j and `np.allclose` for the check. Then apply A to a random x and verify it equals `sum(x[j] * A[:, j] for j in range(3))` — the linear-combination-of-columns view.
+
+3. **Compose rotate-then-scale vs scale-then-rotate** on `v = (1, 1)` with rotation by 45° and scale by (2, 1). Compute both `R @ S @ v` and `S @ R @ v` and confirm the numerical results are different — this is your first visceral evidence that matrix multiplication is non-commutative.
+
+</CodeItYourself>
+
+<Summary>
+
+- A **matrix is a linear map**: A ∈ ℝᵐˣⁿ represents a function ℝⁿ → ℝᵐ that respects addition and scaling. There is a one-to-one correspondence between linear maps and matrices (once bases are chosen).
+- **Columns of A ARE the images of the standard basis**: `Ae_j = a_j`. Consequence: `Ax = Σ_j x_j a_j` — every matrix-vector product is a linear combination of columns weighted by the input's entries.
+- **Design principle**: to build any matrix, pick where you want the basis vectors to land and stack those targets as columns. Rotate/scale/shear/reflect/project — five moves, all built this way.
+- **Composition = matrix product**: `(AB)x = A(Bx)`, read right-to-left. Associative but not commutative — the order in a chain is meaningful.
+- **Non-square matrices** change dimension: tall matrices embed, wide matrices project. Every attention head's W_Q, W_K, W_V is a d_model × d_k wide-projection matrix; embedding tables and MLP up-projections are tall.
+- Every learned parameter tensor in a transformer is a matrix, and every matrix is one of these dimension-changing linear maps — chained together and interleaved with nonlinearities.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>Given A = <code>[[2, 3], [1, 4]]</code> and e<sub>1</sub> = (1, 0), e<sub>2</sub> = (0, 1), compute Ae<sub>1</sub> and Ae<sub>2</sub> and confirm they equal the columns of A.</>,
+      hint: <>Just plug in — Ae<sub>1</sub> picks off column 1, Ae<sub>2</sub> picks off column 2.</>,
+      answer: <>Ae<sub>1</sub> = (2·1 + 3·0, 1·1 + 4·0) = <b>(2, 1)</b> — column 1 ✓. Ae<sub>2</sub> = (2·0 + 3·1, 1·0 + 4·1) = <b>(3, 4)</b> — column 2 ✓. The columns of A are literally the images of the standard basis under the linear map A represents. Every time.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>Design a 2×2 matrix M that scales x-components by 3 and y-components by 5. Then compute Mv for v = (2, 1).</>,
+      hint: <>Where should e<sub>1</sub> go? Where should e<sub>2</sub> go?</>,
+      answer: <>Scale by 3 in x: e<sub>1</sub> = (1, 0) → (3, 0), so column 1 is (3, 0). Scale by 5 in y: e<sub>2</sub> = (0, 1) → (0, 5), so column 2 is (0, 5). M = <code>[[3, 0], [0, 5]]</code> = <code>diag(3, 5)</code>. Applied to v = (2, 1): <b>Mv = (6, 5)</b>. Diagonal matrices are the simplest linear maps — they act independently on each coordinate.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Design a 2×2 matrix that rotates 90° counter-clockwise. Apply it to v = (3, 0) and confirm the result is what you'd expect geometrically.</>,
+      hint: <>Where does e<sub>1</sub> land after a 90° CCW rotation? Where does e<sub>2</sub> land?</>,
+      answer: <>Rotate 90° CCW: e<sub>1</sub> = (1, 0) → (0, 1) (points straight up), and e<sub>2</sub> = (0, 1) → (−1, 0) (points to the left). So R = <code>[[0, −1], [1, 0]]</code>. Apply to v = (3, 0) — a horizontal arrow of length 3: Rv = (0·3 + (−1)·0, 1·3 + 0·0) = <b>(0, 3)</b>. The 3-unit arrow rotated 90° CCW should now point straight up with length 3 — exactly (0, 3). ✓</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Consider A = <code>[[1, 2], [0, 1]]</code> (a horizontal shear) and B = <code>[[2, 0], [0, 3]]</code> (a diagonal scale). Compute AB and BA — are they equal? Which one means "scale first, then shear" and which means "shear first, then scale"?</>,
+      hint: <>Read compositions right-to-left: the rightmost matrix touches the vector first.</>,
+      answer: <>AB = <code>[[2, 6], [0, 3]]</code>. BA = <code>[[2, 4], [0, 3]]</code>. <b>Different</b> — non-commutative. Interpretation: AB means "apply B first (scale by (2, 3)), then apply A (shear)" — the scale happens to a fresh vector first. BA means "shear first, then scale." Concretely on v = (1, 1): AB·v = (8, 3); BA·v = (6, 3). The scale-first version stretches to (2, 3) then shears the taller vector further (the shear coefficient of 2 multiplies a bigger y), while the shear-first version deforms the unit vector to (3, 1) then scales. Same operations, different order, different result — the DNA of "layer order matters" in a neural network.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Give an explicit 3×3 matrix A that maps e<sub>1</sub> → (1, 1, 0), e<sub>2</sub> → (0, 1, 1), e<sub>3</sub> → (1, 0, 1). Then apply it to x = (2, 3, 4) — first by direct matrix-vector product, then by using x's coordinates as a linear combination of columns. Confirm they agree.</>,
+      hint: <>The images tell you the columns directly. Both computations should give the same result.</>,
+      answer: <>Columns are exactly the given images, so A = <code>[[1, 0, 1], [1, 1, 0], [0, 1, 1]]</code>. Direct: Ax = (1·2 + 0·3 + 1·4, 1·2 + 1·3 + 0·4, 0·2 + 1·3 + 1·4) = <b>(6, 5, 7)</b>. Linear-combination view: 2·(1,1,0) + 3·(0,1,1) + 4·(1,0,1) = (2, 2, 0) + (0, 3, 3) + (4, 0, 4) = <b>(6, 5, 7)</b> ✓. Two computations, same result — because they <em>are</em> the same computation, one told in row language and one in column language. This is the core of the "column view" of matrix-vector multiplication.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Give a real-life example of a non-square matrix acting as a dimension-changer in a transformer, and explain what the columns of that matrix mean in the model's own vocabulary. Then explain why the concept ΔW = AB (LoRA) can be stored as two rectangles instead of one square.</>,
+      hint: <>Think about attention head projections — d_model × d_k — and about the rank of the product of two rectangles.</>,
+      answer: <><b>Non-square example.</b> Attention head query-projection W_Q ∈ ℝ<sup>d_model × d_k</sup>, with d_k = d_model / n_heads (e.g., 512 × 64 for a 512-dim model with 8 heads). The columns of W_Q are d_k arrows in ℝ<sup>d_model</sup> — one per query-space dimension — expressed in the model's feature vocabulary. Each says: "to compute *this* query dimension for a token, take *this* weighted combination of the token's 512 features." Every token embedding is projected in one product: <code>Q = tokens @ W_Q</code>, shape (n_tokens, 64). <br /><br /><b>LoRA as two rectangles.</b> A LoRA update to a d×d square weight is ΔW = A B, where A is d×r and B is r×d for some small rank r (e.g., r = 8). Storage: 2·d·r ≪ d² parameters — enormous savings. Why it's viable: the product AB is guaranteed to have rank ≤ r (each of AB's d columns lies in the r-dimensional column space of A, which has at most r independent directions). So LoRA is asserting "the useful weight *update* lives in a low-dimensional subspace" — reasonable for task-specific fine-tuning, even though the full W has rank d. At inference, you can compute ΔW · x either as one big product (materialize AB first, then multiply x) or as two small ones (x → A→ B — cheaper if d ≫ r). Associativity of matrix multiplication makes both legal.</>
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "The columns of an m×n matrix A are:",
+      choices: [
+        { text: "The rows of A transposed" },
+        { text: "The images of the standard basis vectors of the input space under A", correct: true },
+        { text: "The eigenvectors of A" },
+        { text: "The inverse of the map A represents" },
+      ],
+      explanation: <>The j-th column of A is exactly Ae<sub>j</sub> — the image of the j-th standard basis vector under the linear map A. This is the one identity that makes matrices interpretable: instead of a grid of numbers, they become n arrows in the output space that say where the basis lands.</>
+    },
+    {
+      q: "For a linear map A : ℝⁿ → ℝᵐ, applying A to a general vector x = (x₁, …, xₙ) is:",
+      choices: [
+        { text: "Ax = x₁ + x₂ + ⋯ + xₙ (a scalar)" },
+        { text: "Ax = the linear combination of A's columns weighted by x's entries", correct: true },
+        { text: "Ax = the dot product of every column of A with x" },
+        { text: "Undefined unless A is square" },
+      ],
+      explanation: <>By linearity, Ax = A(Σⱼ xⱼeⱼ) = Σⱼ xⱼ(Aeⱼ) = Σⱼ xⱼ aⱼ — every matrix-vector product is a weighted sum of A's columns. This is the "column view"; next chapter also introduces the "row view" (dot products of rows with x) and the "composition view."</>
+    },
+    {
+      q: "Matrix multiplication AB represents:",
+      choices: [
+        { text: "Element-wise multiplication of A and B" },
+        { text: "The linear map that applies B first, then applies A", correct: true },
+        { text: "The Kronecker product of two linear maps" },
+        { text: "A and B independently, side by side" },
+      ],
+      explanation: <>Composition — read right-to-left. AB is the matrix that computes (A ∘ B)(x) = A(B(x)) in one product. This is why the inner dimensions must match: B outputs vectors in ℝⁿ, and A needs ℝⁿ vectors as input. Associativity (AB)C = A(BC) makes chains unambiguous; non-commutativity (AB ≠ BA in general) makes order meaningful.</>
+    },
+    {
+      q: "Which of these is NOT a linear map?",
+      choices: [
+        { text: "T(x, y) = (2x + 3y, x − y)" },
+        { text: "T(x, y) = (x + 5, y)", correct: true },
+        { text: "T(x, y) = (0, 0)" },
+        { text: "T(x, y) = (x cos θ − y sin θ, x sin θ + y cos θ) for fixed θ" },
+      ],
+      explanation: <>T(x, y) = (x + 5, y) fails linearity because T(0, 0) = (5, 0) ≠ (0, 0) — a linear map must send zero to zero (since T(0) = T(2·0) = 2·T(0), forcing T(0) = 0). The +5 is a *translation*, and translations are affine but not linear. In a neural network, the bias vector <em>b</em> in Wx + b is exactly this non-linearity — it's why we call the layer "affine," not "linear."</>
+    },
+    {
+      q: "In a transformer attention head with d_model = 512 and 8 heads (so d_k = 64), the query projection matrix W_Q has shape:",
+      choices: [
+        { text: "8 × 512 (rows are heads)" },
+        { text: "512 × 64 — a wide matrix that maps residual-stream vectors to per-head query vectors", correct: true },
+        { text: "512 × 512 — one square matrix reused across heads" },
+        { text: "64 × 64 — a small per-head matrix" },
+      ],
+      explanation: <>W_Q is a d_model × d_k = 512 × 64 wide matrix per head. Applied to a batch of token embeddings X ∈ ℝ<sup>n×512</sup> as Q = X @ W_Q, the output is a batch of n query vectors of dimension 64 — projected down from the full residual space to a specialized per-head slice. All heads together give (X @ W_Q_1) | (X @ W_Q_2) | … | (X @ W_Q_8), which is equivalent to one big projection X @ W_Q_all with W_Q_all shape 512 × 512 — same total parameters, split across 8 heads.</>
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/matrices-transformations/matrix-as-transformation" title="Matrix as linear transformation" />

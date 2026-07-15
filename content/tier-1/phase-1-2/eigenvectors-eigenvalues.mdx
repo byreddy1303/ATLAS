@@ -1,0 +1,488 @@
+---
+title: Eigenvectors & eigenvalues
+tier: 1
+phase: "1.2"
+---
+
+export const definitionCode = `import numpy as np
+
+# a matrix that scales by 2 along x, and by 3 along y — diagonal, so its axes are eigen-directions
+A = np.array([[2.0, 0.0],
+              [0.0, 3.0]])
+
+# e1 and e2 are the eigenvectors here, with eigenvalues 2 and 3
+for v, expected_lambda in [(np.array([1.0, 0.0]), 2), (np.array([0.0, 1.0]), 3)]:
+    Av = A @ v
+    print(f"v = {v},  Av = {Av},  ratio = {Av / v if v.any() else 'n/a'}")
+    # A v is parallel to v — same direction, scaled by lambda
+
+# a NON-eigen direction: A rotates it
+v = np.array([1.0, 1.0])
+print()
+print(f"non-eigen v = {v},  A v = {A @ v}  (direction changes: (1, 1) -> (2, 3))")`;
+
+export const twoBTwoCode = `import numpy as np
+
+# A 2x2 matrix — compute eigenvalues by trace and determinant
+A = np.array([[4.0, 1.0],
+              [2.0, 3.0]])
+
+tr  = A.trace()          # trace: sum of diagonal = 7
+det = np.linalg.det(A)   # determinant: 4*3 - 1*2 = 10
+
+# eigenvalues solve  lambda^2 - tr*lambda + det = 0
+disc = tr**2 - 4*det
+lam1 = (tr + disc**0.5) / 2
+lam2 = (tr - disc**0.5) / 2
+print(f"tr = {tr}, det = {det}, disc = {disc}")
+print(f"eigenvalues by formula   = {lam1:.4f}, {lam2:.4f}")
+
+# verify with NumPy
+vals, vecs = np.linalg.eig(A)
+print(f"eigenvalues from np.eig  = {sorted(vals, reverse=True)}")
+
+# each eigenvector v satisfies A v = lambda v
+for i, l in enumerate(vals):
+    v = vecs[:, i]
+    Av = A @ v
+    print(f"  lambda={l:.4f},  v={np.round(v, 3)},  Av={np.round(Av, 3)},  Av/lambda ={np.round(Av / l, 3)}")`;
+
+export const diagonalizationCode = `import numpy as np
+
+A = np.array([[4.0, 1.0],
+              [2.0, 3.0]])
+
+vals, vecs = np.linalg.eig(A)                              # A = Q Lambda Q^-1
+Q     = vecs                                               # columns are eigenvectors
+Lam   = np.diag(vals)
+Qinv  = np.linalg.inv(Q)
+
+print("Q Lambda Q^-1 =")
+print(np.round(Q @ Lam @ Qinv, 6))
+print("A =")
+print(A)
+
+# power in eigen-coordinates: A^n = Q Lambda^n Q^-1 — n scalar operations, not n matrix mults
+print()
+print("A^10 direct  =")
+print(np.round(np.linalg.matrix_power(A, 10), 3))
+print("Q Lambda^10 Q^-1 =")
+print(np.round(Q @ np.diag(vals ** 10) @ Qinv, 3))`;
+
+export const symmetricCode = `import numpy as np
+
+# symmetric A = A^T -> eigenvalues are real, eigenvectors are orthogonal
+S = np.array([[3.0, 1.0],
+              [1.0, 2.0]])                           # symmetric
+
+vals, Q = np.linalg.eigh(S)                          # eigh: symmetric-eigen (real vals)
+print("eigenvalues  :", np.round(vals, 4))
+print("eigenvectors (columns of Q):")
+print(np.round(Q, 4))
+print()
+print("Q^T Q = ")
+print(np.round(Q.T @ Q, 6))                          # identity — eigenvectors are orthonormal
+
+# so for symmetric matrices, Q^-1 = Q^T (spectral theorem):
+Lam = np.diag(vals)
+print()
+print("Q Lambda Q^T (rebuild) =")
+print(np.round(Q @ Lam @ Q.T, 6))
+print("S =")
+print(S)`;
+
+export const powerIterCode = `import numpy as np, matplotlib.pyplot as plt
+
+# power iteration: repeatedly multiply by A, normalize -> converges to top eigenvector
+A = np.array([[2.0, 1.0, 0.0],
+              [1.0, 3.0, 1.0],
+              [0.0, 1.0, 2.0]])                     # symmetric, so real & orthogonal eigen
+
+v = np.random.default_rng(0).standard_normal(3)
+v = v / np.linalg.norm(v)
+
+history = []
+for _ in range(20):
+    w   = A @ v
+    lam = float(v @ w)                              # Rayleigh quotient — estimate of top eigenvalue
+    v   = w / np.linalg.norm(w)                     # renormalize
+    history.append(lam)
+
+# compare against numpy
+true_vals, _ = np.linalg.eigh(A)
+print("power-iter converged lambda =", round(history[-1], 5))
+print("largest true eigenvalue      =", round(true_vals[-1], 5))
+
+plt.figure(figsize=(6.5, 3.4))
+plt.plot(history, "-o", color="teal", lw=2, label="Rayleigh quotient")
+plt.axhline(true_vals[-1], color="crimson", ls="--", lw=1, label="true max eigenvalue")
+plt.xlabel("iteration"); plt.ylabel("estimated top eigenvalue")
+plt.grid(alpha=0.3); plt.legend(); plt.tight_layout()`;
+
+export const covarianceCode = `import numpy as np
+
+# synthetic 2-D data with strong correlation
+rng = np.random.default_rng(1)
+n = 400
+x = rng.standard_normal(n)
+y = 2.0 * x + 0.5 * rng.standard_normal(n)                  # y = 2x + small noise
+X = np.column_stack([x, y]) - np.mean(np.column_stack([x, y]), axis=0)    # center
+
+# covariance = (1/(n-1)) X^T X
+C = (X.T @ X) / (n - 1)
+print("covariance matrix =")
+print(np.round(C, 3))
+
+# eigenvectors of the covariance matrix = principal components
+vals, vecs = np.linalg.eigh(C)                              # ascending order
+order = np.argsort(vals)[::-1]                              # descending
+vals, vecs = vals[order], vecs[:, order]
+
+print()
+print("eigenvalues (variances along each PC) =", np.round(vals, 3))
+print("PC1 direction (top eigenvector)       =", np.round(vecs[:, 0], 3))
+print("PC2 direction                          =", np.round(vecs[:, 1], 3))
+
+# 'explained variance' fraction: how much of total variance each PC captures
+print()
+print("explained variance ratio =", np.round(vals / vals.sum(), 3))`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/matrices-transformations/matrix-as-transformation", label: "Matrix as linear transformation", blurb: "Eigenvectors are the special directions that a linear map only stretches — a chapter's core insight applied to itself." },
+  { href: "/learn/mathematics/matrices-transformations/matrix-multiplication", label: "Matrix multiplication — three views", blurb: "Diagonalization A = QΛQ⁻¹ is a matrix product; A^n = QΛⁿQ⁻¹ requires the composition view." },
+  { href: "/learn/mathematics/vectors-space/projections-orthogonality", label: "Projections & orthogonality", blurb: "Symmetric matrices have orthogonal eigenvectors — Q^T = Q⁻¹ and coordinates become dot products." },
+]} />
+
+<Motivation title="The DNA of a matrix — the two questions every eigenvalue answers">
+
+Given a big matrix A, two questions come up over and over in modern ML: (1) if I keep applying A — say, computing A^k or a Markov chain or an RNN's hidden-state update — where does it converge? (2) if I want to *summarize* A by a small number of directions and magnitudes, which ones matter most?
+
+**Eigenvectors and eigenvalues answer both.** An eigenvector of A is a direction that A only stretches — the map's own preferred axis. Its eigenvalue is the stretch factor. If you write A in the coordinate system where the eigenvectors are the basis, A becomes a *diagonal* matrix — each coordinate just scales independently. High-power behavior of A is then trivial (each eigenvalue raised to that power); dimensionality reduction is direct (drop the small-eigenvalue directions).
+
+For a GenAI engineer, eigen-analysis shows up everywhere:
+
+- **PCA** finds a low-dimensional summary of high-dimensional embeddings by picking the top eigenvectors of the covariance matrix. Every visualization of "how are these BERT embeddings clustered" ends with PCA.
+- **PageRank** — the algorithm that made Google — computes the dominant eigenvector of the web link matrix by power iteration.
+- **Attention pattern analysis** looks at the eigenvalues of the attention matrix to check whether an attention head is broad or focused.
+- **RNN training stability** depends on the eigenvalues of the recurrent Jacobian: eigenvalues &gt; 1 give exploding gradients, &lt; 1 give vanishing gradients. This is the mathematical reason why LSTMs and Transformers exist.
+- **SVD**, next chapter, is eigen-analysis applied to `AᵀA` (and its cousin) — the machinery under LoRA and every embedding compression.
+
+Understand `Ax = λx` and you understand half of numerical linear algebra. Even better: it's not scary math — it's asking "which directions doesn't A twist?"
+
+</Motivation>
+
+<Intuition title="Directions that A doesn't turn — it only stretches">
+
+Picture a matrix A acting on all the vectors of ℝ². Most vectors get rotated *and* scaled — their arrow direction changes. But for a typical 2×2 matrix, **there are one or two special directions that A only scales**: it moves those arrows along their own line, longer or shorter (or flipped), never *off* that line.
+
+Those special directions are the **eigenvectors** of A. The stretch factor along each is the **eigenvalue**. If v is an eigenvector with eigenvalue λ, then
+
+$$
+A\mathbf{v} = \lambda \mathbf{v}
+$$
+
+— "applying A" and "multiplying by the scalar λ" have the same effect on v.
+
+The picture in your head should be: A is a machine that stirs space around, but the eigenvectors are its **rotation axes** — they don't move off-line. The eigenvalues tell you the stretch: 2 means "the axis is stretched to twice its length," 0.5 means "shrunk to half," −1 means "flipped end-for-end," 0 means "collapsed to the origin."
+
+Concretely, for a **diagonal matrix** like `diag(2, 3)`, the two eigenvectors are e₁ and e₂ (the standard basis), and the eigenvalues are 2 and 3 — because a diagonal matrix acts on each coordinate independently, stretching each axis by the corresponding diagonal entry. Every other matrix looks the same after a change of coordinates: rotate so the eigenvectors become the axes, apply the stretches, rotate back. That's diagonalization.
+
+</Intuition>
+
+<Recall term="Linear independence">
+
+A set of vectors is **linearly independent** if none can be written as a linear combination of the others — equivalently, the only solution to c₁v₁ + ⋯ + c_kv_k = 0 is all c_i = 0. When a linear map has n independent eigenvectors in ℝⁿ (a "complete" eigenbasis), it's diagonalizable — the linchpin condition of this chapter.
+
+</Recall>
+
+## The definition — Av = λv, and its algebraic consequence
+
+Formally: **λ is an eigenvalue** of an n×n matrix A if there is a nonzero vector v such that
+
+$$
+A\mathbf{v} = \lambda \mathbf{v}
+$$
+
+and any such v is an **eigenvector** of A associated with λ. "Nonzero" is essential — otherwise Av = λv holds trivially for v = 0 and every λ, which would make the definition useless.
+
+Rearranging:
+
+$$
+A\mathbf{v} - \lambda \mathbf{v} = (A - \lambda I)\mathbf{v} = \mathbf{0}
+$$
+
+For a nonzero v to satisfy `(A − λI) v = 0`, the matrix (A − λI) must **not be invertible** — because an invertible matrix has only v = 0 as a solution to Mv = 0. And a matrix is non-invertible exactly when its **determinant is zero**:
+
+$$
+\det(A - \lambda I) = 0 \qquad \text{— the \textbf{characteristic equation}}
+$$
+
+For n×n matrices, this is a polynomial equation of degree n in λ — the **characteristic polynomial**. Its roots are the eigenvalues.
+
+<RunnableCode title="A diagonal matrix — eigenvectors and eigenvalues by inspection" code={definitionCode} packages={["numpy"]} />
+
+## Solving small cases — the 2×2 trace-determinant trick
+
+For a 2×2 matrix, the characteristic polynomial is a quadratic and has a slick form. Expanding `det(A − λI)`:
+
+$$
+\det\begin{bmatrix} a - \lambda & b \\ c & d - \lambda \end{bmatrix} = (a - \lambda)(d - \lambda) - bc = \lambda^2 - (a+d)\lambda + (ad - bc)
+$$
+
+Two coefficients matter, both with names:
+
+- **trace** tr(A) = a + d = sum of the diagonal = **sum of eigenvalues** (from the coefficient of λ).
+- **determinant** det(A) = ad − bc = **product of eigenvalues** (from the constant term).
+
+The quadratic has the tidy form `λ² − tr·λ + det = 0`, so:
+
+$$
+\lambda_{\pm} = \frac{\mathrm{tr}(A) \pm \sqrt{\mathrm{tr}(A)^2 - 4\det(A)}}{2}
+$$
+
+These generalize: for any n×n matrix, the trace equals the *sum* of eigenvalues (with multiplicity) and the determinant equals the *product*. Two numbers you can read straight off the matrix already tell you a lot about its eigen-spectrum.
+
+<RunnableCode title="2×2 eigen-decomposition by trace-and-determinant" code={twoBTwoCode} packages={["numpy"]} />
+
+Once you have λ, the corresponding eigenvector v solves `(A − λI) v = 0` — a system with a nontrivial nullspace (since λ was chosen to make it singular). Solve by inspection (for 2×2) or by `np.linalg.eig` (for anything real).
+
+## Diagonalization — A = QΛQ⁻¹, and why A^n becomes easy
+
+Suppose A has n linearly independent eigenvectors v₁, …, v_n with eigenvalues λ₁, …, λ_n. Build Q with these vectors as columns and Λ = diag(λ₁, …, λ_n). Then:
+
+$$
+A Q = A [\mathbf{v}_1 \mid \cdots \mid \mathbf{v}_n] = [\lambda_1 \mathbf{v}_1 \mid \cdots \mid \lambda_n \mathbf{v}_n] = Q\, \Lambda
+$$
+
+Right-multiply both sides by Q⁻¹ (which exists because the columns of Q are independent):
+
+$$
+A = Q \Lambda Q^{-1}
+$$
+
+This is **diagonalization** — writing A as a change of basis (Q⁻¹) into eigen-coordinates, then a diagonal scaling (Λ), then a change back (Q). It looks like extra machinery, but its power appears when you take **powers**:
+
+$$
+A^k = (Q\Lambda Q^{-1})^k = Q \Lambda Q^{-1} Q \Lambda Q^{-1} \cdots = Q \Lambda^k Q^{-1}
+$$
+
+— every `Q⁻¹Q` cancels to the identity, leaving `Q Λ^k Q⁻¹`. And `Λ^k` is trivial: raise each diagonal entry to the k-th power. **Computing A^k reduces from k matrix multiplications to a single diagonal-scalar-raise plus two changes of basis.**
+
+<RunnableCode title="Diagonalization and its use for fast matrix powers" code={diagonalizationCode} packages={["numpy"]} />
+
+The same idea makes **matrix functions** work: e^A = Q · diag(e^λ₁, …, e^λₙ) · Q⁻¹, log(A) = Q · diag(log λᵢ) · Q⁻¹ (when defined), and so on. The whole "matrix functional calculus" is diagonalization + apply the function to eigenvalues one at a time.
+
+**Caveat**: not every matrix is diagonalizable. Matrices that lack a full eigenbasis (repeated eigenvalues with too few independent eigenvectors) are called **defective**. In practice, symmetric matrices (below) are always safe.
+
+## Symmetric matrices — the case that always works
+
+A matrix S is **symmetric** if S = Sᵀ (entries mirror across the diagonal). Symmetric matrices satisfy the **spectral theorem**:
+
+- All eigenvalues are **real** (no complex numbers).
+- Eigenvectors from different eigenvalues are **orthogonal**; you can always choose an **orthonormal** eigenbasis.
+- **Q is orthogonal**, meaning `QᵀQ = I` and hence `Q⁻¹ = Qᵀ`.
+
+Diagonalization becomes:
+
+$$
+S = Q \Lambda Q^{\mathsf T}
+$$
+
+— no explicit inverse ever required, and coordinates in the eigenbasis are just dot products with the columns of Q (from the "orthonormal basis" chapter). This is a huge deal.
+
+<RunnableCode title="Spectral theorem: symmetric matrices have orthonormal eigenvectors" code={symmetricCode} packages={["numpy"]} />
+
+Where symmetric matrices show up in ML — and why this theorem is why they're so nice:
+
+- **Covariance matrices** are symmetric (`C = XᵀX` with X centered) → PCA works cleanly.
+- **Kernel matrices** (Gram matrices Kᵢⱼ = k(xᵢ, xⱼ) for a symmetric kernel) → SVMs, Gaussian processes work.
+- **Hessians of loss functions** (second-derivative matrices) are symmetric → convexity, curvature analysis.
+- **Attention score matrices `Q @ Kᵀ` are *not* symmetric in general** — that's a specific asymmetry that lets attention be directed. But their eigenvalues still say a lot; we use SVD (next chapter) for them.
+
+Use `np.linalg.eigh` (h for Hermitian, which for real matrices means symmetric) — faster and numerically more stable than `np.linalg.eig` when the matrix is symmetric.
+
+## Power iteration — the algorithm that actually runs
+
+For a big symmetric matrix (say 10,000 × 10,000), computing the full eigen-decomposition is expensive and often unnecessary — you usually just want the top eigenvector. **Power iteration** finds it with a few matmuls:
+
+1. Start with a random unit vector v.
+2. Multiply: `w = A v`.
+3. Normalize: `v = w / ‖w‖`.
+4. Repeat until `v` stops moving.
+
+Why does this converge to the top eigenvector? Write v in the eigenbasis: v = c₁q₁ + c₂q₂ + ⋯ + c_n q_n, with |λ₁| > |λ₂| ≥ … ≥ |λ_n|. Then A v = c₁λ₁q₁ + c₂λ₂q₂ + ⋯. After k applications, A^k v = c₁ λ₁^k q₁ + c₂ λ₂^k q₂ + ⋯. Factor out λ₁^k: A^k v = λ₁^k (c₁ q₁ + c₂ (λ₂/λ₁)^k q₂ + ⋯). Since |λ₂/λ₁| < 1, all non-top terms shrink geometrically — after enough iterations, only c₁ q₁ survives (up to overall scale). Normalizing preserves the direction — we've isolated q₁.
+
+Each iteration also gives an eigenvalue estimate via the **Rayleigh quotient** `λ ≈ v · (A v)` — the direction-preserving projection that becomes exact when v is a true eigenvector.
+
+<RunnableCode title="Power iteration finds the top eigenvector in ~20 steps" code={powerIterCode} packages={["numpy", "matplotlib"]} captureFig={true} />
+
+**PageRank** is power iteration on the (column-stochastic) web link matrix — the resulting top eigenvector ranks pages by "how much random-walk probability lands here." **PCA's leading component** can be computed by power iteration on `XᵀX`. Every "find the top-k eigen-directions" library routine (`scipy.sparse.linalg.eigsh` with `k=1`, `sklearn.decomposition.TruncatedSVD`) is essentially power iteration with orthogonal deflation for the second-and-later components.
+
+## The traps that matter
+
+**Zero and negative eigenvalues have geometric meaning.** λ = 0 means the eigenvector is in the **nullspace** — A collapses that direction to zero (the matrix is singular). λ < 0 means A flips that direction and stretches it. |λ| = 1 means the eigenvector is a fixed length under A (a rotation axis in the sense of "unit stretch"). Always look at both magnitude and sign.
+
+**Complex eigenvalues appear for real matrices that rotate.** A pure rotation matrix `[[cos θ, −sin θ], [sin θ, cos θ]]` has no real eigenvectors when θ isn't a multiple of π — because rotation genuinely turns every direction, leaving no fixed axis in ℝ². Its eigenvalues are complex: e^(±iθ). NumPy's `eig` returns complex arrays for such matrices. Not a bug — it's the honest algebra.
+
+**Non-diagonalizable matrices exist**. The matrix `[[1, 1], [0, 1]]` has eigenvalue 1 with algebraic multiplicity 2 but only *one* independent eigenvector, so no eigenbasis exists — it can't be diagonalized. This is a **shear** matrix (recognize it from the previous chapter). In these cases you can still reach a "nearly diagonal" form called the **Jordan normal form**, but it's fragile numerically — real practice replaces it with SVD.
+
+**Eigenvectors are only defined up to scaling.** If v is an eigenvector, so is `2v` and so is `−v`. NumPy returns unit-length eigenvectors, but the sign is arbitrary — different runs, different implementations, different LAPACK versions can flip signs. Any real algorithm should either not depend on signs or fix them explicitly (e.g., "make the first nonzero coordinate positive").
+
+**Compute cost is O(n³)** for a full eigendecomposition of a dense n×n matrix — the same as matrix multiplication. For large sparse matrices or "top-k only" problems, use iterative methods (`scipy.sparse.linalg.eigsh`, LOBPCG, Lanczos) — they cost O(k · nnz) per iteration instead.
+
+<RealWorldML title="PCA — eigenvectors of the covariance matrix ARE the principal components">
+
+The most cited eigen-application in machine learning. Given a data matrix `X` with n rows (samples) and d columns (features), the **covariance matrix** `C = XᵀX / (n − 1)` (after centering X) is a d×d symmetric matrix whose (i, j)-entry is the covariance between features i and j.
+
+PCA asks: which direction in feature space has the **greatest variance** in my data? That direction is exactly the top eigenvector of C — with eigenvalue = the variance along that direction. The second-largest-variance direction (orthogonal to the first) is the second eigenvector. And so on.
+
+<RunnableCode title="PCA via eigendecomposition of the covariance matrix" code={covarianceCode} packages={["numpy"]} />
+
+Read the cell:
+
+1. **Center the data.** PCA measures variance from the mean, so we subtract the column means. In neural network embeddings, this is often skipped when the embedding is already roughly centered (e.g., after LayerNorm).
+2. **Compute the covariance.** `X.T @ X / (n − 1)` — a matmul, then a scalar divide. Symmetric by construction (`C[i, j] = C[j, i]`), so we use `eigh`.
+3. **`eigh` returns eigenvalues in ascending order** (LAPACK convention). We reverse to get "biggest first" — the PC ordering everyone reports.
+4. **PC1 points along the data's dominant elongation.** In this example, the data lies close to `y = 2x`, so PC1 should point in that direction: normalized `(1, 2)/√5 ≈ (0.447, 0.894)`. Check the printed PC1 direction — it matches (up to sign, since eigenvectors are only defined up to sign).
+5. **Explained variance ratio** = eigenvalue / total sum of eigenvalues. Here you'll see PC1 explains ~99% of the variance — the data really *is* one-dimensional plus a whisker of noise. In embeddings of natural text, the top ~50 components typically explain 60–80% of the variance in a 768-dim BERT space.
+
+Every "reduce to 2D and plot" of embeddings you've seen (t-SNE, UMAP, plain PCA) starts here — with the eigendecomposition of a covariance matrix. Next chapter's SVD gives an equivalent path that skips forming `XᵀX` explicitly, which is preferred numerically.
+
+</RealWorldML>
+
+<StudyDepth
+  intro={<>Eigen-analysis is the vocabulary of half of ML — PCA, PageRank, spectral clustering, RNN stability, GNN theory. Drill the essentials; skim the exotica.</>}
+  drill={[
+    <>The definition <code>Av = λv</code>: "special direction A only stretches" — geometric first, then algebraic</>,
+    <>2×2 shortcut: trace = sum of eigenvalues, det = product; solve quadratic <code>λ² − tr·λ + det = 0</code></>,
+    <>Diagonalization <code>A = QΛQ⁻¹</code> and its payoff <code>A^k = QΛ^k Q⁻¹</code> — matrix functions via eigenvalues</>,
+    <>Spectral theorem for symmetric matrices: real eigenvalues, orthonormal eigenvectors, <code>Q⁻¹ = Qᵀ</code></>,
+    <>Power iteration for the top eigenvector; Rayleigh quotient for the corresponding eigenvalue</>,
+    <>Reading complex/zero/negative eigenvalues geometrically (rotation, collapse, flip)</>,
+  ]}
+  skim={[
+    <>Jordan normal form and defective matrices — replaced in practice by SVD</>,
+    <>Iterative eigensolvers (Lanczos, Arnoldi, LOBPCG) — call <code>scipy.sparse.linalg.eigsh</code>, know the name</>,
+    <>Generalized eigenvalue problems <code>Av = λBv</code> — appear in some kernel methods</>,
+    <>Perturbation theory: how eigenvalues change when A changes slightly (Weyl inequalities, condition number)</>,
+  ]}
+/>
+
+<CodeItYourself title="Three drills — verify, diagonalize, iterate">
+
+1. **Verify the eigen-equation directly.** For A = `[[6, 2], [2, 3]]` (symmetric), use `np.linalg.eigh(A)` and check that `A @ vecs[:, i] ≈ vals[i] * vecs[:, i]` for i = 0, 1. Print both sides with `np.allclose`. *Hint: eigenvector v is a column of `vecs` — column-indexing matters.*
+
+2. **Compute A^10 two ways.** Take A = `[[0.9, 0.1], [0.2, 0.7]]` (a stochastic-ish matrix). Compute `np.linalg.matrix_power(A, 10)` and compare with `Q @ np.diag(vals ** 10) @ np.linalg.inv(Q)` from the eigendecomposition. Verify agreement with `np.allclose`. Then observe: the largest eigenvalue governs the limiting behavior — as k → ∞, `A^k` concentrates in the top eigenvector's direction. Print A^100 and see how the columns collapse.
+
+3. **Write `power_iteration(A, iters=50)`** that returns (top_eigenvector, top_eigenvalue) using the algorithm above (start with a random unit vector, multiply, normalize, use Rayleigh quotient for the eigenvalue). Test on a random symmetric matrix `S = (A + A.T) / 2` for A of shape (5, 5); compare against `np.linalg.eigh(S)`. Report the number of iterations for `‖v_new − v_old‖ < 1e-8`.
+
+</CodeItYourself>
+
+<Summary>
+
+- An eigenvector v of A satisfies **Av = λv** for scalar λ (the eigenvalue) — the direction A only stretches, never rotates off-line. Nonzero v required.
+- Algebraically: eigenvalues are the **roots of the characteristic polynomial** det(A − λI) = 0. For 2×2, that's a quadratic with **sum = trace(A)** and **product = det(A)**.
+- **Diagonalization** A = QΛQ⁻¹ writes A as (change of basis) · (scaling) · (change back). Powers, functions, and log-scale behavior become one-dimensional per eigenvalue.
+- **Spectral theorem** for symmetric matrices: real eigenvalues, orthonormal eigenvectors, Qᵀ = Q⁻¹. Use `np.linalg.eigh`. Covariance matrices, Hessians, kernels are all symmetric → all diagonalize nicely.
+- **Power iteration** finds the top eigenvector in O(matmuls) — the algorithm behind PageRank, the leading component of PCA, and most practical "top-k eigen-directions" routines.
+- **PCA** = eigendecomposition of the covariance matrix. Top-k eigenvectors are the principal components; eigenvalues = variance along each.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>For A = <code>diag(4, −2)</code>, list all eigenvalues, all eigenvectors, and verify Av = λv for each pair.</>,
+      hint: <>Diagonal matrices have the standard basis as eigenvectors.</>,
+      answer: <>Eigenvalues: <b>4 and −2</b>. Eigenvectors: <b>e<sub>1</sub> = (1, 0)</b> for λ = 4, and <b>e<sub>2</sub> = (0, 1)</b> for λ = −2. Verify: Ae<sub>1</sub> = (4·1, −2·0) = (4, 0) = 4·(1, 0) = 4·e<sub>1</sub> ✓; Ae<sub>2</sub> = (0, −2) = −2·(0, 1) ✓. Sign of λ = −2 means A flips the y-axis end-for-end while stretching by 2.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>Find the two eigenvalues of A = <code>[[3, 1], [0, 5]]</code>.</>,
+      hint: <>Upper triangular — the eigenvalues sit on the diagonal.</>,
+      answer: <>For a triangular matrix (upper or lower), the eigenvalues are exactly the diagonal entries — because det(A − λI) becomes a product of (Aᵢᵢ − λ) terms, and setting that to zero gives λ = Aᵢᵢ. So the eigenvalues here are <b>3 and 5</b>. Cross-check by trace/det: tr = 8 = 3 + 5 ✓, det = 15 = 3·5 ✓. This shortcut generalizes to any n×n triangular matrix — one glance at the diagonal.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Compute the eigenvalues of A = <code>[[2, 1], [3, 4]]</code> by finding the characteristic polynomial and solving the quadratic.</>,
+      hint: <>tr(A) = 6, det(A) = 8 − 3 = 5. Solve λ² − 6λ + 5 = 0.</>,
+      answer: <>Characteristic polynomial: λ² − tr·λ + det = λ² − 6λ + 5 = (λ − 5)(λ − 1). Roots: <b>λ = 5</b> and <b>λ = 1</b>. Sanity check: 5 + 1 = 6 = tr ✓, 5 · 1 = 5 = det ✓. To get the eigenvectors: for λ = 5, solve (A − 5I)v = <code>[[−3, 1], [3, −1]]</code> v = 0 → v = <code>(1, 3)</code> (unnormalized) → v = (1, 3)/√10. For λ = 1: (A − I)v = <code>[[1, 1], [3, 3]]</code> v = 0 → v = (1, −1)/√2.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>A 2×2 matrix A has eigenvalues 2 and 3, with eigenvectors v₁ = (1, 1) and v₂ = (1, −1). Reconstruct A from the diagonalization Q Λ Q⁻¹.</>,
+      hint: <>Q = [v₁ | v₂], Λ = diag(2, 3). Compute Q⁻¹ by the 2×2 inverse formula.</>,
+      answer: <>Q = <code>[[1, 1], [1, −1]]</code>, Λ = <code>diag(2, 3)</code>. Determinant of Q = 1·(−1) − 1·1 = −2, so Q⁻¹ = (1/−2)·<code>[[−1, −1], [−1, 1]]</code> = <code>[[0.5, 0.5], [0.5, −0.5]]</code>. Now compute Q Λ = <code>[[1·2, 1·3], [1·2, −1·3]]</code> = <code>[[2, 3], [2, −3]]</code>. Then (QΛ)·Q⁻¹ = <code>[[2·0.5 + 3·0.5, 2·0.5 + 3·(−0.5)], [2·0.5 + (−3)·0.5, 2·0.5 + (−3)·(−0.5)]]</code> = <code>[[2.5, −0.5], [−0.5, 2.5]]</code>. So <b>A = <code>[[2.5, −0.5], [−0.5, 2.5]]</code></b>. (This is a symmetric matrix, as expected: v₁ and v₂ are perpendicular, and the spectral theorem says symmetric matrices have orthogonal eigenvectors.)</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Prove that any nonzero eigenvector v of a symmetric matrix S with eigenvalue λ, and any nonzero eigenvector w with a different eigenvalue μ ≠ λ, must be orthogonal (v · w = 0).</>,
+      hint: <>Compute vᵀSw in two ways: as vᵀ(Sw) = μ vᵀw, and as (Sv)ᵀw = λ vᵀw (using symmetry). Set them equal.</>,
+      answer: <>Compute the scalar vᵀSw two ways using the definitions: <br />(a) vᵀSw = vᵀ(Sw) = vᵀ(μw) = <b>μ (vᵀw)</b>. <br />(b) vᵀSw = (Sᵀv)ᵀ w = (Sv)ᵀ w = (λv)ᵀ w = <b>λ (vᵀw)</b> — using Sᵀ = S and pulling λ out. <br />Equate: μ(vᵀw) = λ(vᵀw), so (μ − λ)(vᵀw) = 0. Since μ ≠ λ, we get <b>vᵀw = 0</b>. ∎ <br /><br /> Consequence: symmetric matrices have an orthogonal eigenbasis whenever their eigenvalues are all distinct — and even with repeated eigenvalues you can *choose* an orthonormal basis inside each eigenspace (via Gram–Schmidt). That's why the spectral theorem gives you an orthogonal Q "for free" in the symmetric case.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Why does power iteration converge to the top eigenvector? Give the argument in terms of expanding the initial vector in the eigenbasis and taking the k-th power.</>,
+      hint: <>Write v₀ = c₁q₁ + ⋯ + c_nq_n in the eigenbasis; apply A^k; factor out λ₁^k.</>,
+      answer: <>Assume A is diagonalizable with eigenvalues |λ₁| &gt; |λ₂| ≥ … ≥ |λ_n| and eigenvectors q₁, …, q_n. Expand v₀ in the eigenbasis: <b>v₀ = c₁q₁ + c₂q₂ + ⋯ + c_nq_n</b> for scalars c_i. <br /><br /> Apply A^k: A^k v₀ = c₁ λ₁^k q₁ + c₂ λ₂^k q₂ + ⋯ + c_n λ_n^k q_n. Factor out λ₁^k: <br />A^k v₀ = <b>λ₁^k</b>(c₁ q₁ + c₂ (λ₂/λ₁)^k q₂ + ⋯ + c_n (λ_n/λ₁)^k q_n). <br /><br /> Each ratio |λ_i/λ₁| &lt; 1 for i ≥ 2, so each (λ_i/λ₁)^k → 0 geometrically as k → ∞. What survives: <b>A^k v₀ ≈ λ₁^k c₁ q₁</b> — proportional to q₁. Normalizing at each step throws away the λ₁^k factor and keeps the direction of q₁. <br /><br /> Convergence is geometric with ratio |λ₂/λ₁| — so power iteration is fast when the top eigenvalue is well-separated (large "spectral gap") and slow when λ₁ ≈ λ₂. Requirement: c₁ ≠ 0, which holds for almost every random starting vector (measure zero of "bad" starts).</>
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "An eigenvector v of a matrix A satisfies:",
+      choices: [
+        { text: "A v = 0" },
+        { text: "A v = λ v for some scalar λ, and v ≠ 0", correct: true },
+        { text: "v is a column of A" },
+        { text: "A v is orthogonal to v" },
+      ],
+      explanation: <>The defining relation Av = λv with v nonzero. The stretch λ is the eigenvalue; v may be any *direction* A doesn't twist. "A v = 0" holds only when λ = 0 — the special case where v is in the nullspace of A.</>
+    },
+    {
+      q: "For a 2×2 matrix A with trace 7 and determinant 12, the eigenvalues are:",
+      choices: [
+        { text: "3 and 4", correct: true },
+        { text: "7 and 12" },
+        { text: "5 and 2" },
+        { text: "Undetermined without more info" },
+      ],
+      explanation: <>Sum of eigenvalues = trace = 7, product = determinant = 12. Two numbers that sum to 7 and multiply to 12 are 3 and 4. Equivalently, solve λ² − 7λ + 12 = 0 → (λ − 3)(λ − 4) = 0. For 2×2 you rarely need the characteristic polynomial as a polynomial — trace and determinant are the shortcut.</>
+    },
+    {
+      q: "A symmetric matrix S = Sᵀ has the property that:",
+      choices: [
+        { text: "All eigenvalues are complex" },
+        { text: "Eigenvectors from distinct eigenvalues are orthogonal, and Q⁻¹ = Qᵀ", correct: true },
+        { text: "It cannot be diagonalized" },
+        { text: "It is always invertible" },
+      ],
+      explanation: <>The spectral theorem for symmetric (real) matrices: eigenvalues are real, eigenvectors from distinct eigenvalues are orthogonal, and you can choose an orthonormal eigenbasis. Then Q (columns = orthonormal eigenvectors) satisfies QᵀQ = I, i.e., Qᵀ = Q⁻¹. This is why `np.linalg.eigh` for symmetric matrices is fast and stable: it can exploit the orthogonality structure directly.</>
+    },
+    {
+      q: "The diagonalization A = QΛQ⁻¹ gives us a fast way to compute:",
+      choices: [
+        { text: "The trace and determinant of A" },
+        { text: "The inverse of A" },
+        { text: "Powers A^k = QΛ^k Q⁻¹, and matrix functions like e^A", correct: true },
+        { text: "The nullspace of A" },
+      ],
+      explanation: <>Powers reduce to raising diagonal entries to a power — one exponent per eigenvalue. Similarly e^A = Q · diag(e^λᵢ) · Q⁻¹, log(A) = Q · diag(log λᵢ) · Q⁻¹, and so on. This is the "operator calculus" in one line — every well-defined function of a matrix acts on eigenvalues one at a time.</>
+    },
+    {
+      q: "Power iteration converges to the top eigenvector because:",
+      choices: [
+        { text: "Random initial vectors are always eigenvectors" },
+        { text: "Repeated multiplication by A amplifies components in the direction of the largest-|λ| eigenvector geometrically", correct: true },
+        { text: "It solves the characteristic polynomial by root-finding" },
+        { text: "It is a form of gradient descent on the loss ‖Av − λv‖" },
+      ],
+      explanation: <>Write v₀ as c₁q₁ + c₂q₂ + …; then A^k v₀ = c₁ λ₁^k q₁ + c₂ λ₂^k q₂ + …, and factoring out λ₁^k shows the non-top components decay by factors of (λᵢ/λ₁)^k &lt; 1. After enough iterations only the top direction survives. Normalization at each step preserves direction and keeps numerics from overflow.</>
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/matrices-transformations/eigenvectors-eigenvalues" title="Eigenvectors & eigenvalues" />

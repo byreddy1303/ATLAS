@@ -1,0 +1,461 @@
+---
+title: Singular Value Decomposition (SVD)
+tier: 1
+phase: "1.2"
+---
+
+export const svdBasicCode = `import numpy as np
+
+# rectangular matrix — no eigen-decomposition possible, but SVD always works
+A = np.array([[3.0,  1.0],
+              [1.0,  3.0],
+              [1.0,  1.0]])                             # 3x2
+
+U, s, Vt = np.linalg.svd(A, full_matrices=False)       # thin SVD
+
+print("A shape        =", A.shape)
+print("U shape        =", U.shape, "  (columns: orthonormal 'output' basis)")
+print("singular values=", np.round(s, 4))
+print("V^T shape      =", Vt.shape, "  (rows: orthonormal 'input' basis)")
+
+# reconstruct: A = U diag(s) V^T
+Sigma = np.diag(s)
+A_recon = U @ Sigma @ Vt
+print()
+print("U @ diag(s) @ V^T =")
+print(np.round(A_recon, 6))
+print("A =")
+print(A)
+
+# U and V^T are orthonormal — verify
+print()
+print("U^T U =",  np.round(U.T @ U, 6))                 # 2x2 identity
+print("V V^T =",  np.round(Vt @ Vt.T, 6))               # 2x2 identity`;
+
+export const geometryCode = `import numpy as np, matplotlib.pyplot as plt
+
+# geometric picture: SVD is rotate -> scale -> rotate.  Watch it happen to a unit circle.
+A = np.array([[2.0, 1.0],
+              [1.0, 2.0]])
+
+theta = np.linspace(0, 2 * np.pi, 100)
+circle = np.stack([np.cos(theta), np.sin(theta)])       # 2x100 unit circle points
+
+# svd pieces
+U, s, Vt = np.linalg.svd(A)
+Sigma = np.diag(s)
+
+step0 = circle                                          # start
+step1 = Vt @ step0                                      # V^T rotates the circle
+step2 = Sigma @ step1                                   # stretch axes: unit circle -> ellipse
+step3 = U @ step2                                       # rotate the ellipse
+step_direct = A @ step0                                 # direct A applied
+
+fig, axes = plt.subplots(1, 4, figsize=(12.5, 3.2))
+for ax, pts, title in zip(axes,
+                          [step0, step1, step2, step3],
+                          ["1. start (unit circle)",
+                           "2. V^T rotate",
+                           "3. Sigma stretch",
+                           "4. U rotate"]):
+    ax.plot(pts[0], pts[1], color="teal", lw=2)
+    ax.set_xlim(-3.5, 3.5); ax.set_ylim(-3.5, 3.5)
+    ax.set_aspect("equal"); ax.grid(alpha=0.3); ax.set_title(title)
+
+plt.tight_layout()
+
+# and it exactly matches applying A directly
+print("SVD path == direct A @ circle:", np.allclose(step3, step_direct))
+print("singular values (semi-axes)   :", np.round(s, 3))`;
+
+export const relationEigenCode = `import numpy as np
+
+# SVD is eigen-decomposition of A^T A (and A A^T) — with a translation
+A = np.array([[3.0,  1.0],
+              [1.0,  3.0],
+              [1.0,  1.0]])                             # 3x2
+
+U, s, Vt = np.linalg.svd(A, full_matrices=False)
+
+# A^T A is 2x2 symmetric: its eigenvectors ARE V, eigenvalues ARE s^2
+ATA = A.T @ A
+eig_vals, eig_vecs = np.linalg.eigh(ATA)               # ascending order
+
+print("singular values^2       =", np.round(sorted(s**2, reverse=True), 4))
+print("eigenvalues of A^T A    =", np.round(sorted(eig_vals, reverse=True), 4))
+
+# so the recipe: eigen-decompose A^T A -> V and Sigma; then U = A V / Sigma
+print()
+print("first right singular vec V[:, 0]        =", np.round(Vt[0], 4))
+print("top eigenvector of A^T A (largest lam)  =", np.round(eig_vecs[:, -1], 4))`;
+
+export const truncationCode = `import numpy as np, matplotlib.pyplot as plt
+
+# take a large-ish random data matrix; try low-rank approximation via SVD truncation
+rng = np.random.default_rng(0)
+
+# generate a matrix that is "almost rank 3" — high signal in top 3 components + tiny noise
+rank = 3
+M = rank
+N = 40
+D = 30
+U_true = rng.standard_normal((N, M))
+V_true = rng.standard_normal((M, D))
+A = U_true @ V_true + 0.05 * rng.standard_normal((N, D))   # signal + tiny noise
+
+U, s, Vt = np.linalg.svd(A, full_matrices=False)
+
+print("top 10 singular values:", np.round(s[:10], 4))
+
+# truncated (rank-k) reconstruction using top k singular components
+def rank_k(k):
+    return (U[:, :k] * s[:k]) @ Vt[:k]                    # sum of top k outer products
+
+errors = []
+for k in range(1, min(A.shape) + 1):
+    A_k = rank_k(k)
+    errors.append(np.linalg.norm(A - A_k, "fro"))
+
+plt.figure(figsize=(6.4, 3.4))
+plt.semilogy(range(1, len(errors) + 1), errors, "-o", color="teal", lw=1.5)
+plt.axvline(rank, color="crimson", ls="--", label=f"true rank = {rank}")
+plt.xlabel("truncation rank k")
+plt.ylabel("Frobenius error ||A - A_k||")
+plt.title("Truncated SVD error — the elbow marks the true rank")
+plt.grid(alpha=0.3, which="both"); plt.legend(); plt.tight_layout()`;
+
+export const loraCode = `import numpy as np
+
+# LoRA: parameterize a d x d weight update as ΔW = B A with A: d x r, B: r x d, r << d
+# Storage saves d^2 vs 2*d*r; expressivity limit is rank r.
+
+rng = np.random.default_rng(1)
+d = 128
+r_true = 8                                                # actual useful rank of the update
+r_lora = 16                                               # capacity we give the adapter
+
+# make a "true" low-rank ΔW to imitate
+U_true = rng.standard_normal((d, r_true)) * 0.3
+V_true = rng.standard_normal((r_true, d)) * 0.3
+Delta_true = U_true @ V_true                              # rank exactly r_true
+
+# fit a LoRA-like rank r_lora approximation via top-r SVD
+U, s, Vt = np.linalg.svd(Delta_true, full_matrices=False)
+Delta_lora = (U[:, :r_lora] * s[:r_lora]) @ Vt[:r_lora]
+
+full_params  = d * d
+lora_params  = 2 * d * r_lora
+print(f"full  W storage   : {full_params:>7} params")
+print(f"LoRA  A,B storage : {lora_params:>7} params  ({lora_params/full_params:.1%} of full)")
+print()
+print(f"top 12 singular values of the 'true' ΔW: {np.round(s[:12], 3)}")
+print(f"reconstruction error (rank {r_lora} approx) : {np.linalg.norm(Delta_true - Delta_lora):.2e}")
+
+# rank_lora >= rank_true, so error should be near zero — LoRA captures the update exactly
+# when rank(update) <= r_lora. Real fine-tuning benefits when the "task-specific" update
+# genuinely lies in a low-rank subspace of the weight space.`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/matrices-transformations/eigenvectors-eigenvalues", label: "Eigenvectors & eigenvalues", blurb: "SVD generalizes eigen-decomposition to any matrix — including rectangular ones — and computes internally via eigen of AᵀA." },
+  { href: "/learn/mathematics/matrices-transformations/matrix-multiplication", label: "Matrix multiplication — three views", blurb: "The outer-product view (AB = Σ column outer row) is exactly how truncated SVD approximates a matrix." },
+  { href: "/learn/mathematics/vectors-space/projections-orthogonality", label: "Projections & orthogonality", blurb: "SVD's U and V matrices are orthogonal — Q⁻¹ = Qᵀ — the same 'coordinates via dot products' machinery." },
+]} />
+
+<Motivation title="The one decomposition every GenAI engineer needs">
+
+Two of the most important techniques in modern deep learning are direct applications of SVD:
+
+- **LoRA (Low-Rank Adaptation)** — the standard method for parameter-efficient fine-tuning of large language models — represents each weight update as a product ΔW = B A with A and B thin rectangles. That's a rank-r decomposition; SVD is the mathematical machine that says "any matrix has a rank-r approximation, and here it is."
+- **Model compression, embedding compression, activation caching in inference** — all reduce to "approximate this matrix with a lower-rank one." Truncated SVD gives the *provably best* rank-k approximation (Eckart–Young theorem).
+
+SVD also unlocks the analyses you'll need to understand a model's guts: the singular values of the attention pattern tell you whether a head is focused or diffuse; the singular values of the weight matrix tell you the effective dimensionality of the map (a k=64 head with rank 4 is wasting capacity); the singular values of the covariance matrix are the variances of the principal components in PCA (via `SVD(X) → Σ² = variances`, no covariance-matrix construction needed — a numerical win).
+
+More broadly: **SVD works for any matrix**, not just square symmetric ones — rectangular, non-square, complex-eigenvalue, defective, whatever you throw at it. Eigen-decomposition has caveats; SVD has none. That's the deep reason it's the workhorse decomposition of numerical linear algebra.
+
+The three-part deliverable of this chapter: (1) know the geometric picture of SVD, so you can *see* what a weight matrix does; (2) know the algebraic form A = UΣVᵀ, so you can read code; (3) know Eckart–Young + truncation, so you can reason about compression and rank.
+
+</Motivation>
+
+<Intuition title="Rotate, stretch, rotate — any matrix, exactly">
+
+Every m×n matrix A can be written as a product of three specific pieces:
+
+$$
+A \;=\; U\,\Sigma\,V^{\mathsf T}
+$$
+
+where:
+
+- **V** is an n×n **orthogonal** matrix — its columns are an orthonormal basis for the input space ℝⁿ (the "right singular vectors"). Vᵀ acts as a rotation of the input.
+- **Σ** is an m×n matrix with non-negative entries on the diagonal (the **singular values** σ₁ ≥ σ₂ ≥ … ≥ 0) and zeros elsewhere. It scales each new axis independently.
+- **U** is an m×m **orthogonal** matrix — its columns are an orthonormal basis for the output space ℝᵐ (the "left singular vectors"). U rotates the stretched result into the output space.
+
+Geometrically: to apply A to a vector x, **first rotate x** (via Vᵀ), then **stretch along each new axis** by the corresponding σ_i (via Σ), then **rotate the result** (via U) into the output space. Every matrix, no matter how ugly, is exactly one of these three-step maps — once you find the right pair of orthogonal frames.
+
+Concretely: a unit circle in the input space is rotated (still a circle), stretched into an ellipse with semi-axes equal to the σ_i (aligned with the coordinate axes because Σ is diagonal), then rotated to a rotated ellipse in the output space. **The singular values are the lengths of the semi-axes of that ellipse.** That's what σ_i *is* — a stretch factor along a specific right singular direction.
+
+</Intuition>
+
+<Recall term="Orthogonal matrix">
+
+An orthogonal matrix Q satisfies QᵀQ = I, equivalently Q⁻¹ = Qᵀ — its columns (and rows) are orthonormal. Applying Q rotates (and possibly reflects) space without distorting lengths or angles. Rotations and reflections are the two ways a matrix can be "rigid"; both are captured by orthogonality.
+
+</Recall>
+
+## The SVD in practice — every matrix, guaranteed
+
+For an m×n matrix A of any shape:
+
+$$
+A \;=\; U_{m \times m}\; \Sigma_{m \times n}\; V^{\mathsf T}_{n \times n}
+$$
+
+with U, V orthogonal, Σ non-negative diagonal (with r = rank(A) positive entries). The decomposition exists for every matrix — this is the payoff of SVD over eigendecomposition:
+
+- **Non-square matrices** — SVD works; eigen doesn't (eigenvalues only exist for square matrices).
+- **Defective matrices** (repeated eigenvalues with too few eigenvectors) — SVD works; diagonalization fails.
+- **Complex eigenvalues** for real matrices — SVD still returns real orthogonal U, V and real non-negative Σ.
+
+In code, `np.linalg.svd(A)` returns `U, s, Vt` where `s` is the 1-D array of singular values (already sorted descending) and `Vt` is Vᵀ (already transposed for convenience).
+
+<RunnableCode title="SVD of a rectangular matrix — U, s, V^T" code={svdBasicCode} packages={["numpy"]} />
+
+## The geometric picture — the animation you should carry in your head
+
+Watch a unit circle in ℝ² go through the three stages of an SVD:
+
+<RunnableCode title="The unit circle -> ellipse animation, made explicit" code={geometryCode} packages={["numpy", "matplotlib"]} captureFig={true} />
+
+Read the plots left-to-right:
+
+1. **Start**: unit circle in the input space.
+2. **After Vᵀ**: a rotated circle — Vᵀ preserves lengths and angles, so it's still a circle of the same radius, just re-aligned so that the "important input directions" (right singular vectors) coincide with the standard axes.
+3. **After Σ**: an ellipse aligned with the standard axes. The semi-axis in the x-direction has length σ₁; the y-semi-axis has length σ₂. Each direction's independent stretch.
+4. **After U**: a rotated ellipse in the output space — same shape as (3), rotated by U into whatever orientation A actually produces. This is the image of the unit circle under A: an ellipse whose axes are the columns of U (up to length) and whose semi-axes are the σ_i.
+
+Every 2×2 matrix's "action on space" is a rotated ellipse. Every 3×3 matrix's action is a rotated ellipsoid. In n dimensions it's the same picture with n singular values telling you how much stretching happens in each of n orthogonal directions.
+
+## Where SVD comes from — an eigen-problem in disguise
+
+SVD isn't a fundamentally new object — it's the eigen-decomposition of a *symmetric* matrix built from A, translated back. Compute `AᵀA`:
+
+- **AᵀA is symmetric** (obvious: (AᵀA)ᵀ = AᵀA).
+- **AᵀA is positive semi-definite** (all eigenvalues ≥ 0), because for any vector x, xᵀ(AᵀA)x = ‖Ax‖² ≥ 0.
+
+So AᵀA has real, non-negative eigenvalues and an orthonormal eigenbasis (by the spectral theorem). It turns out:
+
+- The **right singular vectors of A** (columns of V) are the eigenvectors of AᵀA.
+- The **singular values of A** are the square roots of the eigenvalues of AᵀA: σ_i = √λ_i.
+- The **left singular vectors of A** (columns of U) can be computed as `u_i = Av_i / σ_i` (or as eigenvectors of `AAᵀ`, which has the same nonzero eigenvalues as AᵀA).
+
+<RunnableCode title="SVD via eigen-decomposition of A^T A" code={relationEigenCode} packages={["numpy"]} />
+
+That's the theoretical connection. In practice, computing SVD via `AᵀA` is *numerically bad* — squaring A doubles the condition number and drops precision. Real libraries use dedicated SVD algorithms (Golub–Reinsch, Jacobi rotations) that work on A directly. But the connection to eigen is why SVD "just works" for any matrix — every A gives rise to a symmetric AᵀA, and the spectral theorem handles it.
+
+## Full, thin, and truncated SVD
+
+Three flavors of the same decomposition:
+
+- **Full SVD**: U is m×m, Σ is m×n, Vᵀ is n×n. Costs the full O(mn·min(m,n)) but gives you complete orthonormal bases for both spaces (including the nullspace and left-nullspace, via the "extra" columns of V and U).
+- **Thin (reduced) SVD**: U is m×r, Σ is r×r, Vᵀ is r×n, where r = min(m, n). Drops the extra orthogonal columns that get multiplied by zero singular values anyway. Same product A = UΣVᵀ, less storage. NumPy's `full_matrices=False` gives you this — usually what you want.
+- **Truncated (rank-k) SVD**: keep only the top k singular values and their vectors. `A_k = U[:, :k] @ diag(s[:k]) @ Vt[:k]`. This is *not* an exact factorization — it's an approximation.
+
+The truncated form is the star. It's a way to compress a matrix by keeping only the most significant rank-1 pieces. By the outer-product view of matmul, `U Σ Vᵀ = Σ_i σ_i u_i outer v_i` — a sum of rank-1 outer products, weighted by σ_i. **Truncated SVD keeps the biggest few**:
+
+$$
+A_k \;=\; \sum_{i=1}^{k} \sigma_i\, \mathbf{u}_i\, \mathbf{v}_i^{\mathsf T}
+$$
+
+Storage: k(m + n + 1) numbers vs the original mn. When k ≪ min(m, n), that's a huge compression — and by Eckart–Young below, it's the *best possible* rank-k approximation.
+
+## Eckart–Young — truncation is optimal
+
+The **Eckart–Young theorem** states that among all rank-≤k matrices, the truncated SVD `A_k` minimizes the reconstruction error in both the Frobenius norm and the operator (spectral) norm:
+
+$$
+\lVert A - A_k \rVert_F^2 \;=\; \sigma_{k+1}^2 + \sigma_{k+2}^2 + \cdots + \sigma_r^2
+$$
+
+Interpretation: the "compression error" of a rank-k approximation is exactly the sum of squares of the **discarded** singular values. Small trailing singular values → good compression. Fat trailing singular values → you're throwing away real signal, and no rank-k approximation can do better.
+
+This is *the* theoretical backbone of every low-rank technique. The one theorem to know: **the best rank-k approximation is the top-k terms of the SVD.**
+
+<RunnableCode title="Truncated SVD reveals the true rank of nearly-low-rank data" code={truncationCode} packages={["numpy", "matplotlib"]} captureFig={true} />
+
+Watch the singular values in the printout: 3 big ones, then a cliff (the "elbow" in the error plot), then a floor of tiny noise-level singular values. This is what "nearly rank 3" looks like — and Eckart–Young quantifies exactly how much error you're accepting at each truncation level.
+
+## The traps that matter
+
+**Singular values are always non-negative and sorted descending.** They're square roots of eigenvalues of AᵀA (which is PSD, so eigenvalues ≥ 0) — no sign ambiguity. NumPy returns them in descending order; other libraries may not — always check the convention when porting code.
+
+**Left/right singular vectors have sign ambiguity.** If (u, v, σ) is a triple, so is (−u, −v, σ). Both sign the same product `σ uv^T`, so this is truly a free choice — algorithms may return either. Don't rely on the sign of a specific singular vector across library versions.
+
+**Rank = number of non-zero singular values.** For a "clean" theoretical matrix — sure. For an actual computed matrix with floating-point noise, "zero" means "smaller than a numerical threshold." Both `np.linalg.matrix_rank(A)` and truncation strategies choose a threshold (usually `s.max() * max(A.shape) * eps`).
+
+**"Best rank-k" is only best in the average-error sense.** Eckart–Young says truncated SVD minimizes the *Frobenius* (sum-of-squares) error — it treats every entry equally. If your problem cares about a specific matrix structure (sparsity, non-negativity, block structure), other decompositions (NMF, sparse PCA, block-truncated SVD) can beat plain SVD on that structure. But for "unweighted mean-squared reconstruction," it's optimal.
+
+**SVD is O(mn·min(m, n)) time.** For an m×n matrix, full SVD costs roughly min(m, n) squared times max(m, n) — same order as matrix multiplication. Truncated SVD via iterative methods (`scipy.sparse.linalg.svds`, randomized SVD) costs O(k · nnz(A)) per iteration — for the "top k only" case, use these on large matrices.
+
+<RealWorldML title="LoRA — the SVD application every LLM engineer uses">
+
+LoRA is a parameter-efficient fine-tuning method that has become the default way to adapt an off-the-shelf LLM to a new task. Instead of retraining a d×d weight matrix W (millions or billions of parameters per layer), LoRA *freezes* W and learns a low-rank *update* ΔW = BA parameterized by two thin matrices:
+
+- **A** is r × d (a wide matrix)
+- **B** is d × r (a tall matrix)
+- **r ≪ d** (typically r ∈ \{4, 8, 16, 32\})
+
+The forward pass becomes `y = (W + BA) x = W x + B(A x)` — the "adapter" adds a low-rank correction on top of the frozen base weight. Parameters trained: only A and B, totaling 2·d·r ≪ d². A 4096×4096 attention weight (16.8M params) becomes 2·4096·8 = 65K params with r=8 — a 260× reduction.
+
+<RunnableCode title="LoRA storage math + SVD reconstruction of a rank-r update" code={loraCode} packages={["numpy"]} />
+
+Read the code:
+
+1. **The setup.** We synthesize a d×d update ΔW that is *exactly* rank r_true (constructed as U V with U, V thin), then pretend we don't know that and try to fit it with rank r_lora ≥ r_true.
+2. **The reconstruction.** `U[:, :k] * s[:k] @ Vt[:k]` is the top-k truncated SVD in one expression — this is *literally* the "rank r_lora approximation" LoRA aspires to represent. When r_lora ≥ r_true (real rank of the update), the error is machine-precision zero — Eckart–Young says the low-rank approximation is exact when the target is already low-rank.
+3. **Storage.** Print statement shows the parameter savings — real LLMs sit at 200× to 1000× parameter reduction from LoRA depending on `r`.
+
+Why LoRA works empirically (a claim, not a proof): the *useful* fine-tuning update lies in a low-dimensional subspace of the full weight space. Most of the model's knowledge is in the pretrained W; adapting to a new task only requires nudging a few directions. Whether that assumption is deeply true or a lucky match to task complexity is an active research question — but the fact that LoRA works with r as small as 4 for many tasks is strong empirical evidence.
+
+**Inference is free.** After training, you can merge `W_merged = W + B A` once and use W_merged as a normal weight — no runtime overhead. Or keep A and B separate (hot-swappable adapters) — one base model, many task-specific adapters.
+
+Every LoRA-related paper and library boils down to this: SVD says the best rank-r approximation exists and is unique (up to sign); LoRA gives us a *learned* approximation to a specific unknown ΔW by gradient descent on A and B. The theoretical scaffolding is the chapter you're reading.
+
+</RealWorldML>
+
+<StudyDepth
+  intro={<>SVD is the single most useful decomposition in ML. If you understand this chapter well, LoRA, PCA, low-rank compression, and half of "how do we interpret this weight matrix" reduce to fluent computation with U, Σ, Vᵀ.</>}
+  drill={[
+    <>The three-part decomposition <code>A = U Σ Vᵀ</code> — orthogonal, non-negative diagonal, orthogonal. Existence for any m×n matrix.</>,
+    <>The geometric picture: rotate → stretch → rotate; unit circle becomes rotated ellipse; singular values are semi-axis lengths</>,
+    <>Right singular vectors = eigenvectors of AᵀA; singular values = √eigenvalues (theoretical link; not the algorithm)</>,
+    <>Full vs thin vs truncated SVD; when each is appropriate</>,
+    <>Eckart–Young: <code>A_k</code> (top-k SVD) is the best rank-k approximation in Frobenius norm; error = Σ<sub>i&gt;k</sub> σ<sub>i</sub>²</>,
+    <>Outer-product form: <code>A = Σ σᵢ uᵢ vᵢᵀ</code> — the seed of LoRA, PCA, image compression</>,
+  ]}
+  skim={[
+    <>Randomized SVD algorithms (Halko–Martinsson–Tropp) — for very large sparse matrices; call <code>sklearn.decomposition.TruncatedSVD</code></>,
+    <>Golub–Reinsch and Jacobi SVD internals — the numerical algorithms LAPACK actually runs</>,
+    <>Complex SVD (Hermitian conjugates for U*, V*) — needed only if you work with complex matrices</>,
+    <>Pseudoinverse via SVD: <code>A⁺ = V Σ⁺ Uᵀ</code> — useful for solving <code>Ax = b</code> when A is singular or rectangular</>,
+  ]}
+/>
+
+<CodeItYourself title="Three drills — decompose, reconstruct, compress">
+
+1. **Decompose and reconstruct.** Generate a random 5×3 matrix A. Compute `U, s, Vt = np.linalg.svd(A, full_matrices=False)` and verify `np.allclose(A, U @ np.diag(s) @ Vt)`. Then verify orthonormality: `U.T @ U` and `Vt @ Vt.T` should both equal a 3×3 identity matrix. *Hint: use `full_matrices=False` for the thin SVD.*
+
+2. **Compress a matrix.** Generate a 100×80 "low-rank plus noise" matrix: `A = U_true @ V_true + 0.01 * noise` where `U_true` is 100×5 and `V_true` is 5×80. Compute the SVD; plot the singular values (`plt.semilogy(s)`). Reconstruct with rank 5 and compute the Frobenius error `np.linalg.norm(A - A_5)`. Compare against the theoretical error `np.sqrt((s[5:]**2).sum())`. *Hint: they should agree to machine precision — this is Eckart–Young in your terminal.*
+
+3. **PCA via SVD.** Take a random 200×3 dataset X (centered). Compute PCA both ways: (a) eigendecomposition of `X.T @ X / (n − 1)`; (b) `U, s, Vt = np.linalg.svd(X, full_matrices=False)`. The principal components are `Vt` (from SVD) or the eigenvectors of `X.T @ X`. Verify they agree (up to sign per column). Verify that `s**2 / (n − 1)` matches the eigenvalues of the covariance — the "explained variance" values. *Hint: SVD is numerically preferable because it avoids the squaring step that creates `X.T @ X`.*
+
+</CodeItYourself>
+
+<Summary>
+
+- **Every m×n matrix has an SVD**: A = U Σ Vᵀ with U m×m orthogonal, Σ m×n non-negative diagonal, V n×n orthogonal. No matrix-shape or non-diagonalizability caveats.
+- **Geometric picture**: Vᵀ rotates the input, Σ stretches along the new axes by the singular values σ_i, U rotates into the output space. Unit sphere → rotated ellipsoid with semi-axes σ_i.
+- **Relation to eigen**: right singular vectors = eigenvectors of AᵀA; singular values = square roots of those eigenvalues.
+- **Full vs thin vs truncated**: full for complete orthogonal bases, thin (`full_matrices=False`) for computation, truncated (top-k) for compression.
+- **Outer-product form** A = Σ σᵢ uᵢ vᵢᵀ — a sum of rank-1 pieces weighted by importance.
+- **Eckart–Young**: truncated SVD is the best rank-k approximation in Frobenius (and spectral) norm; reconstruction error = Σ<sub>i&gt;k</sub> σᵢ².
+- **Applications**: LoRA (low-rank fine-tuning updates), PCA (SVD of centered data avoids covariance construction), embedding compression, pseudoinverse for singular systems, attention/weight analysis.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>For A = <code>[[3, 0], [0, 2]]</code>, what are U, Σ, Vᵀ (with singular values sorted descending)?</>,
+      hint: <>Diagonal matrices with positive entries have a trivial SVD.</>,
+      answer: <>The singular values of A are its diagonal entries reordered largest-first: <b>σ<sub>1</sub> = 3, σ<sub>2</sub> = 2</b>. Right singular vectors (rows of Vᵀ) are the standard basis reordered to match: v₁ = (1, 0), v₂ = (0, 1) — but if σ_1 corresponds to the "3" (first row), Vᵀ = I; if we sort with σ ≥ σ, no reordering needed. So <b>U = I, Σ = diag(3, 2), Vᵀ = I</b>. Verify: U Σ Vᵀ = diag(3, 2) = A ✓. For a diagonal matrix with all positive entries, SVD is trivial.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>Given the SVD U diag(4, 2) Vᵀ, what is the Frobenius norm of the matrix? What is the norm of the best rank-1 approximation error?</>,
+      hint: <>Frobenius norm² = sum of squared singular values.</>,
+      answer: <>Frobenius norm² = σ₁² + σ₂² = 16 + 4 = 20, so <b>‖A‖_F = √20 ≈ 4.47</b>. The best rank-1 approximation keeps only σ₁, discards σ₂; by Eckart–Young, the error is √(σ₂²) = <b>‖A − A_1‖_F = σ₂ = 2</b>. In general, throwing away the smallest k singular values gives Frobenius error equal to the L2 norm of the discarded σ's.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Prove that ‖A‖_F² = Σᵢ σᵢ² (Frobenius norm is the L2 norm of the singular values).</>,
+      hint: <>Use the fact that U and V are orthogonal, and that ‖A‖_F² = trace(AᵀA).</>,
+      answer: <>Recall: ‖A‖_F² = Σᵢⱼ Aᵢⱼ² = trace(AᵀA). <br />Substitute the SVD: AᵀA = (UΣVᵀ)ᵀ(UΣVᵀ) = V Σᵀ Uᵀ U Σ Vᵀ = V (ΣᵀΣ) Vᵀ, using UᵀU = I. <br />ΣᵀΣ is diagonal with entries σᵢ² on the diagonal, so trace(V (ΣᵀΣ) Vᵀ) = trace(V Vᵀ (ΣᵀΣ)) (cyclic property of trace) = trace(ΣᵀΣ) since VVᵀ = I. <br />trace(ΣᵀΣ) = <b>Σᵢ σᵢ²</b>. ∎ <br /><br /> Consequence: Frobenius norm is invariant under orthogonal transformations — makes sense, because U and V are rotations that don't change the "total energy" of the matrix.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Consider A = <code>[[1, 1], [1, 1]]</code>. Compute AᵀA, find its eigenvalues, and use them to write the singular values of A. What is the rank of A?</>,
+      hint: <>AᵀA is a 2×2 symmetric matrix; use trace/det for eigenvalues.</>,
+      answer: <>AᵀA = <code>[[2, 2], [2, 2]]</code>. Trace = 4, det = 4 − 4 = 0. Eigenvalues from λ² − 4λ + 0 = 0: <b>λ = 4 and λ = 0</b>. Singular values are √eigenvalues: <b>σ₁ = 2, σ₂ = 0</b>. <br /><br /> Since one singular value is zero, <b>rank(A) = 1</b> — makes sense because A's two columns are identical (rank of the column space is 1). The SVD is: σ₁ = 2 with right sv v₁ = (1, 1)/√2, left sv u₁ = (1, 1)/√2 (since Av₁ = 2·(1, 1)/√2 · √2 = (2, 2)/1... let's verify: A·(1,1)/√2 = (2, 2)/√2 = √2·(1,1)/... just check that u₁ = Av₁/σ₁ = ((2, 2)/√2)/2 = (1, 1)/√2 ✓). The all-ones matrix is textbook rank-1: σ₁ = 2, everything else zero.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Prove Eckart–Young in the Frobenius norm: for any rank-≤k matrix B, ‖A − B‖_F² ≥ ‖A − A_k‖_F² where A_k is the truncated SVD.</>,
+      hint: <>Use the outer-product form A = Σ σᵢ uᵢvᵢᵀ, the fact that ‖·‖_F is invariant under orthogonal multiplication, and that rank-k matrices can be written as C Dᵀ with C, D of k columns.</>,
+      answer: <><b>Reduction to diagonal.</b> Left-multiply by Uᵀ and right-multiply by V: ‖A − B‖_F² = ‖Uᵀ(A − B)V‖_F² (Frobenius norm is unitary-invariant). Uᵀ A V = Σ (the diagonal matrix of singular values), so the problem becomes: minimize ‖Σ − B̃‖_F² over rank-≤k matrices B̃ = Uᵀ B V (rank doesn't change under orthogonal multiplication). <br /><br /><b>Rank-k rewrite.</b> Any rank-≤k matrix B̃ can be written as CDᵀ where C is m×k and D is n×k. So ‖Σ − CDᵀ‖_F² is what we want to minimize. <br /><br /><b>Lower bound.</b> By the outer-product view, CDᵀ = Σⱼ c_j d_jᵀ — a sum of k rank-1 pieces. The Frobenius error ‖Σ − Σⱼ c_j d_jᵀ‖_F² can be decomposed by taking the trace: for any matrix M, ‖M‖_F² = Σᵢⱼ Mᵢⱼ². Since Σ is diagonal with entries σᵢ, the sum Σᵢⱼ (Σ − CDᵀ)ᵢⱼ² pushes matter along the diagonal — the closest rank-k matrix to Σ (a diagonal matrix) is obtained by keeping the top k diagonal entries and zeroing the rest: <b>Σ_k = diag(σ₁, σ₂, …, σ_k, 0, …, 0)</b>. Any other rank-k choice can only be worse. Corresponding error: <b>Σ<sub>i&gt;k</sub> σᵢ² = ‖A − A_k‖_F²</b>. So ‖A − B‖_F² ≥ ‖A − A_k‖_F² ∎.<br /><br />(A rigorous version of "the closest rank-k matrix to a diagonal is the top-k truncation" requires some work with von Neumann's trace inequality; a full proof is in Horn &amp; Johnson.)</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Explain, in your own words, why LoRA's ΔW = B A parameterization can only represent rank-r updates, and why that's often (surprisingly) enough to fine-tune LLMs.</>,
+      hint: <>Think about the outer-product form of a matrix product and the empirical observation about weight-space geometry.</>,
+      answer: <><b>Why rank r.</b> ΔW = B A with A of shape r × d and B of shape d × r means ΔW = sum over i=1..r of B[:, i] outer A[i, :] — a sum of r rank-1 outer products. So ΔW has rank at most r. Every column of ΔW lies in the r-dimensional column space of B, and every row lies in the r-dimensional row space of A. In terms of "adaptation directions in weight space," LoRA offers exactly r degrees of freedom per weight matrix. <br /><br /><b>Why it works.</b> Two empirical observations. (1) <em>Intrinsic dimension of fine-tuning is low.</em> Aghajanyan et al. (2020) and follow-up work show that with careful projection, fine-tuning a big model to a specific task requires only a few hundred to a few thousand meaningful degrees of freedom — several orders of magnitude less than the raw parameter count. (2) <em>Task-specific updates concentrate.</em> When you do full fine-tuning and take the SVD of the resulting ΔW, most of the Frobenius energy is in the top few singular values. Eckart–Young says the best rank-r approximation with r ≈ intrinsic-dim already captures the useful update. <br /><br /> The rank-r constraint isn't fundamental — it's a *good enough* approximation that trades a small amount of expressive capacity for enormous compute and memory savings. When r is too small (r = 1 or 2 for a hard task), LoRA underfits; when r is generous (r = 16 or 32), it works essentially as well as full fine-tuning on standard benchmarks.</>
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "The Singular Value Decomposition of an m×n matrix A takes the form:",
+      choices: [
+        { text: "A = QΛQ⁻¹, requiring A to be diagonalizable" },
+        { text: "A = UΣVᵀ, with U and V orthogonal and Σ non-negative diagonal — for any matrix", correct: true },
+        { text: "A = LU, with L lower-triangular and U upper-triangular" },
+        { text: "A = QR, with Q orthogonal and R upper-triangular" },
+      ],
+      explanation: <>SVD is A = UΣVᵀ; it exists for every real matrix regardless of shape or diagonalizability. QΛQ⁻¹ is the eigendecomposition (square, diagonalizable only). LU and QR are other factorizations useful for solving linear systems, not the topic here.</>
+    },
+    {
+      q: "The singular values of A are:",
+      choices: [
+        { text: "The eigenvalues of A, when A is symmetric" },
+        { text: "The square roots of the eigenvalues of AᵀA — always non-negative", correct: true },
+        { text: "The diagonal entries of A" },
+        { text: "The absolute values of the eigenvalues of A" },
+      ],
+      explanation: <>σᵢ = √λᵢ(AᵀA), always non-negative. For symmetric positive-definite matrices, the singular values equal the eigenvalues (since AᵀA = A²). In general, though, singular values and eigenvalues are different objects — eigenvalues can be complex for real matrices, singular values cannot.</>
+    },
+    {
+      q: "The Eckart–Young theorem states that:",
+      choices: [
+        { text: "SVD is the fastest matrix decomposition to compute" },
+        { text: "The top-k truncated SVD is the best rank-k approximation in Frobenius norm; the error is √(Σᵢ>k σᵢ²)", correct: true },
+        { text: "Every matrix has exactly rank min(m, n)" },
+        { text: "SVD is only defined for square matrices" },
+      ],
+      explanation: <>Truncated SVD's optimality is why low-rank approximation *works*: throwing away the smallest singular values discards the least "energy" of the matrix. Frobenius reconstruction error equals the L2 norm of the discarded singular values — a clean quantitative accounting.</>
+    },
+    {
+      q: "For a 100×80 matrix A with SVD U of shape (100, 80), s of length 80, Vᵀ of shape (80, 80) (thin SVD), the rank of A is:",
+      choices: [
+        { text: "Always 100" },
+        { text: "Always 80" },
+        { text: "The number of non-zero singular values (up to numerical threshold)", correct: true },
+        { text: "The smaller of the two dimensions, always" },
+      ],
+      explanation: <>Rank = number of non-zero singular values. It's at most min(m, n) = 80, but can be smaller if some singular values are (numerically) zero — which happens when A has linearly dependent rows or columns. `np.linalg.matrix_rank` computes this with a sensible threshold.</>
+    },
+    {
+      q: "In LoRA, the update ΔW = B A with A of shape (r, d) and B of shape (d, r):",
+      choices: [
+        { text: "Can represent any d×d weight update" },
+        { text: "Represents updates with rank ≤ r, using only 2·d·r parameters instead of d²", correct: true },
+        { text: "Is only used at initialization time and thrown away" },
+        { text: "Doubles the model size" },
+      ],
+      explanation: <>By the outer-product view, ΔW = BA is a sum of r rank-1 outer products, so rank ≤ r. Storage is 2·d·r ≪ d² for r ≪ d. LoRA works empirically because task-specific fine-tuning updates live in a low-dimensional subspace of the full weight space — an assumption backed by the singular-value spectrum of actual fine-tuned updates.</>
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/matrices-transformations/svd-decomposition" title="Singular Value Decomposition (SVD)" />
