@@ -629,7 +629,7 @@ const tier1: Tier = {
             "Uses in second-order optimization",
           ],
           priority: "mandatory",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "backprop-as-chain-rule",
@@ -707,7 +707,7 @@ const tier1: Tier = {
             "Common medical-test example (base-rate fallacy)",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "random-variables",
@@ -777,7 +777,7 @@ const tier1: Tier = {
             "Mutual information",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
       ],
     },

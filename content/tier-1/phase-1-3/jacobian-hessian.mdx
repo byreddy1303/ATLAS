@@ -1,0 +1,430 @@
+---
+title: Jacobian & Hessian
+tier: 1
+phase: "1.3"
+---
+
+export const jacobianCode = `# Jacobian: derivative of a vector-valued function of a vector input.
+# f: R^2 -> R^2 defined by
+#   f1(x, y) = x^2 + y
+#   f2(x, y) = 3xy
+# Jacobian = matrix of all partials, shape (m rows, n cols) = (2, 2)
+import numpy as np
+
+def f(x, y):
+    return np.array([x ** 2 + y, 3 * x * y])
+
+def J_analytic(x, y):
+    # rows: outputs f1, f2 ; cols: inputs x, y
+    return np.array([
+        [2 * x, 1.0],       # df1/dx, df1/dy
+        [3 * y, 3 * x],     # df2/dx, df2/dy
+    ])
+
+def J_numerical(x, y, h=1e-6):
+    def col(delta_x, delta_y):
+        return (f(x + delta_x, y + delta_y) - f(x - delta_x, y - delta_y)) / (2 * (delta_x + delta_y))
+    dfdx = (f(x + h, y) - f(x - h, y)) / (2 * h)
+    dfdy = (f(x, y + h) - f(x, y - h)) / (2 * h)
+    return np.column_stack([dfdx, dfdy])
+
+x, y = 1.0, 2.0
+print("analytic  J =")
+print(J_analytic(x, y))
+print()
+print("numerical J =")
+print(np.round(J_numerical(x, y), 5))`;
+
+export const chainRuleJacobianCode = `# Chain rule with Jacobians: if y = f(x) and z = g(y), then dz/dx = J_g(y) @ J_f(x).
+# Verify on a toy chain and compare with finite differences.
+import numpy as np
+
+# f: R^2 -> R^2
+def f(v):
+    x, y = v
+    return np.array([x ** 2 + y, x * y])
+
+def J_f(v):
+    x, y = v
+    return np.array([[2 * x, 1.0],
+                     [y, x]])
+
+# g: R^2 -> R^2
+def g(u):
+    a, b = u
+    return np.array([a + b, a - b])
+
+def J_g(u):
+    return np.array([[1.0, 1.0],
+                     [1.0, -1.0]])
+
+# composition
+def gf(v):
+    return g(f(v))
+
+# analytic chain-rule Jacobian at v0
+v0 = np.array([1.0, 2.0])
+u0 = f(v0)
+J_chain = J_g(u0) @ J_f(v0)     # ORDER MATTERS: outer's Jacobian times inner's Jacobian
+
+# numerical
+def J_num(func, v, h=1e-6):
+    n = len(v); out = []
+    for i in range(n):
+        e = np.zeros(n); e[i] = h
+        out.append((func(v + e) - func(v - e)) / (2 * h))
+    return np.column_stack(out)
+
+print("J_g(f(v0)) @ J_f(v0) =")
+print(J_chain)
+print()
+print("numerical J of composition (g o f) at v0 =")
+print(np.round(J_num(gf, v0), 5))`;
+
+export const hessianCode = `# Hessian: matrix of SECOND partial derivatives of a scalar function.
+# f(x, y) = x^2 + xy + y^2  (a positive-definite quadratic — a bowl)
+import numpy as np
+
+def f(x, y): return x ** 2 + x * y + y ** 2
+
+def hessian_analytic():
+    # ∂²f/∂x² = 2,  ∂²f/∂y² = 2,  ∂²f/∂x∂y = ∂²f/∂y∂x = 1
+    return np.array([[2.0, 1.0],
+                     [1.0, 2.0]])
+
+H = hessian_analytic()
+print("Hessian =")
+print(H)
+
+# eigenvalues tell us the shape of the quadratic near the minimum
+vals, _ = np.linalg.eigh(H)
+print("eigenvalues:", vals)
+print("all positive -> local MINIMUM (positive-definite Hessian)")
+
+# curvature in a specific direction u: uT H u  (a scalar).
+# For a bowl, this is always > 0; for a saddle, it's negative in some direction.
+for name, u in [("x-axis", (1, 0)), ("y-axis", (0, 1)), ("diagonal", (1/np.sqrt(2), 1/np.sqrt(2)))]:
+    u = np.array(u)
+    curv = u @ H @ u
+    print(f"curvature in {name:>10} direction: {curv:.3f}")`;
+
+export const newtonCode = `# Newton's method for optimization: use the Hessian to make quadratic-fit steps.
+# For a convex bowl f(x) = 0.5 * xT A x - bT x, minimum is at A^{-1} b.
+# Newton's step is x <- x - H^{-1} grad(x), which for a quadratic reaches the minimum in ONE step.
+import numpy as np
+
+# A positive-definite A and a linear term b
+A = np.array([[4.0, 1.0],
+              [1.0, 3.0]])
+b = np.array([5.0, 4.0])
+def f(x):    return 0.5 * x @ A @ x - b @ x
+def grad(x): return A @ x - b
+def hess(x): return A                                    # constant for a quadratic
+
+x0 = np.array([0.0, 0.0])
+grad0 = grad(x0)
+H0 = hess(x0)
+step = np.linalg.solve(H0, grad0)                        # H^{-1} @ grad(x0)
+x1 = x0 - step
+print("Newton step from x0 = (0,0): x1 =", x1)
+print("Analytic minimum   x* =", np.linalg.solve(A, b))
+print("Loss at x0:", f(x0), "  Loss at x1:", f(x1))
+print()
+
+# Comparison with vanilla gradient descent (many steps needed)
+lr = 0.1
+x = x0.copy()
+for i in range(6):
+    x = x - lr * grad(x)
+print(f"Gradient descent after 6 steps: x = {np.round(x, 3)},  f = {f(x):.3f}")
+print("Newton got there in ONE step. That's what curvature information buys.")`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/calculus/multivariable-partials", label: "Partial derivatives & the gradient", blurb: "Jacobian is a matrix of partials for vector-valued functions; Hessian is the matrix of gradients of the gradient — same tools stacked one dimension higher." },
+  { href: "/learn/mathematics/calculus/chain-rule", label: "The chain rule", blurb: "For vector-in/vector-out chains, the chain rule becomes Jacobian multiplication — the multivariable generalization of local-slope multiplication." },
+  { href: "/learn/mathematics/matrices-transformations/eigenvectors-eigenvalues", label: "Eigenvectors & eigenvalues", blurb: "The Hessian's eigenvalues tell you whether a critical point is a minimum, maximum, or saddle — and how fast optimizers can move in each direction." },
+]} />
+
+<Motivation title="Curvature is why Adam works and gradients aren't enough">
+
+Vanilla gradient descent uses one number per parameter — the gradient. It ignores *how the slope is changing*. Consider a loss surface that's a stretched bowl: steep in one direction, gentle in the other. Gradient descent oscillates wildly on the steep direction (learning rate too big) and crawls on the gentle direction (learning rate too small). Any single learning rate is wrong for both directions.
+
+The **Hessian** encodes exactly the information missing from the gradient: how much the slope changes as you move. It's the second-derivative matrix — the derivative of the gradient with respect to the parameters. Its eigenvalues tell you the curvature along each principal direction; large eigenvalues = steep, small = flat.
+
+For a GenAI engineer:
+
+- **Adam, RMSprop, and Adagrad** all use running estimates of the *diagonal* of the Hessian (or approximations of it) to adaptively rescale the per-coordinate learning rate. Steep directions get smaller effective learning rates; flat directions get larger ones. This adaptive rescaling is the reason these optimizers work so much better than SGD on transformer training.
+- **Second-order optimizers** (K-FAC, Shampoo, Sophia) explicitly use Hessian information — usually block-approximated, since the full n×n Hessian for n = 10^9 parameters is uncomputable. They win big on convex-ish loss surfaces and are gaining ground in LLM pretraining.
+- **The Jacobian** — the vector-valued generalization of the gradient — is what backprop actually computes at every non-scalar node in the graph. Every layer of a neural network is a vector-in/vector-out function; the layer's Jacobian is what the chain rule multiplies against the upstream gradient.
+
+This chapter builds both tools. Jacobian first (backprop's real currency), then Hessian (curvature and its optimizer implications). Nothing here is beyond calculus you already have; we're just stacking gradients into matrices.
+
+</Motivation>
+
+<Intuition title="Jacobian = matrix of gradients (for vector outputs); Hessian = matrix of gradient's gradients (for scalar outputs)">
+
+Two mental slogans:
+
+- **Jacobian J_f of a vector function f: ℝⁿ → ℝᵐ**: stack all the gradients side-by-side (or, more precisely, all the partials). Row i is the gradient of the i-th output f_i; column j is the derivative w.r.t. the j-th input. Shape: m × n. For scalar output (m=1), the Jacobian degenerates to the gradient (as a row).
+- **Hessian H_f of a scalar function f: ℝⁿ → ℝ**: matrix of second partials. Row i, column j is ∂²f/∂x_i∂x_j. Symmetric (Clairaut's theorem, assuming continuous second partials). Shape: n × n. Loosely: "Hessian is the Jacobian of the gradient function." It captures curvature — how the slope changes as you walk.
+
+Both are matrices; the geometry lives in their eigenvalues. Jacobian eigenvalues describe how the vector function stretches/rotates space locally. Hessian eigenvalues describe the local curvature of a scalar loss surface (positive = bowl direction, negative = ridge direction, zero = flat).
+
+</Intuition>
+
+## The Jacobian — one row per output, one column per input
+
+For f: ℝⁿ → ℝᵐ, the **Jacobian matrix** at x is:
+
+$$
+J_f(x) \;=\; \begin{pmatrix}
+\partial f_1 / \partial x_1 & \partial f_1 / \partial x_2 & \cdots & \partial f_1 / \partial x_n \\
+\partial f_2 / \partial x_1 & \partial f_2 / \partial x_2 & \cdots & \partial f_2 / \partial x_n \\
+\vdots & & & \vdots \\
+\partial f_m / \partial x_1 & \partial f_m / \partial x_2 & \cdots & \partial f_m / \partial x_n
+\end{pmatrix}
+$$
+
+— shape m × n. Row i is the gradient of the i-th output; column j is "how does the whole output change when you nudge x_j." The (i, j) entry is ∂f_i/∂x_j.
+
+Special cases:
+
+- **m = 1** (scalar output): Jacobian is a 1×n row vector, effectively the gradient (transposed).
+- **n = 1** (scalar input): Jacobian is an m×1 column vector, the componentwise derivative of the vector function.
+- **m = n and f is a coordinate change**: the Jacobian's determinant is the local *area/volume scaling factor* — appears in change-of-variables integration and in normalizing-flow architectures for density estimation.
+
+<RunnableCode title="Jacobian of a small vector function — analytic vs numerical" code={jacobianCode} packages={["numpy"]} />
+
+## The multivariable chain rule — Jacobians multiply
+
+If y = f(x) with f: ℝⁿ → ℝᵐ, and z = g(y) with g: ℝᵐ → ℝᵏ, then z = g(f(x)) with Jacobian:
+
+$$
+J_{g \circ f}(x) \;=\; J_g(f(x)) \cdot J_f(x)
+$$
+
+— matrix product, same "multiply local factors" as the scalar chain rule. The evaluation-point subtlety still holds: J_g is evaluated at the value f(x), not at x. Shapes work: J_g is k × m, J_f is m × n, product is k × n. Same as the shape of the composite Jacobian (k-output, n-input).
+
+**Non-commutativity of matrix multiplication is the multivariable version of "order matters" in the chain rule.** For scalar functions, "outer × inner" and "inner × outer" happen to be the same (scalar multiplication is commutative). For vector functions, they're different matrices with different shapes; you must apply the outer's Jacobian on the left of the inner's Jacobian.
+
+<RunnableCode title="Chain rule with Jacobians — outer's J times inner's J" code={chainRuleJacobianCode} packages={["numpy"]} />
+
+**Backprop and Jacobians.** In neural network language: each layer is a vector-in/vector-out function with a Jacobian. Backprop computes the loss gradient (a row vector of length equal to the layer output's dimension) times the layer's Jacobian to pull it back to the layer input's dimension. This is the "MatMulBackward" or "LayerBackward" operation you saw in the backprop chapter. Because the loss is a scalar and every intermediate is a tensor, backprop never materializes the full Jacobian — it computes *Jacobian-vector products* (JVPs) or *vector-Jacobian products* (VJPs) on the fly. That's the deep efficiency win of reverse-mode autodiff.
+
+## The Hessian — matrix of second partials
+
+For a scalar function f: ℝⁿ → ℝ, the **Hessian matrix** at x is:
+
+$$
+H_f(x) \;=\; \begin{pmatrix}
+\partial^2 f / \partial x_1^2 & \partial^2 f / \partial x_1 \partial x_2 & \cdots \\
+\partial^2 f / \partial x_2 \partial x_1 & \partial^2 f / \partial x_2^2 & \cdots \\
+\vdots & & \\
+\end{pmatrix}
+$$
+
+— shape n × n. Symmetric (Clairaut/Schwarz theorem when second partials are continuous, which is almost always the case in ML). Its (i, j) entry is ∂²f/∂x_i∂x_j — the "curvature" in the (i, j)-th mixed direction.
+
+Equivalent definition: **H_f is the Jacobian of the gradient function**. The gradient ∇f is itself a function ℝⁿ → ℝⁿ, so its Jacobian is n × n — which is exactly the Hessian.
+
+Interpretation via **quadratic Taylor expansion** around a point x_0:
+
+$$
+f(x_0 + \Delta x) \approx f(x_0) + \nabla f(x_0)^{\mathsf T} \Delta x + \frac{1}{2} \Delta x^{\mathsf T} H_f(x_0) \Delta x
+$$
+
+The gradient gives the linear part (steepest ascent, first-order change). The Hessian gives the **quadratic part** — how the loss curves as you move. If H is positive definite, the quadratic term is always positive, so any move from x_0 increases the loss to first-plus-second order — x_0 is a **local minimum**. If H is negative definite: local maximum. Indefinite (mixed signs of eigenvalues): **saddle point**.
+
+<RunnableCode title="Hessian of a quadratic bowl — eigenvalues classify the critical point" code={hessianCode} packages={["numpy"]} />
+
+## Hessian eigenvalues — the shape of the loss
+
+For a positive-definite Hessian at a local minimum, the eigenvalues tell you the *aspect ratio* of the loss surface:
+
+- **Largest eigenvalue λ_max**: curvature in the steepest direction (the fastest-changing).
+- **Smallest eigenvalue λ_min**: curvature in the flattest direction (the slowest-changing).
+- **Condition number κ = λ_max / λ_min**: measures how "stretched" the bowl is. κ = 1 → perfectly round bowl (any learning rate works). κ ≫ 1 → elongated bowl (learning rate must be tuned to the fastest direction, so the slowest direction crawls).
+
+Gradient descent's convergence rate depends on κ (roughly, needs O(κ log 1/ε) iterations to reach loss ε above minimum, for a strongly convex quadratic). Second-order methods can achieve O(log 1/ε) — the κ dependence goes away because they precondition the gradient by H⁻¹ (making the effective bowl round).
+
+## Newton's method — one step to the bottom of a quadratic
+
+For a quadratic loss f(x) = (1/2) xᵀ A x − bᵀx (with A positive definite), the gradient is A x − b and the Hessian is A. **Newton's update** is:
+
+$$
+x \leftarrow x - H^{-1} \nabla f
+$$
+
+For our quadratic: x − A⁻¹(Ax − b) = x − (x − A⁻¹b) = A⁻¹b, which is exactly the minimum. Newton reaches the bottom of a quadratic in *one step*, regardless of condition number.
+
+<RunnableCode title="Newton's method vs gradient descent on a stretched bowl" code={newtonCode} packages={["numpy"]} />
+
+For non-quadratic losses, Newton uses the second-order Taylor approximation locally — very fast near a minimum, but the Hessian is expensive (O(n²) storage, O(n³) inverse). For neural networks with n = 10^9, the full Hessian is completely intractable. This is why practical optimizers use **diagonal approximations** (Adam, RMSprop store one Hessian-approximating scalar per parameter) or **block-diagonal approximations** (K-FAC, Shampoo group parameters into layers and use per-block Hessian estimates).
+
+## The traps that matter
+
+**Jacobian shape is (m outputs, n inputs), not the reverse.** Confusing which dimension is which is the #1 shape-error bug in hand-derived backprop. Rule: row = output, column = input.
+
+**Jacobians don't commute — order matters in the chain rule.** J_g(f(x)) · J_f(x) is a specific matrix; swapping to J_f(x) · J_g(f(x)) usually doesn't even make sense dimensionally, let alone give the right answer.
+
+**The full Hessian is intractable for large models.** For 10^9 parameters, the Hessian is a 10^9 × 10^9 matrix = 10^18 numbers = 4 exabytes of storage. Nobody stores it. Adam et al. store diagonal estimates; Newton's method is used only for small optimization problems (fewer than about 10,000 parameters) or as inspiration for approximations. **Hessian-vector products** (Hv for a given vector v) can be computed cheaply via a second-order backprop pass — used by algorithms like conjugate gradient and Lanczos to work with the Hessian implicitly.
+
+**Symmetry of the Hessian** (∂²f/∂x_i∂x_j = ∂²f/∂x_j∂x_i) holds when second partials are continuous — always true for the smooth loss surfaces of neural networks. It's what lets us call it "the Hessian eigenvalue spectrum" without ambiguity.
+
+**Saddle points are the villain in high-dimensional optimization**, not local minima. In n dimensions, a random critical point is a local minimum with probability roughly 1/2^n — vanishingly small for large n. Almost every critical point of a deep neural network loss is a saddle point with some negative-eigenvalue directions. Gradient descent generally escapes saddles slowly; adding stochastic noise (as in SGD) or momentum helps. This is a purely Hessian-eigenvalue-based diagnosis of the optimization landscape.
+
+**Batch-normalized / LayerNorm'd networks have interesting Hessian structure.** The normalization layer reshapes the loss landscape to be more isotropic (Hessian eigenvalues cluster more), which is one theoretical reason why normalization enables training deep networks. Empirically this shows up as: normalized networks tolerate larger learning rates without diverging, exactly what you'd predict from a lower Hessian condition number.
+
+<RealWorldML title="Adam adapts the learning rate per-parameter using diagonal Hessian estimates">
+
+Adam is the workhorse optimizer for transformer training. Its update rule is:
+
+- Compute gradient g_t = ∇L(w_t) at the current parameters.
+- Maintain exponential moving averages: m_t (first moment, ≈ gradient direction with momentum), v_t (second moment, ≈ **diagonal of the Hessian squared, componentwise**).
+- Update: w_(t+1) = w_t − η · m_t / (sqrt(v_t) + ε), applied elementwise.
+
+The critical piece is **dividing by sqrt(v_t) elementwise**. Where the gradient magnitude has been large (steep loss direction, big diagonal Hessian entry), v_t is large, and we take a *smaller* effective step. Where the gradient has been small (flat direction), we take a *larger* step. This is a per-parameter adaptive learning rate that automatically preconditions the update — approximately what Newton's method does with the full Hessian, but using only cheap diagonal information you can compute during backprop for free.
+
+The "second moment estimate" v_t ≈ E[g²] is a *diagonal approximation* to the Fisher information (for probabilistic losses) or to the Hessian's diagonal (for smooth losses). Adam works because for many neural network loss surfaces, this diagonal approximation is good enough — the interaction terms between different parameters are less important than the per-parameter scaling. When it's not good enough (some LLM pretraining setups), people reach for K-FAC, Shampoo, or Sophia, which use block-diagonal or Kronecker-factored Hessian approximations to capture cross-parameter curvature.
+
+Every "the loss went to NaN, halve the learning rate" experience in LLM training is a diagnostic of the Hessian's largest eigenvalue being too big for the current step size. Every "the loss plateaus around 3.5 and won't budge" experience is a diagnostic of the Hessian's smallest eigenvalue being too small (flat direction, gradient too small to make progress). Understanding the Hessian is the theoretical scaffolding for reading these diagnostics correctly.
+
+</RealWorldML>
+
+<StudyDepth
+  intro={<>Jacobian is a straightforward extension of gradient to vector outputs. Hessian is where curvature lives, and it's the reason modern optimizers work. Deep intuition here pays off for the entire rest of ML.</>}
+  drill={[
+    <>Jacobian shape: (m outputs, n inputs); row i is gradient of f_i; column j is partial w.r.t. x_j</>,
+    <>Chain rule with Jacobians: J_(g ∘ f) = J_g(f(x)) · J_f(x); non-commutative matrix product</>,
+    <>Hessian = Jacobian of the gradient; symmetric; captures curvature via its eigenvalues</>,
+    <>Positive-definite Hessian at a critical point = local minimum; indefinite = saddle</>,
+    <>Condition number κ of Hessian = ratio of largest to smallest eigenvalue; determines gradient descent difficulty</>,
+    <>Newton's method: x ← x − H⁻¹ ∇f; reaches quadratic minimum in one step (Adam approximates this diagonally)</>,
+  ]}
+  skim={[
+    <>Full Hessian computation and inversion — never done for large models</>,
+    <>Higher-order derivatives beyond Hessian — usually not needed</>,
+    <>Automatic differentiation of Jacobians (jax.jacfwd / jax.jacrev) — useful for small problems, know the API exists</>,
+    <>K-FAC / Shampoo / Sophia optimizer internals — active research area, worth revisiting when doing pretraining</>,
+  ]}
+/>
+
+<CodeItYourself title="Three drills — Jacobian shapes, Hessian eigenvalues, Newton step">
+
+1. **Verify Jacobian shapes.** For a function f: ℝ³ → ℝ² given by f(x, y, z) = (x·y + z, x² − y·z), compute the Jacobian analytically (should be 2 rows × 3 columns) and verify numerically at (1, 2, 3) using central differences on each input dimension. Print both.
+
+2. **Classify critical points with the Hessian.** For each function below, compute the Hessian at (0, 0) and classify the point using eigenvalues: (a) f(x, y) = x² + y² (should be a minimum), (b) f(x, y) = −x² − y² (max), (c) f(x, y) = x² − y² (saddle), (d) f(x, y) = x² (degenerate — zero eigenvalue).
+
+3. **Newton's step on a non-quadratic function.** For f(x) = x⁴ − 2x² + 1 (a one-variable non-quadratic bowl at x = ±1), take one Newton step from x_0 = 2: compute f', f'', apply x_new = x_0 − f'(x_0)/f''(x_0). Verify the new point is closer to the minimum (x = 1) than the starting point. Iterate 5 times and print the trajectory converging to the minimum. Newton on non-quadratics doesn't reach the minimum in one step but converges quadratically fast (once close enough).
+
+</CodeItYourself>
+
+<Summary>
+
+- The **Jacobian** J_f of a vector function f: ℝⁿ → ℝᵐ is an m × n matrix of all first partials — row i is the gradient of f_i, column j is the partial w.r.t. x_j. Reduces to the gradient when m = 1.
+- **Chain rule for vectors**: J_(g ∘ f)(x) = J_g(f(x)) · J_f(x) — matrix product of the outer's Jacobian (evaluated at inner's output) with the inner's Jacobian. Non-commutative; order matters.
+- Backprop computes **Jacobian-vector** or **vector-Jacobian** products layer by layer, never materializing the full Jacobians — the deep efficiency of reverse-mode autodiff.
+- The **Hessian** H_f of a scalar function is the n × n matrix of second partials — symmetric, captures local curvature. Equivalent to the Jacobian of the gradient.
+- **Hessian eigenvalue signs classify critical points**: all positive → minimum; all negative → maximum; mixed signs → saddle. Condition number κ = λ_max/λ_min controls gradient-descent convergence rate.
+- **Newton's method** x ← x − H⁻¹ ∇f reaches a quadratic minimum in one step. Impractical for full ML models (n² storage, n³ inverse), but its diagonal approximation is the mathematical basis of Adam, RMSprop, and Adagrad.
+- **Saddles dominate the landscape** in high dimensions; escaping them is a real optimization concern, addressed by momentum, stochastic noise (SGD), and second-order methods.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>For f(x, y) = (x + y, x - y), compute the Jacobian.</>,
+      hint: <>2 outputs, 2 inputs — Jacobian is 2×2.</>,
+      answer: <>Row 1 (∂f_1/∂x, ∂f_1/∂y) = (1, 1). Row 2 (∂f_2/∂x, ∂f_2/∂y) = (1, −1). So <b>J = [[1, 1], [1, −1]]</b>. <br /> This is the "sum-and-difference" transformation. Its determinant is (1)(−1) − (1)(1) = −2, so this map scales area by 2 and reverses orientation.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>Compute the Hessian of f(x, y) = 3x² − 2xy + 5y² at any point (it's a constant matrix — a quadratic function has constant Hessian).</>,
+      hint: <>Second partials: ∂²f/∂x², ∂²f/∂y², ∂²f/∂x∂y.</>,
+      answer: <>∂²f/∂x² = 6, ∂²f/∂y² = 10, ∂²f/∂x∂y = −2 (matches ∂²f/∂y∂x by symmetry). So <b>H = [[6, −2], [−2, 10]]</b>. <br /> Eigenvalues: tr = 16, det = 60 − 4 = 56. λ² − 16λ + 56 = 0, λ = (16 ± √(256 − 224))/2 = (16 ± √32)/2 ≈ 10.83, 5.17. <b>Both positive → the origin is a local minimum</b>. Condition number κ = 10.83 / 5.17 ≈ 2.1 (mildly stretched bowl).</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Given f: ℝ² → ℝ³ with J_f(x) computed once, and g: ℝ³ → ℝ with gradient ∇g(y) computed at y = f(x), how do you express the gradient of the composite ∇(g ∘ f)(x)? What are its shape and its formula?</>,
+      hint: <>Composite is scalar-valued; gradient is a 2-vector. Use the chain rule with Jacobians.</>,
+      answer: <>The composite g ∘ f: ℝ² → ℝ is scalar-valued; its gradient is a 2-vector. By the chain rule, J_(g ∘ f) = J_g · J_f. Since J_g is a 1×3 row (the gradient of g), and J_f is 3×2, the product is 1×2 — a row vector. <br /><br /> Equivalently, as a column-gradient: <b>∇(g ∘ f)(x) = J_f(x)ᵀ · ∇g(f(x))</b>, a 2-vector. Notice the transpose: the OUTPUT dimensions of J_f become the INPUT dimensions of the pullback. This is EXACTLY how backprop pulls a gradient back through a vector-valued layer — dL/dinput = J_layerᵀ · dL/doutput.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>The Hessian of a scalar function f at a point has eigenvalues 4, 4, 0.1. What is the condition number, and what does it predict about gradient-descent convergence?</>,
+      hint: <>κ = λ_max / λ_min.</>,
+      answer: <>κ = 4 / 0.1 = <b>40</b>. Gradient descent's iteration count to reach loss ε above minimum for a quadratic is roughly O(κ · log(1/ε)) — for ε = 10⁻⁶, that's about 40 · 14 ≈ 560 iterations. Compare to κ = 1 (perfectly round bowl): ~14 iterations. The stretched bowl (large κ) is 40× slower. <br /><br /> Adam and other adaptive optimizers effectively reduce this κ by preconditioning each parameter independently. Modern optimizer research is largely about better ways to estimate the Hessian (or its inverse) to reduce the effective condition number and speed up convergence.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Prove that for a scalar function f, if the Hessian H at a critical point x_0 (where ∇f(x_0) = 0) is positive definite, then x_0 is a strict local minimum.</>,
+      hint: <>Use the second-order Taylor expansion around x_0 and the definition of positive-definite.</>,
+      answer: <>Since x_0 is a critical point, ∇f(x_0) = 0, so the second-order Taylor expansion becomes: <br /> f(x_0 + Δx) = f(x_0) + 0 + (1/2) Δxᵀ H(x_0) Δx + o(‖Δx‖²) <br /><br /> The Hessian H is positive definite means: for every Δx ≠ 0, ΔxᵀH Δx &gt; 0. So the quadratic term is strictly positive for any nonzero displacement. <br /><br /> Specifically, if λ_min is the smallest eigenvalue of H (which is &gt; 0 by positive-definiteness), then by the spectral theorem, ΔxᵀH Δx ≥ λ_min ‖Δx‖². So: <br /> f(x_0 + Δx) − f(x_0) ≥ (λ_min / 2) ‖Δx‖² + o(‖Δx‖²). <br /><br /> For sufficiently small ‖Δx‖, the o(‖Δx‖²) term is smaller than (λ_min / 4) ‖Δx‖² in magnitude, so f(x_0 + Δx) − f(x_0) ≥ (λ_min / 4) ‖Δx‖² &gt; 0. Every point in a small neighborhood has strictly larger f than x_0. That's the definition of a strict local minimum. ∎ <br /><br /> The classifications for other cases follow analogously: negative-definite H → local max; indefinite H → saddle (some Δx directions increase, others decrease f); positive semi-definite (with 0 eigenvalue) → degenerate case, need higher-order Taylor terms.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Explain why Adam's diagonal-scaling update is a diagonal approximation to Newton's method, and describe when this approximation breaks down.</>,
+      hint: <>Newton is x ← x − H⁻¹ ∇f. Adam uses ∇f divided by sqrt(diagonal-of-something).</>,
+      answer: <><b>Newton's step:</b> x_new = x − H⁻¹ ∇f. For scalar problems this is trivially x − f'/f''; for vectors it's a linear solve. <br /><br /><b>Adam-like approximation:</b> ignore off-diagonal Hessian entries. If H were diagonal, H = diag(h_1, h_2, ..., h_n), then H⁻¹ = diag(1/h_1, ..., 1/h_n) and the Newton step decomposes per-parameter: x_i,new = x_i − g_i / h_i. Adam does exactly this pattern: x_i,new = x_i − η · m_i / (sqrt(v_i) + ε), with v_i ≈ E[g_i²] as a stand-in for h_i (which is exact for a per-parameter quadratic with local Hessian entry h_i). <br /><br /><b>When it works:</b> loss surface has approximately diagonal Hessian in some basis (which is common near shallow-network minima and for well-normalized transformers). Each parameter's curvature is roughly independent of the others, and the diagonal preconditioning is close to the full Newton update. <br /><br /><b>When it breaks:</b> Hessian has significant off-diagonal structure — meaning parameters interact strongly. Then diagonal Adam misses the interaction and can oscillate or converge slowly. This happens in some pretraining regimes for large transformers, motivating Shampoo (uses Kronecker-factored Hessian, capturing per-layer parameter interactions), K-FAC (block-diagonal by layer), and Sophia (uses diagonal Hessian estimates but with smarter clipping). All of these try to add back some off-diagonal information without paying the full O(n²) storage cost.</>
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "The Jacobian of a function f: ℝⁿ → ℝᵐ is:",
+      choices: [
+        { text: "A scalar — the determinant of a matrix of partials" },
+        { text: "An m × n matrix where entry (i, j) is ∂fᵢ/∂xⱼ", correct: true },
+        { text: "An n × n matrix of second partial derivatives" },
+        { text: "The same as the gradient" },
+      ],
+      explanation: <>Jacobian shape: m rows (one per output), n columns (one per input). Row i is the gradient of f_i; column j is how the entire output changes when you nudge x_j. Reduces to the gradient (as a row) when m = 1 (scalar output).</>
+    },
+    {
+      q: "The chain rule for two vector functions y = f(x), z = g(y) is:",
+      choices: [
+        { text: "J_(g ∘ f) = J_g + J_f" },
+        { text: "J_(g ∘ f) = J_g · J_f (evaluated at appropriate points)", correct: true },
+        { text: "J_(g ∘ f) = J_f · J_g" },
+        { text: "J_(g ∘ f) = tr(J_f) · J_g" },
+      ],
+      explanation: <>Matrix product of the outer Jacobian (J_g, evaluated at f(x)) times the inner Jacobian (J_f, evaluated at x). Non-commutative — swapping the order gives a different (or dimensionally invalid) product. This is exactly what backprop does at every vector-valued layer.</>
+    },
+    {
+      q: "The Hessian of a scalar function f: ℝⁿ → ℝ is:",
+      choices: [
+        { text: "An n × 1 gradient vector" },
+        { text: "An n × n symmetric matrix of second partial derivatives", correct: true },
+        { text: "A scalar — the norm of the gradient" },
+        { text: "An n × 1 vector of second partials" },
+      ],
+      explanation: <>Hessian = matrix of second partials, size n × n, symmetric (∂²f/∂xᵢ∂xⱼ = ∂²f/∂xⱼ∂xᵢ by Clairaut's theorem). Equivalent to the Jacobian of the gradient function. Its eigenvalues encode the local curvature.</>
+    },
+    {
+      q: "If the Hessian at a critical point of f is positive definite (all eigenvalues > 0), then the point is:",
+      choices: [
+        { text: "A local maximum" },
+        { text: "A local minimum", correct: true },
+        { text: "A saddle point" },
+        { text: "Cannot be determined without more information" },
+      ],
+      explanation: <>At a critical point (gradient = 0), the second-order Taylor term is (1/2) Δxᵀ H Δx. Positive-definite H means this term is strictly positive for every nonzero Δx — so f increases in every direction from the critical point. That's the definition of a strict local minimum.</>
+    },
+    {
+      q: "Adam's per-parameter adaptive learning rate approximates:",
+      choices: [
+        { text: "The full inverse Hessian, block by block" },
+        { text: "The diagonal of the Hessian, using the running second moment of the gradient", correct: true },
+        { text: "Only the largest eigenvalue of the Hessian" },
+        { text: "A Kronecker factorization of the Hessian" },
+      ],
+      explanation: <>Adam divides each parameter's step by sqrt(E[gᵢ²]) — an estimate of the diagonal entry of the Hessian near a quadratic minimum. This is a per-parameter Newton-style rescaling that ignores off-diagonal terms (parameter interactions). Works well for many neural network loss surfaces; fails when the Hessian has strong off-diagonal structure — motivating K-FAC, Shampoo, Sophia, and other higher-order methods.</>
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/calculus/jacobian-hessian" title="Jacobian & Hessian" />

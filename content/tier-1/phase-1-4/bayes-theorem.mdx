@@ -1,0 +1,387 @@
+---
+title: Bayes' theorem — belief updating
+tier: 1
+phase: "1.4"
+---
+
+export const medicalTestCode = `# The classic base-rate example: a 99% accurate test for a rare disease.
+# 1% prior; 99% sensitivity (P(pos | disease)); 99% specificity (P(neg | healthy)).
+# Q: patient tests positive — what's P(disease | positive)?
+prior_disease = 0.01                       # 1% of population has the disease
+p_pos_given_D  = 0.99                      # sensitivity: test catches 99% of true positives
+p_pos_given_H  = 1 - 0.99                  # 1 - specificity: false-positive rate = 1%
+
+# Bayes: P(D | pos) = P(pos | D) P(D) / P(pos)
+p_pos = p_pos_given_D * prior_disease + p_pos_given_H * (1 - prior_disease)
+posterior = (p_pos_given_D * prior_disease) / p_pos
+print(f"P(disease | positive) = {posterior:.4f}   ({posterior*100:.2f}%)")
+print(f"Even with a 99% accurate test, prob of disease given positive test is ~{posterior*100:.0f}%.")
+print("Because the disease is rare, most positives are FALSE positives.  This is the base-rate fallacy.")
+print()
+
+# Sensitivity to prior — a public-health screen has different implications from a targeted test
+for prior in [0.001, 0.01, 0.1, 0.5]:
+    p_pos_total = p_pos_given_D * prior + p_pos_given_H * (1 - prior)
+    post = p_pos_given_D * prior / p_pos_total
+    print(f"prior {prior*100:>5.2f}%  ->  P(D | +) = {post*100:>6.2f}%")`;
+
+export const spamCode = `# Naive Bayes text classifier — Bayes' theorem applied to word features.
+# Simple bag-of-words: given a message, is it spam?
+import numpy as np
+from collections import Counter, defaultdict
+
+# Toy training data: 5 spam, 5 ham messages
+training = [
+    ("free money now click", "spam"),
+    ("meeting tomorrow at ten", "ham"),
+    ("free vacation win prize", "spam"),
+    ("lunch tomorrow bring the report", "ham"),
+    ("cash prize free entry", "spam"),
+    ("send the meeting notes", "ham"),
+    ("free trial upgrade now", "spam"),
+    ("dinner tomorrow at eight", "ham"),
+    ("win million dollars easy", "spam"),
+    ("report meeting update at ten", "ham"),
+]
+
+# Learn class priors and per-class word likelihoods (with Laplace smoothing)
+def train(data):
+    class_docs = defaultdict(list)
+    for msg, label in data:
+        class_docs[label].append(msg.split())
+    prior = {c: len(docs) / len(data) for c, docs in class_docs.items()}
+    vocab = set(w for msg, _ in data for w in msg.split())
+    likelihoods = {}
+    for c, docs in class_docs.items():
+        counts = Counter(w for msg in docs for w in msg)
+        total  = sum(counts.values()) + len(vocab)              # Laplace +1 smoothing
+        likelihoods[c] = {w: (counts[w] + 1) / total for w in vocab}
+    return prior, likelihoods, vocab
+
+def classify(msg, prior, likelihoods, vocab):
+    # log posterior for each class: log P(c) + sum log P(w | c)
+    words = [w for w in msg.split() if w in vocab]
+    scores = {}
+    for c in prior:
+        s = np.log(prior[c])
+        for w in words:
+            s += np.log(likelihoods[c].get(w, 1e-6))
+        scores[c] = s
+    # normalize to actual posterior (softmax)
+    total = np.logaddexp.reduce(list(scores.values()))
+    return {c: np.exp(s - total) for c, s in scores.items()}
+
+prior, likelihoods, vocab = train(training)
+for msg in ["free prize now", "meeting tomorrow at ten", "click free win"]:
+    p = classify(msg, prior, likelihoods, vocab)
+    print(f"{msg:>30}  ->  spam prob = {p['spam']:.3f}, ham prob = {p['ham']:.3f}")`;
+
+export const bayesUpdateCode = `# Sequential Bayes: update prior as evidence arrives.
+# Coin problem: is this coin fair (p=0.5) or biased toward heads (p=0.75)?
+# Start with 50-50 prior, then update after each flip.
+import numpy as np
+
+prior_fair = 0.5
+prior_bias = 0.5
+
+def update(observation, posterior_fair, posterior_bias):
+    # posterior_fair := P(fair | observations so far)
+    # observation: "H" or "T"
+    p_obs_fair = 0.5 if observation == "H" else 0.5
+    p_obs_bias = 0.75 if observation == "H" else 0.25
+    joint_fair = p_obs_fair * posterior_fair
+    joint_bias = p_obs_bias * posterior_bias
+    total = joint_fair + joint_bias
+    return joint_fair / total, joint_bias / total
+
+flips = "HHHHH"    # 5 heads in a row
+p_fair, p_bias = prior_fair, prior_bias
+print(f"start: P(fair) = {p_fair:.3f},  P(biased) = {p_bias:.3f}")
+for i, f in enumerate(flips, 1):
+    p_fair, p_bias = update(f, p_fair, p_bias)
+    print(f"after {i} flip{'s' if i > 1 else ''}: {flips[:i]:>{len(flips)}}  ->  P(fair) = {p_fair:.3f}, P(biased) = {p_bias:.3f}")
+
+print()
+print("After 5 heads, our belief has shifted from 50/50 to strongly biased —")
+print(f"each 'H' multiplies the ratio P(bias)/P(fair) by 0.75/0.5 = 1.5")`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/probability/information-entropy", label: "Information, entropy & KL divergence", blurb: "Bayes updates redistribute probability mass; KL measures how much the posterior has shifted from the prior." },
+]} />
+
+<Motivation title="Bayes = how any rational system updates belief">
+
+Bayes' theorem is a one-line formula: **posterior = (prior × likelihood) / evidence**. But it's a mental model much bigger than a formula. It's how any rational belief system should update when new data arrives — and it directly powers half of practical ML: Naive Bayes classifiers, spam filters, Bayesian regression, RAG confidence estimates, Kalman filters, latent-variable models, and the entire Bayesian deep-learning literature.
+
+For a GenAI engineer, Bayes appears in several critical places:
+
+- **Understanding model outputs.** When an LLM outputs "The capital of France is Paris" with confidence 0.99, Bayes helps you reason about whether that confidence is calibrated (does the model's 99% probability match the actual 99% correctness rate? — usually not, models are often overconfident).
+- **Retrieval-augmented generation.** RAG scores documents against a query with a similarity metric; if you interpret those scores as unnormalized probabilities, ranking and re-scoring become Bayesian inference problems.
+- **Reasoning under uncertainty.** "The model says the answer is X; how much should I trust that?" is a Bayesian question. Prior: baseline model reliability. Likelihood: evidence from the specific output. Posterior: your updated belief.
+- **Bayesian deep learning.** Not mainstream in vanilla LLM training, but foundational for uncertainty estimation, active learning, and hyperparameter tuning (Bayesian optimization).
+
+The chapter is short: derive the theorem, work through the base-rate example everyone gets wrong on the first try, build a Naive Bayes spam classifier from scratch, and sketch sequential Bayesian updating. The formula is trivial; the mental model is the payoff.
+
+</Motivation>
+
+<Intuition title="Reweight the prior by how much the evidence supports each hypothesis">
+
+You have several possible explanations for what's true (hypotheses H₁, H₂, …). Before seeing any evidence, you have a **prior** belief in each — often just "they're equally likely" if you have no reason to prefer one. Then evidence E arrives. For each hypothesis, you ask: **"How likely was this evidence to occur if this hypothesis were true?"** — that's the *likelihood* P(E | H_i).
+
+Bayes says: multiply each hypothesis's prior by its likelihood of producing the evidence, then normalize so the total is 1. Hypotheses that predicted the evidence well get boosted; hypotheses that predicted otherwise get demoted. The result is your updated (posterior) belief.
+
+$$
+\text{posterior} \;=\; \frac{\text{prior} \times \text{likelihood}}{\text{evidence}}
+$$
+
+The **evidence** in the denominator is just the total probability of the evidence occurring (summed over all hypotheses) — a normalizing constant that ensures the posterior probabilities sum to 1. Often you can compute the posterior *up to* this constant, do arithmetic in log-space, and normalize at the end.
+
+</Intuition>
+
+<Recall term="Conditional probability">
+
+P(A | B) = P(A and B) / P(B) — the probability that A is true, given we know B is true. Restricts attention to the "B is true" subset of the sample space. This is the definition that makes Bayes' theorem trivial to derive.
+
+</Recall>
+
+## Bayes' theorem — one line derived
+
+Start from the definition of conditional probability:
+
+$$
+P(A \mid B) \;=\; \frac{P(A \cap B)}{P(B)} \qquad \text{and} \qquad P(B \mid A) \;=\; \frac{P(A \cap B)}{P(A)}
+$$
+
+Rearrange the second: P(A ∩ B) = P(B | A) · P(A). Substitute into the first:
+
+$$
+\boxed{\;P(A \mid B) \;=\; \frac{P(B \mid A) \cdot P(A)}{P(B)}\;}
+$$
+
+That's Bayes' theorem. In model-fitting language: A is a hypothesis (e.g., "disease present," "spam," "coin biased"), B is evidence (e.g., "test positive," "message contains word 'free'," "flip is heads"). The pieces:
+
+- **P(A)** = **prior** — belief in A before seeing B.
+- **P(B | A)** = **likelihood** — how well A explains the evidence.
+- **P(A | B)** = **posterior** — belief in A after seeing B.
+- **P(B)** = **evidence / marginal likelihood** — total probability of seeing B, summed over all hypotheses. For two-hypothesis problems, P(B) = P(B | A) P(A) + P(B | ¬A) P(¬A).
+
+## The base-rate trap — why "99% accurate tests" still give bad news
+
+Everyone learns Bayes with this example: a rare disease affects 1% of the population. A test is 99% sensitive (P(pos | disease) = 0.99) and 99% specific (P(neg | healthy) = 0.99). If you test positive, what's the probability you have the disease?
+
+Intuition says "about 99%." Bayes says otherwise:
+
+- P(disease) = 0.01 (prior)
+- P(pos | disease) = 0.99 (likelihood, "sensitivity")
+- P(pos | healthy) = 0.01 (false-positive rate = 1 − specificity)
+- P(pos) = 0.99 · 0.01 + 0.01 · 0.99 = 0.0198 (evidence)
+
+Bayes: P(disease | pos) = (0.99 · 0.01) / 0.0198 = **0.5**. A 99% accurate test on a 1% base-rate disease still leaves you with only 50% probability of actually being sick. **Half of the people who test positive are false alarms.**
+
+This is the *base-rate fallacy* — the human tendency to ignore the prior and focus only on the likelihood. Doctors get this wrong on medical school exams. Journalists get it wrong in reporting. Machine-learning models — if they're trained on class-imbalanced data without careful calibration — get it wrong too.
+
+<RunnableCode title="Medical test paradox: 99% accurate test, still only 50% posterior" code={medicalTestCode} packages={[]} />
+
+**Lesson for GenAI**: if a model's output has 99% confidence for a rare category (say "generate a factually correct sentence about an obscure topic"), you should reason like the base rate. Even if the model is well-calibrated on average, the prior probability of correctness on obscure topics is low, so the posterior may still be much lower than the model's stated confidence. Hallucination detection is fundamentally a base-rate problem.
+
+## Naive Bayes — Bayes applied to features
+
+The **naive Bayes classifier** is Bayes' theorem applied to features that are (naively) assumed independent given the class. For classifying a document with word features w_1, …, w_n:
+
+$$
+P(\text{class} \mid w_1, \ldots, w_n) \;\propto\; P(\text{class}) \prod_{i} P(w_i \mid \text{class})
+$$
+
+The "independence" is naive because words aren't actually independent (seeing "free" makes "prize" more likely), but the simplification makes the math easy AND the classifier surprisingly effective. This was the state of the art in spam filtering for years, and Bayesian classifiers still appear in pipelines today.
+
+<RunnableCode title="Naive Bayes spam classifier from scratch" code={spamCode} packages={["numpy"]} />
+
+Key implementation notes:
+
+- **Log-space arithmetic.** Products of many small probabilities underflow; sum log-probabilities instead.
+- **Laplace smoothing.** Add 1 to every count so no unseen word gets zero probability (which would zero out the whole product).
+- **Softmax normalization.** Compute log-posteriors, subtract the max, exponentiate — the standard log-sum-exp trick for numerical stability.
+
+For a modern GenAI engineer, Naive Bayes is less commonly used but the machinery is instructive: it's Bayes with strong independence assumptions, and its failure modes (bad calibration when features are correlated) illustrate why more sophisticated models exist.
+
+## Sequential updating — the Bayesian iteration
+
+Bayes composes. If evidence arrives one piece at a time, each new piece updates the posterior of the previous step, and the result is the same as if all evidence had arrived at once. This is the mathematical basis of **online learning**, **Kalman filters**, and **Bayesian belief networks**.
+
+For sequential updates with independent-given-hypothesis observations E_1, E_2, …, E_n:
+
+$$
+P(H \mid E_1, \ldots, E_n) \;\propto\; P(H) \cdot P(E_1 \mid H) \cdot P(E_2 \mid H) \cdots P(E_n \mid H)
+$$
+
+— multiply the prior by every likelihood, normalize. Equivalent to iterating "posterior = prior · likelihood / evidence" and using the previous posterior as the next prior.
+
+<RunnableCode title="Sequential Bayes: coin-fairness belief update after each flip" code={bayesUpdateCode} packages={["numpy"]} />
+
+The iteration is easy to code and has a satisfying property: it converges to the *right* answer as evidence accumulates, regardless of the prior (as long as the prior didn't assign zero probability to the true hypothesis). This is the mathematical foundation of "belief updates are self-correcting" in Bayesian methods.
+
+## The traps that matter
+
+**Don't confuse P(A|B) with P(B|A).** They differ by the ratio of priors: P(A|B) / P(B|A) = P(A) / P(B). Journalists commit this error constantly ("99% of terrorists use encryption" ≠ "99% of encryption users are terrorists"). The base-rate fallacy is a special case of this confusion.
+
+**Priors matter — subjective is not the same as wrong.** Different priors give different posteriors. In practice, use domain knowledge to choose a prior; if you have none, use a "flat" or "uninformative" prior (uniform over hypotheses). Objective Bayes tries to codify "uninformative" priors formally; subjective Bayes accepts that priors are user-provided and tests robustness to prior choice.
+
+**Log-space or numerical explosion.** Multiplying many small probabilities underflows to zero. Always work in log-space: log P(posterior) = log P(prior) + log P(likelihood) − log P(evidence). Log-sum-exp is the trick for the normalizer.
+
+**Naive Bayes is not calibrated.** Even when Naive Bayes classifies correctly, its output probabilities are often way off from true posteriors — usually too confident. For a document classified as 99% spam by naive Bayes, actual spam probability might be 60–70%. Use isotonic regression or Platt scaling to calibrate if you need meaningful probability outputs.
+
+**Bayesian ≠ Frequentist.** These are two paradigms of interpreting probability. Bayesian: probability represents degree of belief; can talk about "P(hypothesis)". Frequentist: probability is long-run frequency in repeated trials; can't talk about "P(hypothesis)" (a hypothesis is either true or false, no randomness). Practical ML uses both — Bayes rule is a mathematical identity that works in either framework, but the *interpretation* of the outputs differs.
+
+<RealWorldML title="Bayesian reasoning about model hallucinations">
+
+Consider an LLM that outputs a specific fact with 90% confidence. Is that fact actually correct 90% of the time? Almost certainly not — modern LLMs are typically *overconfident*, especially on rare topics. Bayes gives us a framework for reasoning about this:
+
+- **Prior** P(fact is true | topic): how common is truthfulness for facts of this type/domain in the training data? For common facts (capitals of countries), high. For obscure facts (specific dates in niche fields), lower.
+- **Likelihood** P(model outputs this specific claim with this confidence | fact is true) vs P(same output | fact is false): how does the model behave when it "knows" vs when it's confabulating? Recent research: the *entropy* of the model's next-token distribution during generation is a useful signal — low-entropy generations for factual claims are more reliable.
+- **Posterior** P(fact is true | model says X with 90% confidence): the actual belief you should hold about the fact after seeing the model output.
+
+Practical hallucination detection systems (e.g., SelfCheckGPT, various uncertainty-quantification tools) formalize this: sample multiple generations from the model, look at agreement across samples, use the Bayesian posterior of "the model actually knows this fact" as the confidence score.
+
+**Calibration matters for RAG systems too.** When retrieving evidence for a query, similarity scores are proxies for P(relevance | query). But these scores are not calibrated probabilities. A cosine similarity of 0.85 doesn't mean "85% probability of being the right document." Bayes lets you formalize this: if you have labeled query-doc pairs with correctness annotations, you can learn a calibrated posterior P(is-answer | similarity, query-topic) and use *that* to gate whether to trust the retrieved document. This is a genuine engineering win — better calibration means fewer wrong answers surfaced from RAG.
+
+Every "how much should I trust this" question in GenAI has a Bayesian shape to it. You may not always write down the formula, but recognizing it in the wild is the beginning of not being fooled by overconfident model outputs.
+
+</RealWorldML>
+
+<StudyDepth
+  intro={<>Bayes is the single most useful "how to reason under uncertainty" tool. The formula is one line; the mental model is what pays off across statistics, ML, and everyday judgment.</>}
+  drill={[
+    <>Bayes' theorem: P(A|B) = P(B|A) P(A) / P(B); recognize the prior/likelihood/posterior vocabulary</>,
+    <>Base-rate fallacy: even with a highly-accurate test, rare events remain rare after positive evidence — compute the posterior explicitly, don't intuit</>,
+    <>Naive Bayes: assume features independent given class; compute log-posteriors and softmax normalize</>,
+    <>Sequential Bayesian updating: multiply prior by likelihoods of each new observation, normalize; equivalent to batch Bayes</>,
+    <>Log-space arithmetic for products of many small probabilities; log-sum-exp for the normalizer</>,
+    <>Recognize P(A|B) ≠ P(B|A); the ratio is the prior ratio P(A)/P(B)</>,
+  ]}
+  skim={[
+    <>Formal Bayesian vs Frequentist philosophy debates — practical ML uses both, don't get lost in the arguments</>,
+    <>Conjugate priors and closed-form Bayesian updates (Beta-Binomial, Normal-Normal) — useful when they apply, but rare in DL</>,
+    <>Bayesian neural networks (variational inference, MC dropout) — appears in uncertainty quantification research, not vanilla training</>,
+    <>Empirical Bayes and hierarchical models — nice for cross-domain problems, defer until needed</>,
+  ]}
+/>
+
+<CodeItYourself title="Three drills — base-rate calibration, spam scoring, sequential update">
+
+1. **Base-rate calibration for a rare event.** A model classifies news articles as "fake news" with 95% accuracy. Suppose 2% of real articles are actually fake. Compute P(fake | model says fake) by hand using Bayes: prior = 0.02, likelihood P(model says fake | actually fake) = 0.95, false-positive rate P(model says fake | actually real) = 0.05. Compare to the naive assumption that "95% accuracy = 95% posterior." Discuss why classifiers on imbalanced data need calibration.
+
+2. **Log-space Bayes.** Write a `log_bayes(log_prior, log_likelihoods)` function that takes log P(H) and a list of log P(E_i | H) values and returns the log posterior (up to a normalizing constant). Extend to multiple hypotheses: given lists of log priors and log likelihoods per hypothesis, compute the normalized log posterior using logsumexp. Test on a 3-class version of the spam example above.
+
+3. **Sequential coin fairness.** A coin is either fair (p_heads = 0.5) or biased (p_heads = 0.75), with equal prior belief. Simulate 20 coin flips from a biased coin (p_heads = 0.75), and use sequential Bayes to update your belief after each flip. Print P(biased | evidence so far) after each flip — you should see it climb toward 1. What if the true coin were fair? Simulate that too and watch the belief converge toward P(fair) = 1.
+
+</CodeItYourself>
+
+<Summary>
+
+- **Bayes' theorem**: P(A|B) = P(B|A) · P(A) / P(B). Read as "posterior = prior × likelihood / evidence." Derives in one line from the definition of conditional probability.
+- **Prior**: belief before evidence. **Likelihood**: how well each hypothesis predicts the evidence. **Posterior**: updated belief. **Evidence**: normalizer, sum over all hypotheses.
+- **Base-rate fallacy**: even highly accurate tests give surprising posteriors when the prior is small. Formalize with Bayes; don't intuit.
+- **Naive Bayes classifier**: assume features independent given class, multiply likelihoods, normalize. Simple and effective for text; poorly calibrated but often good at ranking.
+- **Sequential updating**: multiply prior by each likelihood as evidence arrives; equivalent to batch Bayes. Use log-space to avoid underflow.
+- **Applications in GenAI**: reasoning about model hallucinations, calibrating RAG confidences, updating beliefs about model reliability given new evaluations.
+- **Not the same as frequentist inference**: Bayesian talks about P(hypothesis); frequentist talks about long-run frequencies. Bayes' theorem is a mathematical identity that works in both, but the *interpretation* of "probability of a hypothesis" is Bayesian.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>Derive Bayes' theorem from the definition of conditional probability.</>,
+      hint: <>Start with P(A ∩ B) written two ways.</>,
+      answer: <>Definition of conditional probability gives two expressions for the joint P(A ∩ B): <br /> P(A ∩ B) = P(A | B) · P(B) (from P(A | B) = P(A ∩ B) / P(B)) <br /> P(A ∩ B) = P(B | A) · P(A) <br /><br /> Setting them equal: P(A | B) · P(B) = P(B | A) · P(A). Divide both sides by P(B): <br /><br /> <b>P(A | B) = P(B | A) · P(A) / P(B).</b> ∎</>
+    },
+    {
+      difficulty: "easy",
+      q: <>A test for a disease has sensitivity 90% (P(+|D) = 0.9) and specificity 85% (P(−|H) = 0.85, so P(+|H) = 0.15). The disease affects 5% of the population. If you test positive, what's the posterior probability you have the disease?</>,
+      hint: <>Bayes: P(D|+) = P(+|D) P(D) / P(+), where P(+) = P(+|D) P(D) + P(+|H) P(H).</>,
+      answer: <>P(D) = 0.05, P(H) = 0.95. <br /> P(+) = 0.9 · 0.05 + 0.15 · 0.95 = 0.045 + 0.1425 = 0.1875. <br /> P(D | +) = (0.9 · 0.05) / 0.1875 = 0.045 / 0.1875 = <b>0.24 (24%)</b>. <br /><br /> Even with high test accuracy, a positive result gives only 24% probability of disease — because the disease is rare (5% base rate), most positive results are false alarms from the 95% healthy population.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Given P(spam) = 0.3, P("free" | spam) = 0.6, P("free" | ham) = 0.05, compute P(spam | contains "free") using Bayes.</>,
+      hint: <>The denominator P("free") sums over both spam and ham.</>,
+      answer: <>P(ham) = 0.7. Total P("free") = 0.6 · 0.3 + 0.05 · 0.7 = 0.18 + 0.035 = 0.215. <br /> P(spam | "free") = 0.18 / 0.215 = <b>0.837 (about 84%)</b>. <br /><br /> Seeing the word "free" alone shifted the posterior spam probability from 30% (prior) to 84% (posterior). The word is a strong feature because its likelihood ratio P("free"|spam) / P("free"|ham) = 12x — the "Bayes factor" — is large.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Show that Bayes' theorem is consistent with sequential updating: if you observe two independent-given-hypothesis pieces of evidence E₁ and E₂, then applying Bayes twice (using the posterior from E₁ as the prior for E₂) gives the same result as applying Bayes once with the combined evidence P(E₁, E₂ | H) = P(E₁ | H) P(E₂ | H).</>,
+      hint: <>Sequential: posterior_1 = P(H | E₁), then posterior_2 = P(H | E₁, E₂) computed using posterior_1 as prior. Batch: use P(E₁, E₂ | H) directly.</>,
+      answer: <><b>Sequential:</b> <br /> Step 1: P(H | E₁) = P(E₁ | H) P(H) / P(E₁). <br /> Step 2 (use posterior_1 as new prior; E₂ conditionally independent of E₁ given H): <br /> P(H | E₁, E₂) = P(E₂ | H) · P(H | E₁) / P(E₂ | E₁) = P(E₂ | H) · [P(E₁ | H) P(H) / P(E₁)] / P(E₂ | E₁). <br /><br /><b>Batch:</b> <br /> P(H | E₁, E₂) = P(E₁, E₂ | H) P(H) / P(E₁, E₂) = P(E₁ | H) P(E₂ | H) P(H) / P(E₁, E₂). <br /><br /> Both expressions have P(E₁ | H) P(E₂ | H) P(H) in the numerator. Both have the total marginal probability of E₁, E₂ in the denominator (since P(E₁) · P(E₂ | E₁) = P(E₁, E₂) by chain rule). So <b>they're equal</b>. ∎ <br /><br /> Consequence: Bayesian updating is order-independent — you can process evidence in any order and get the same posterior. This is what makes streaming/online Bayesian inference well-defined.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>You have a Bayesian classifier over 3 classes with priors P(c_1) = 0.2, P(c_2) = 0.5, P(c_3) = 0.3. For a specific observation x, the likelihoods are P(x | c_1) = 0.6, P(x | c_2) = 0.1, P(x | c_3) = 0.4. Compute the posterior distribution and identify the MAP class.</>,
+      hint: <>Compute unnormalized products, then normalize.</>,
+      answer: <>Unnormalized: <br /> c_1: 0.6 · 0.2 = 0.12 <br /> c_2: 0.1 · 0.5 = 0.05 <br /> c_3: 0.4 · 0.3 = 0.12 <br /> Total: 0.29 <br /><br /> Normalized posterior: <br /> P(c_1 | x) = 0.12 / 0.29 ≈ <b>0.414</b> <br /> P(c_2 | x) = 0.05 / 0.29 ≈ <b>0.172</b> <br /> P(c_3 | x) = 0.12 / 0.29 ≈ <b>0.414</b> <br /><br /> The MAP (maximum a posteriori) is <b>a tie between c_1 and c_3</b> at ~41.4% each. c_2 was demoted from 50% prior to 17% posterior because it explained the observation poorly (likelihood 0.1). c_1 and c_3 both moved up despite different priors, because both had high likelihoods. When ties happen, real classifiers typically pick one arbitrarily or report both — the posterior itself is the honest answer.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>An LLM outputs an answer to a factual question with 90% confidence. You want to know the *actual* probability the answer is correct. Frame this as a Bayesian problem and identify what data you would need to estimate the true posterior.</>,
+      hint: <>Prior: baseline correctness rate for questions of this type. Likelihood: how the model's confidence maps to correctness.</>,
+      answer: <>Bayesian framing: <br /> H = "answer is correct" (the hypothesis) <br /> E = "model reports 90% confidence" (the evidence) <br /> Want: P(H | E) = P(E | H) · P(H) / P(E) <br /><br /> Pieces you'd need to estimate: <br /> - <b>Prior P(H).</b> Base rate of correctness on questions of this type/domain. For common knowledge, might be 95%; for obscure trivia, might be 40%. Estimate by evaluating the model on a random sample of similar questions with known answers. <br /> - <b>Likelihood P(E | H).</b> When the model IS correct, how often does it report 90% confidence? Estimate by looking at model behavior on correctly-answered training/eval questions. <br /> - <b>Alternative likelihood P(E | ¬H).</b> When the model is WRONG, how often does it also report 90% confidence? This is the crucial number — a model that says "90%" only when correct is well-calibrated; a model that says "90%" for both correct and wrong answers is overconfident. Estimate on questions the model gets wrong. <br /> - <b>Evidence P(E) = P(E | H) P(H) + P(E | ¬H) P(¬H).</b> Marginal probability of the model saying 90%. <br /><br /> Then P(H | E) = [P(E | H) · P(H)] / P(E). If it turns out P(H | E) &lt; 0.9 = the model's own stated confidence, the model is *overconfident* — its stated probabilities are systematically inflated. If P(H | E) &gt; 0.9, the model is *underconfident*. Empirically, most modern LLMs are overconfident, especially on obscure topics — the base rate of correctness there is low, so even high stated confidence doesn't rescue the posterior. This is what calibration research (temperature scaling, isotonic regression) tries to fix.</>
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "Bayes' theorem states:",
+      choices: [
+        { text: "P(A|B) = P(A) · P(B)" },
+        { text: "P(A|B) = P(B|A) · P(A) / P(B)", correct: true },
+        { text: "P(A ∩ B) = P(A) + P(B)" },
+        { text: "P(A|B) = P(B|A)" },
+      ],
+      explanation: <>Posterior = (likelihood × prior) / evidence. Derives in one line from the definition of conditional probability. Every "belief update given data" in probabilistic modeling is an application of this formula (perhaps in a fancy iterative or continuous form).</>
+    },
+    {
+      q: "In Bayes' theorem, what does the 'prior' represent?",
+      choices: [
+        { text: "The probability of the evidence" },
+        { text: "The updated belief after seeing evidence" },
+        { text: "The initial belief before seeing evidence", correct: true },
+        { text: "The likelihood of the hypothesis" },
+      ],
+      explanation: <>Prior = P(H), your belief in the hypothesis before any evidence. Combined with the likelihood P(E|H), Bayes updates it to the posterior P(H|E). The prior encodes your baseline uncertainty and is often the trickiest piece to specify — subjective priors are legitimate but should be tested for robustness.</>
+    },
+    {
+      q: "The base-rate fallacy is:",
+      choices: [
+        { text: "Assuming that a well-designed test gives well-calibrated probabilities" },
+        { text: "Ignoring the prior probability when updating on evidence, leading to overestimated posteriors for rare events", correct: true },
+        { text: "Using the wrong likelihood function" },
+        { text: "Confusing sensitivity and specificity" },
+      ],
+      explanation: <>Even a 99% accurate test for a 1% disease gives only ~50% posterior. People intuitively focus on the test's accuracy (likelihood) and forget the base rate (prior). Bayes formalizes the correct update; the fallacy is doing it in your head and getting the wrong answer.</>
+    },
+    {
+      q: "Naive Bayes assumes:",
+      choices: [
+        { text: "All features have the same distribution" },
+        { text: "Features are independent given the class label", correct: true },
+        { text: "Only Gaussian features are allowed" },
+        { text: "The class prior is uniform" },
+      ],
+      explanation: <>The "naive" assumption: P(features | class) = product of per-feature likelihoods, ignoring correlations. False in general (words in text are correlated) but makes computation cheap and works surprisingly well for classification. Downside: probabilities aren't well-calibrated — the classifier ranks correctly but its confidence scores are unreliable.</>
+    },
+    {
+      q: "Sequential Bayesian updating (applying Bayes twice with independent evidence) gives:",
+      choices: [
+        { text: "A different posterior than batch Bayes with combined evidence" },
+        { text: "The same posterior as applying Bayes once with the combined evidence (order-independent)", correct: true },
+        { text: "A posterior only when the two pieces of evidence are perfectly correlated" },
+        { text: "The prior, unchanged" },
+      ],
+      explanation: <>Bayesian updating is order-independent when observations are conditionally independent given the hypothesis. Multiply the prior by each likelihood in any order, normalize — the result is the same as processing all evidence at once. This is what makes online / streaming Bayesian inference well-defined and self-consistent.</>
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/probability/bayes-theorem" title="Bayes' theorem — belief updating" />
