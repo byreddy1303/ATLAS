@@ -1,0 +1,409 @@
+---
+title: Matrix multiplication — three views
+tier: 1
+phase: "1.2"
+---
+
+export const rowColCode = `import numpy as np
+
+A = np.array([[1.0, 2.0, 3.0],
+              [4.0, 5.0, 6.0]])                       # 2x3
+B = np.array([[7.0,  8.0],
+              [9.0,  10.0],
+              [11.0, 12.0]])                          # 3x2
+
+C = A @ B                                             # 2x2
+print("A @ B =")
+print(C)
+
+# each entry (i, j) is row i of A dotted with column j of B
+for i in range(2):
+    for j in range(2):
+        entry = A[i] @ B[:, j]
+        print(f"C[{i},{j}] = row{i}(A) . col{j}(B) = {entry}")`;
+
+export const columnViewCode = `import numpy as np
+
+A = np.array([[1.0, 2.0],
+              [3.0, 4.0]])                            # 2x2
+B = np.array([[5.0, 6.0],
+              [7.0, 8.0]])                            # 2x2
+
+C = A @ B
+print("A @ B =")
+print(C)
+
+# COLUMN VIEW: each column of C = A applied to the corresponding column of B
+print()
+print("column 0 of A @ B = A @ B[:, 0] =", A @ B[:, 0])
+print("column 1 of A @ B = A @ B[:, 1] =", A @ B[:, 1])
+print("stacked ->")
+print(np.column_stack([A @ B[:, 0], A @ B[:, 1]]))
+
+# ROW VIEW (dual): each row of C = corresponding row of A applied to B (from the left)
+print()
+print("row 0 of A @ B = A[0] @ B =", A[0] @ B)
+print("row 1 of A @ B = A[1] @ B =", A[1] @ B)`;
+
+export const outerViewCode = `import numpy as np
+
+A = np.array([[1.0, 2.0, 3.0],
+              [4.0, 5.0, 6.0]])                       # 2x3
+B = np.array([[7.0,  8.0],
+              [9.0,  10.0],
+              [11.0, 12.0]])                          # 3x2
+
+C = A @ B
+print("A @ B =")
+print(C)
+
+# OUTER-PRODUCT VIEW: sum of (column k of A) x (row k of B) for k = 0..n-1
+outer_sum = np.zeros((2, 2))
+for k in range(3):
+    col_k = A[:, k].reshape(2, 1)                     # column vector (2, 1)
+    row_k = B[k].reshape(1, 2)                        # row vector    (1, 2)
+    rank1 = col_k @ row_k                             # rank-1 (2, 2)
+    print(f"k={k}: outer(A[:,{k}], B[{k}]) =")
+    print(rank1)
+    outer_sum += rank1
+
+print()
+print("sum of rank-1 pieces =")
+print(outer_sum)                                      # equals A @ B`;
+
+export const pitfallCode = `import numpy as np
+
+A = np.array([[1.0, 2.0],
+              [3.0, 4.0]])
+B = np.array([[5.0, 6.0],
+              [7.0, 8.0]])
+
+print("A @ B (matmul)  =")
+print(A @ B)                                          # matrix product
+
+print()
+print("A * B (element) =")
+print(A * B)                                          # element-wise (Hadamard)
+
+# transposition rule: (A B)^T = B^T A^T (order flips!)
+print()
+print("(A@B).T          =")
+print((A @ B).T)
+print("B.T @ A.T        =")
+print(B.T @ A.T)                                       # same matrix
+
+# order matters: A @ B != B @ A in general
+print()
+print("A @ B - B @ A =")
+print(A @ B - B @ A)`;
+
+export const attentionScoresCode = `import numpy as np
+
+# core attention step: scores = Q @ K^T (before softmax and scaling)
+rng = np.random.default_rng(0)
+n_tokens, d_k = 4, 3                                    # 4 tokens, per-head query dim 3
+
+Q = rng.standard_normal((n_tokens, d_k))               # (4, 3) — one query per token
+K = rng.standard_normal((n_tokens, d_k))               # (4, 3) — one key   per token
+
+scores = Q @ K.T                                        # (4, 3) @ (3, 4) -> (4, 4)
+print("scores shape =", scores.shape, "  (n_tokens x n_tokens)")
+print("scores =")
+print(np.round(scores, 3))
+
+# what did that product actually compute? row i, col j = Q[i] . K[j]
+print()
+print("scores[0, 2] =", round(scores[0, 2], 3),
+      "== Q[0].K[2] =", round(Q[0] @ K[2], 3))
+
+# after scaling and softmax, each row is a probability distribution over tokens:
+scaled = scores / np.sqrt(d_k)
+attn   = np.exp(scaled) / np.exp(scaled).sum(axis=1, keepdims=True)
+print()
+print("attn weights (rows sum to 1):")
+print(np.round(attn, 3))
+print("row sums:", attn.sum(axis=1))`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/matrices-transformations/matrix-as-transformation", label: "Matrix as linear transformation", blurb: "Columns of A are the images of the basis vectors — the anchor for both the row-column view and the composition view." },
+  { href: "/learn/mathematics/vectors-space/dot-product-cosine-similarity", label: "Dot product & cosine similarity", blurb: "Every entry of a matrix product is a dot product of a row with a column — matmul is dot products in bulk." },
+]} />
+
+<Motivation title="Matmul is 90 percent of the compute — read it four ways">
+
+The forward pass of an LLM is basically a chain of matrix multiplications. Attention scores are `Q @ K.T`. Weighted values are `attn @ V`. Each MLP layer is two matmuls back-to-back, `up = x @ W_up` then `down = act(up) @ W_down`. The final logits are `hidden @ W_out.T`. Every training step is more matmuls (gradients, weight updates).
+
+For a GenAI engineer, one recipe for computing AB is not enough — you need to *interpret* what a matrix product means to reason about shapes, memory, gradients, and pathological cases. This chapter gives you the four canonical readings of the same computation:
+
+1. **Entry-by-entry (row · column)** — the definition, used for hand computation and shape reasoning.
+2. **Column view** — each column of AB is A applied to the corresponding column of B; the fastest mental model for batched linear transformations.
+3. **Composition view** — AB is the linear map "B first, then A"; the model behind fused layers and neural network stacks.
+4. **Sum-of-outer-products view** — AB is the sum of rank-1 pieces (column of A × row of B); the mental model behind SVD, LoRA, low-rank approximation.
+
+Each view answers different questions. Row-column view answers "what's this specific entry?" Column view answers "what does this map do to my batch of vectors?" Composition view answers "what map do these two matrices compose to?" Outer-product view answers "how simple could this really be?" Fluency in switching between them is what separates people who *use* matmul from people who *understand* what matmul is doing.
+
+</Motivation>
+
+<Intuition title="Every entry of AB is one dot product">
+
+To multiply an m×n matrix A by an n×p matrix B, you produce an m×p matrix. **The inner dimensions must match** (n = n) and they *cancel*: the outer dimensions (m, p) survive to define the output shape.
+
+Each entry (AB)ᵢⱼ is the dot product of **row i of A** with **column j of B**. That's the definition — one dot product per entry, m·p entries in total, n multiplications each. Everything else in this chapter is a different way to organize the same n·m·p multiplications.
+
+The mnemonic: **rows meet columns**. Rows of the left matrix, columns of the right matrix, dot products, output.
+
+</Intuition>
+
+## Shape conformability — the one rule that must hold
+
+For A @ B to be defined, `A.shape = (m, n)` and `B.shape = (n, p)` — the number of columns of A must equal the number of rows of B. The result has shape `(m, p)`:
+
+$$
+\underbrace{A}_{m \times n} \;\; \underbrace{B}_{n \times p} \;=\; \underbrace{AB}_{m \times p}
+$$
+
+Write it out as `(m × n) · (n × p) → (m × p)` — the two n's touch and vanish, m and p stand at the outsides. This is the *only* thing you need to remember to guess the shape of any product.
+
+Every "shape mismatch" bug in ML code is a violation of this rule (or a transpose you forgot). When debugging, print the shapes of the operands before printing anything else.
+
+## View 1 — row × column (the definition)
+
+The standard textbook formula:
+
+$$
+(AB)_{ij} \;=\; \sum_{k=1}^{n} A_{ik}\, B_{kj} \;=\; \mathrm{row}_i(A) \cdot \mathrm{col}_j(B)
+$$
+
+The (i, j) entry of AB is the dot product of row i of A with column j of B. Concretely: to fill in entry (0, 0), take row 0 of A and column 0 of B, multiply elementwise, sum. Move to (0, 1): row 0 of A, column 1 of B. Sweep through all m rows and p columns; you're done.
+
+<RunnableCode title="Row × column definition, entry by entry" code={rowColCode} packages={["numpy"]} />
+
+Reasons this view is useful:
+
+- **Doing it by hand** for small matrices.
+- **Debugging a specific entry**: "why is `scores[2, 5]` so large? Print `Q[2]` and `K[5]` and their dot product."
+- **Order-of-operations analysis**: each entry costs n multiplications and n − 1 additions, so the whole product is Θ(m·n·p) — this is where the 90 percent of compute comes from in an LLM (n_tokens² · d_model² type quantities).
+
+But this view hides *what the map is doing* — you see numbers appear, not geometry. Views 2–4 fix that.
+
+## View 2 — the column (and row) view
+
+The key insight from the previous chapter: matrix-vector multiplication `Ax` is a linear combination of A's columns weighted by x. Now consider `A @ B` where B has p columns:
+
+$$
+A\,B \;=\; A\,[\,\mathbf{b}_1 \mid \mathbf{b}_2 \mid \cdots \mid \mathbf{b}_p\,] \;=\; [\,A\mathbf{b}_1 \mid A\mathbf{b}_2 \mid \cdots \mid A\mathbf{b}_p\,]
+$$
+
+**Column j of AB is A applied to column j of B.** The product is nothing more than "apply the linear map A to each of B's p column vectors." This is the mental model to use whenever you see a matmul like `activations @ W`: A is the linear map, and each column of B is a fresh input vector.
+
+The dual — the **row view** — says the same story from the other side:
+
+$$
+A\,B \;=\; \begin{bmatrix} \mathrm{row}_1(A) \\ \mathrm{row}_2(A) \\ \vdots \\ \mathrm{row}_m(A) \end{bmatrix}\,B \;=\; \begin{bmatrix} \mathrm{row}_1(A)\,B \\ \mathrm{row}_2(A)\,B \\ \vdots \\ \mathrm{row}_m(A)\,B \end{bmatrix}
+$$
+
+**Row i of AB is row i of A applied to B (from the left).** In ML code where activations `X` are shaped `(batch, features)` and weights `W` are `(features, out)`, the row view says: row i of `X @ W` is X's i-th sample projected through W. That's the mental model for batched neural network layers — each row of the output batch is one sample's output, and it's produced by the same linear map W acting on the corresponding input row.
+
+<RunnableCode title="Column view and row view — same product, two lenses" code={columnViewCode} packages={["numpy"]} />
+
+## View 3 — composition of maps
+
+Matrix multiplication is *defined* to make composition of linear maps into a single matrix. If A is m×n (map ℝⁿ → ℝᵐ) and B is n×p (map ℝᵖ → ℝⁿ), then:
+
+$$
+(AB)(\mathbf{x}) \;=\; A(B\mathbf{x}) \qquad \text{for every } \mathbf{x} \in \mathbb{R}^p
+$$
+
+Read chains right-to-left. In a transformer, a small MLP block is `x @ W_up` (project up to a wider space) then `act(...) @ W_down` (project back down). If we ignore the nonlinearity for a moment, the composition `x @ W_up @ W_down` could be *precomputed* as one product `W_up @ W_down` and applied in one shot — associativity of matrix multiplication makes this legal. That's the mathematical basis of "fusing" layers at inference time and of LoRA weight merging.
+
+**Associativity** is the deep reason chains work: `(AB)C = A(BC)`, so you can compute either grouping and get the same answer — pick whichever costs less. **Non-commutativity** is why order matters: `AB ≠ BA` in general (often not even the same shape). Rearranging linear layers in a network changes the map they compose to.
+
+## View 4 — sum of outer products (rank decomposition)
+
+The most underrated view. Write A as [a₁ | a₂ | ⋯ | aₙ] (columns) and B as (b̃₁; b̃₂; ⋯; b̃ₙ) (rows). Then:
+
+$$
+A\,B \;=\; \sum_{k=1}^{n} \mathbf{a}_k \, \tilde{\mathbf{b}}_k
+$$
+
+— a sum of **outer products** of A's k-th column with B's k-th row. Each `a_k · b̃_k` is a rank-1 m×p matrix (an outer product of a column vector with a row vector). The full product AB is the sum of n such rank-1 pieces.
+
+This is the view that says "AB is at most rank n" — a fact that becomes electric in the SVD and LoRA chapters. It also gives you the fastest recipe when n is small: only n rank-1 additions instead of m·p dot products.
+
+<RunnableCode title="Outer-product view — AB as sum of rank-1 pieces" code={outerViewCode} packages={["numpy"]} />
+
+Why this matters for GenAI: **LoRA's ΔW = A B (with A of shape (d, r), B of shape (r, d), r ≪ d) is exactly this decomposition** — a sum of r outer products, one per "adaptation direction." SVD (next chapter but one) writes any matrix as a sum of its own outer products, ranked by importance. The whole "low-rank" story in modern ML is this view.
+
+## The traps that matter
+
+**Element-wise `*` is not matmul `@`.** In NumPy, `A * B` multiplies element-by-element (Hadamard product) — nothing to do with matrix multiplication. `A @ B` is the matrix product. In PyTorch same convention. Confusing these is the #1 shape/silent-correctness bug: `A * B` requires `A` and `B` to be broadcast-compatible, which happens to be true for square matrices of the same size — so the code runs but computes the wrong thing. **Always use `@` for matmul; reserve `*` for masks and gates.**
+
+<RunnableCode title="@ vs * — matmul vs Hadamard, transpose flip rule, non-commutativity" code={pitfallCode} packages={["numpy"]} />
+
+**Transposition flips order: (AB)ᵀ = BᵀAᵀ.** This is not a preference — it's forced by the shapes. If A is m×n and B is n×p, then AB is m×p and its transpose is p×m; the only product of A's and B's transposes with shape p×m is Bᵀ Aᵀ (which is (p×n)·(n×m) = p×m). Consequences you'll use constantly:
+
+- Attention writes `Q @ K.T` because you want a `(n_tok × n_tok)` matrix of dot products, and `K.T` puts the key vectors as columns. Equivalent formulations `(K @ Q.T).T` compute the same thing with an extra transpose.
+- Gradient of `L = ‖Ax − y‖²` is `2Aᵀ(Ax − y)` — the transpose appears because the chain rule pushes derivatives through the linear map's *adjoint*, which for matrices is the transpose.
+
+**Non-commutativity is not "sometimes" — it's the default.** Any code that swaps two matrix operands (`A @ B` vs `B @ A`) is doing something different. The exceptions are: (a) both are diagonal, (b) both are powers of the same matrix, (c) one is a scalar-times-identity. Anything else — assume `AB ≠ BA` until proven otherwise.
+
+**Compute cost is Θ(m·n·p).** The naive cost of multiplying `(m×n)·(n×p)` is m·n·p scalar multiplications. Strassen's algorithm and successors shave this down asymptotically (Θ(n^~2.37) for square matrices), but real ML uses the standard Θ(n³) algorithm on GPUs — because it maps beautifully to tensor cores and cache hierarchies. When you see quadratic attention (`Q @ K.T` costs O(n_tokens² · d_k) per head), the m·n·p formula is why.
+
+**Batched matmul in code**. NumPy and PyTorch generalize `@` to tensors with extra leading batch dimensions: `X @ Y` where `X.shape = (B, m, n)` and `Y.shape = (B, n, p)` gives `(B, m, p)` — the same matmul performed independently for each batch element. When the shapes are `X.shape = (m, n)` and `Y.shape = (B, n, p)`, X is broadcast: same map applied to every batch element. This is the ubiquitous shape story in attention (`(batch, heads, seq, d_k)` shapes flying around).
+
+<RealWorldML title="Attention scores are Q @ K.T — a matmul that returns similarities">
+
+The attention step every LLM performs: given per-token query vectors `Q` of shape `(n_tokens, d_k)` and per-token key vectors `K` of shape `(n_tokens, d_k)`, compute the score matrix `scores = Q @ K.T`, of shape `(n_tokens, n_tokens)`. Entry `(i, j)` is "how much should token i pay attention to token j?" — measured as the dot product of query i and key j.
+
+<RunnableCode title="Attention scores as one matrix product" code={attentionScoresCode} packages={["numpy"]} />
+
+Read the cell in four views:
+
+1. **Row-column view.** `scores[i, j] = Q[i] · K[j]` — the definition. That's what makes the entry an inner-product-style similarity score. Every entry of `scores` is one dot product; the whole matrix is n_tokens² of them.
+2. **Column view.** Each column of `Q @ K.T` is `Q @ K[j]` — the linear map defined by Q applied to key j. Not the most useful reading here, but it's the one that makes "columns of a product are the map applied to columns" concrete.
+3. **Composition view.** `Q @ K.T` is the composition of two maps: first `K.T` (an `(d_k → n_tokens)` map that measures how much of each key direction is present in an input vector), then `Q` (an `(d_k → n_tokens)` map on that output? no — this only makes sense with careful transpose bookkeeping). More often useful when you notice `attn @ V` composes with the previous step.
+4. **Outer-product view.** `Q @ K.T = Σ_k Q[:, k] outer K[:, k]` (sum over the d_k feature dimensions) — the scores matrix is a sum of d_k rank-1 similarity patterns. Each pattern says "on this feature dimension, this is who looks like whom." This is precisely the SVD view of the score matrix, and it's why some attention analyses find that most of the attention pattern is explained by a small number of features (few dominant singular values).
+
+After scoring, we divide by √d_k (temperature control) and softmax each row to get a probability distribution over tokens — the attention weights. The full attention output is one more matmul: `attn @ V`. Two chained matrix products, `Q @ K.T` then `attn @ V`; every transformer layer does this once per head per token.
+
+</RealWorldML>
+
+<StudyDepth
+  intro={<>The four views of matrix multiplication are not four techniques — they're four <em>readings</em> of one computation. Being fluent in all four is what makes tensor shape debugging fast and low-rank thinking intuitive.</>}
+  drill={[
+    <>Shape conformability: <code>(m×n) · (n×p) → (m×p)</code>; the inner dimensions must match and they vanish</>,
+    <>Row-column view for computing a specific entry or debugging its value</>,
+    <>Column view for the mental picture "apply this linear map to a batch of column vectors"</>,
+    <>Composition view — <code>ABC x = A(B(Cx))</code>, right-to-left; associative, non-commutative</>,
+    <>Outer-product view — AB = Σ (col of A) outer (row of B) — the seed of every low-rank story (SVD, LoRA)</>,
+    <>Transposition flip: <code>(AB)ᵀ = BᵀAᵀ</code>; matmul vs Hadamard (<code>@</code> vs <code>*</code>) — the top NumPy/torch mistake</>,
+  ]}
+  skim={[
+    <>Sub-cubic algorithms (Strassen, Coppersmith–Winograd, laser method) — theoretical, not what GPUs run</>,
+    <>Block matrix multiplication — the low-level view of how BLAS/cuBLAS actually tile the product</>,
+    <>Tensor contractions and einsum notation — a generalization of matmul; <code>einsum('ij,jk->ik', A, B)</code> is A @ B</>,
+  ]}
+/>
+
+<CodeItYourself title="Three drills — write matmul by hand, verify shape, spot the trap">
+
+1. **Write `matmul_by_hand(A, B)`** using three nested Python loops (no `@`, no `np.dot`) that returns AB entry-by-entry via the row-column formula. Compare against `A @ B` with `np.allclose` on a `(3, 4)` × `(4, 5)` example. *Hint: allocate `C = np.zeros((A.shape[0], B.shape[1]))`, then fill `C[i, j] = sum(A[i, k] * B[k, j] for k in range(A.shape[1]))`.*
+
+2. **Verify all four views produce the same product** on random 4×3 and 3×5 matrices A and B: (a) row-column direct via `A @ B`; (b) column view — `np.column_stack([A @ B[:, j] for j in range(5)])`; (c) row view — `np.stack([A[i] @ B for i in range(4)])`; (d) outer-product view — `sum(np.outer(A[:, k], B[k]) for k in range(3))`. Check `np.allclose` between all four.
+
+3. **Reproduce the classic bug**: build A = np.ones((3, 3)) and B = np.ones((3, 3)) and print `A @ B` and `A * B`. Observe how they differ (each entry of `A @ B` is 3, but each entry of `A * B` is 1). Then break it: make A `(3, 3)` and B `(3, 5)` and try `A * B` — see the broadcasting error, which is the tell that you meant `@`.
+
+</CodeItYourself>
+
+<Summary>
+
+- Matrix multiplication `A @ B` is defined only when the inner dimensions match: `(m × n) · (n × p) → (m × p)`. The n's touch and vanish; m and p survive.
+- **Four views, one product** — pick the one that fits your question:
+  - **Row-column**: (AB)ᵢⱼ = row i of A · column j of B. For hand computation and per-entry debugging.
+  - **Column view**: column j of AB = A · (column j of B). For "apply this map to a batch of columns."
+  - **Composition view**: `(AB)x = A(Bx)`. For understanding chained linear layers and fused weights.
+  - **Outer-product view**: AB = Σ_k a_k outer b̃_k. For low-rank thinking (SVD, LoRA).
+- **Order matters** (AB ≠ BA in general) but **grouping doesn't** ((AB)C = A(BC)). Non-commutative, associative.
+- **Transpose flips order**: (AB)ᵀ = BᵀAᵀ. This is why attention writes `Q @ K.T`.
+- **`@` vs `*`**: `@` is matmul, `*` is element-wise (Hadamard). Confusing them is the #1 silent-correctness bug in NumPy/torch.
+- **Cost**: Θ(m·n·p). LLM compute is 90 percent this operation, on GPUs, on batched tensors.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>If A is 4×5 and B is 5×3, what is the shape of AB? Of BA (if defined)?</>,
+      hint: <>Inner dims must match; outer dims survive.</>,
+      answer: <>AB is <b>4×3</b> — the shared inner "5" vanishes, outer "4" and "3" survive. BA would need B's number of columns (3) to equal A's number of rows (4); they don't, so <b>BA is undefined</b>. This is the most common form of non-commutativity: not even a well-defined product exists in the other order.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>Compute A @ B by hand for A = <code>[[1, 2], [3, 4]]</code>, B = <code>[[5, 6], [7, 8]]</code>.</>,
+      hint: <>Row 1 dotted with column 1, row 1 dotted with column 2, and so on.</>,
+      answer: <>Row-column: (0,0) = 1·5 + 2·7 = <b>19</b>; (0,1) = 1·6 + 2·8 = <b>22</b>; (1,0) = 3·5 + 4·7 = <b>43</b>; (1,1) = 3·6 + 4·8 = <b>50</b>. AB = <code>[[19, 22], [43, 50]]</code>. Column view sanity check: column 0 = A @ (5, 7) = (1·5+2·7, 3·5+4·7) = (19, 43) ✓ — matches column 0 of the result.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Prove that if v and w are column vectors (n×1 each), then v @ w.T is a rank-1 matrix and w.T @ v is a 1×1 matrix (a scalar). Give the shapes and the meaning of each.</>,
+      hint: <>Apply the (m×n)·(n×p) → (m×p) shape rule with v as (n, 1) and w.T as (1, n).</>,
+      answer: <>v is n×1, w.T is 1×n, so <b>v @ w.T is n×n</b>. The entry (i, j) = v[i] · w[j] — every entry is a product of one v-entry and one w-entry, so every row is a scalar multiple of w.T and every column is a scalar multiple of v — hence rank 1 (single independent direction). This is the <b>outer product</b>. <br /><br /> Conversely, w.T is 1×n and v is n×1, so <b>w.T @ v is 1×1</b> — a scalar. Its single entry is Σ w[i] v[i] = w · v — the ordinary <b>dot product</b>. So `w.T @ v` and `w @ v.T` are the same thing computed with different associations of dimensions: one gives a scalar (inner product), the other gives an n×n rank-1 matrix (outer product). Both are matmuls; the shapes chosen decide the meaning.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Given the identity (AB)ᵀ = BᵀAᵀ, derive (ABC)ᵀ = CᵀBᵀAᵀ. Show the two-step derivation.</>,
+      hint: <>Group ABC as A(BC), apply the rule once, then apply it again to the inner product.</>,
+      answer: <>Step 1: view ABC as A · (BC), a product of two matrices. Then (ABC)ᵀ = (A(BC))ᵀ = (BC)ᵀ · Aᵀ by the two-matrix rule.<br />Step 2: (BC)ᵀ = CᵀBᵀ by the same rule again.<br />Substituting: <b>(ABC)ᵀ = CᵀBᵀAᵀ</b>. The pattern generalizes: for any chain, transposing reverses the order and transposes every element. This is why `(Q @ K.T).T = K @ Q.T` — you can compute attention scores from either direction, at the cost of one transpose.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Consider matrices A of shape (d, r) and B of shape (r, d) with r ≪ d, so AB is a d×d matrix produced from far fewer parameters. Argue that AB has rank ≤ r, and use the outer-product view to give a slick proof.</>,
+      hint: <>Write AB as a sum of r rank-1 outer products and count independent directions in the column space.</>,
+      answer: <><b>Outer-product decomposition:</b> AB = sum over k=1..r of A[:, k] outer B[k, :]. Each term is an outer product a<sub>k</sub> · b̃<sub>k</sub> — a rank-1 matrix whose column space is the line through a<sub>k</sub> (every column is a scalar multiple of a<sub>k</sub>). <br /><br /> The column space of a sum of matrices is contained in the union of their individual column spaces (any column of the sum is a sum of columns of the pieces). So the column space of AB is contained in the span of a<sub>1</sub>, a<sub>2</sub>, …, a<sub>r</sub> — a subspace of dimension at most r. Rank = dim(column space) ≤ r. ∎ <br /><br /> This is the LoRA reasoning: a rank-r update ΔW = AB has at most r "adaptation directions," parametrized by 2·d·r ≪ d² numbers, and expressive enough for task-specific fine-tuning because empirically the useful weight update lies in a low-dimensional subspace of the full d²-dimensional weight space.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Attention output is <code>attn @ V</code> where <code>attn</code> is <code>(n × n)</code> and <code>V</code> is <code>(n × d_v)</code>. Explain in the column view what a specific output row `out[i]` represents.</>,
+      hint: <>The output is (n × d_v). Look at row i using the row view of matrix multiplication.</>,
+      answer: <>Using the row view: `out[i] = attn[i] @ V` — row i of the output is row i of `attn` (a probability vector over tokens after softmax) applied to V. <br /><br /> Reading `attn[i] @ V` further: this is a linear combination of the <em>rows</em> of V, weighted by `attn[i]`. Row j of V is the value vector for token j. So `out[i] = Σ_j attn[i, j] · V[j]` — the output for token i is a <b>weighted average of every token's value vector</b>, with weights equal to how much attention token i pays to each other token. <br /><br /> This is the whole content of "attention is a soft lookup": the query says who to attend to (via `Q @ K.T` scores), softmax normalizes to probabilities, and the values get averaged in that mixture. One matmul, one operation, one geometric picture — a weighted convex combination of rows.</>
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "For A of shape (5, 3) and B of shape (3, 7), the shape of A @ B is:",
+      choices: [
+        { text: "(3, 3)" },
+        { text: "(5, 7)", correct: true },
+        { text: "(5, 3)" },
+        { text: "Undefined" },
+      ],
+      explanation: <>(m × n) · (n × p) → (m × p). Here m = 5, n = 3, p = 7, so the product is (5, 7). The inner dimension (3) must match — it does — and vanishes; the outer dimensions (5 and 7) survive as the result shape.</>
+    },
+    {
+      q: "The entry (AB)ᵢⱼ equals:",
+      choices: [
+        { text: "Aᵢⱼ · Bᵢⱼ (element-wise product)" },
+        { text: "The dot product of row i of A and column j of B", correct: true },
+        { text: "Σₖ Aₖᵢ · Bⱼₖ" },
+        { text: "The (i, j) entry of A + B" },
+      ],
+      explanation: <>The row-column definition: (AB)ᵢⱼ = Σₖ Aᵢₖ Bₖⱼ = row i of A dotted with column j of B. Element-wise product is the Hadamard product (`A * B` in NumPy) — a different operation that requires matching shapes, not the (m×n)·(n×p) shape rule.</>
+    },
+    {
+      q: "Matrix multiplication is:",
+      choices: [
+        { text: "Commutative and associative" },
+        { text: "Non-commutative and non-associative" },
+        { text: "Non-commutative but associative", correct: true },
+        { text: "Commutative but non-associative" },
+      ],
+      explanation: <>AB ≠ BA in general (non-commutative), but (AB)C = A(BC) always (associative). Non-commutativity is why the order of neural network layers matters. Associativity is why LoRA can materialize its low-rank update either as one big matrix or as two matmuls — the same answer, different compute cost.</>
+    },
+    {
+      q: "(A @ B).T equals:",
+      choices: [
+        { text: "A.T @ B.T" },
+        { text: "B.T @ A.T", correct: true },
+        { text: "A @ B.T" },
+        { text: "(B @ A).T" },
+      ],
+      explanation: <>Transposing a product reverses the order: (AB)ᵀ = BᵀAᵀ. The shape argument forces this: if A is m×n and B is n×p, then (AB)ᵀ is p×m, and the only product of the transposes with shape p×m is (p×n)(n×m) = BᵀAᵀ. A.T @ B.T would require B.T's columns (m) to match A.T's rows (n) — usually wrong.</>
+    },
+    {
+      q: "In the outer-product view, AB (with A of shape (m, n) and B of shape (n, p)) equals:",
+      choices: [
+        { text: "The product of n scalars — one per column of A dotted with a row of B" },
+        { text: "The sum of n rank-1 outer products, one per shared inner index", correct: true },
+        { text: "The Hadamard product of A and B when they're the same shape" },
+        { text: "The matrix whose (i, j) entry is Σₖ Aᵢₖ + Bₖⱼ" },
+      ],
+      explanation: <>AB = sum over k=1..n of A[:, k] outer B[k, :]. Each term is a rank-1 m×p matrix (an outer product of a column of A with a row of B), and there are n such terms. This is the view underneath SVD, PCA, LoRA, and every low-rank approximation — recognizing AB as a *sum* of rank-1 pieces is what makes "keep only the biggest few" a meaningful compression strategy.</>
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/matrices-transformations/matrix-multiplication" title="Matrix multiplication — three views" />
