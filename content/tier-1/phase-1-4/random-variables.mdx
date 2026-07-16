@@ -144,147 +144,239 @@ print("\\nWithout the |dx/dy| = 1/y Jacobian, the transformed density would not 
   ]}
 />
 
-<Motivation title="Random variables turn events into numbers you can compute with">
+<Motivation title="Random variables let you compute with 'the number you get' instead of 'the outcome that happened'">
 
-A random variable X is just a function from the sample space Ω to numbers. It gives you a scalar (or vector) label for every outcome, which is the shape you actually need to compute expectations, losses, distributions of predictions, and every other numerical quantity in ML. Sample-space language talks about events (subsets); random-variable language talks about *the number you get* — and numbers are what our tools eat.
+Sample-space probability talks about *outcomes* — "the coin landed heads," "the customer clicked," "the die rolled a 4-or-a-6." But when you actually build a model, you want to compute **numbers**: an average loss, a predicted score, an error bar. A **random variable** is the bridge: it is a rule that assigns a number to every outcome. Once outcomes are numbers, you can add them, average them, differentiate over them, and feed them to code.
 
-Every distribution you meet in ML lives inside this framework:
+Concretely, a random variable X is a function
 
-- **Softmax output** = a random variable over the vocabulary, with PMF P(next token = wᵢ) equal to the softmax weight of the i-th logit. Every LLM sampling step draws one realization of this RV.
-- **Diffusion noise ε ~ 𝒩(0, I)** = a multivariate continuous random variable. The forward diffusion process is a scheduled sequence of noisy random variables; the reverse process learns to invert it.
-- **Model prediction error** = a random variable indexed by data point. Its distribution controls loss, calibration, and confidence intervals.
-- **Latent code z in a VAE** = a continuous random variable, usually parameterized as 𝒩(μ, σ²) per data point.
+$$
+X : \Omega \to \mathbb{R}
+$$
 
-You need two representations. For **discrete** RVs (categorical, count, tokenwise), a **probability mass function** P(X = x) that assigns weight to each possible value. For **continuous** RVs (real-valued, on ℝ or ℝⁿ), a **probability density function** f(x) that says how much probability is packed per unit length — and where P(X = x) = 0 for any single point, but ∫ f(x) dx over an interval gives a real probability. The **cumulative distribution function** F(x) = P(X ≤ x) unifies both.
+where Ω (capital omega) is the **sample space** — the set of every possible outcome — and ℝ is the real number line. If Ω = &#123;heads, tails&#125;, then X(heads) = 1 and X(tails) = 0 is a random variable. Nothing "random" about the function itself — the randomness comes from *which* outcome nature picks; the function just tells us what number that outcome corresponds to.
 
-This chapter builds those three tools (PMF, PDF, CDF) plus the change-of-variables formula that underpins every normalizing-flow and diffusion architecture.
+Once you have numbers, the questions you can ask fall into three families, each answered by one representation:
+
+- **"What is the chance of each specific number?"** → answered by a **probability mass function (PMF)** when the values are countable (die rolls, token IDs, click / no-click). Notation: p(x) = P(X = x).
+- **"What is the chance of landing near this value?"** → answered by a **probability density function (PDF)** when the values are continuous (heights, embeddings, noise samples). Notation: f(x). The chance of any *exact* value is zero; chance lives on intervals.
+- **"What is the chance of landing at or below this value?"** → answered by a **cumulative distribution function (CDF)**, notation F(x) = P(X ≤ x). Works for both discrete and continuous — it is the universal representation.
+
+For a GenAI engineer, this trio comes up everywhere: the next-token distribution an LLM samples from (PMF over a vocabulary), the Gaussian noise a diffusion model injects (PDF on ℝⁿ), the calibration diagnostic that asks whether predicted probabilities look uniform when transformed through their CDF. This chapter builds the trio + one operation you will use over and over: how a distribution transforms when you push it through a function (the **change-of-variables** formula).
 
 </Motivation>
 
-<Intuition title="A random variable is a labeling of outcomes; a distribution is the histogram of those labels weighted by probability">
+<Intuition title="Picture: paint a number on every outcome. The distribution is the pattern of numbers you'd see over many repeats.">
 
-Picture the sample space Ω one more time. A random variable X paints a number on every outcome. If you draw an outcome from Ω according to the probability measure P, X gives you a number — that number is itself random. The **distribution of X** is the pattern of numbers you&rsquo;d see if you repeated the experiment many times, weighted by their probabilities.
+Imagine the sample space Ω as a bag of every possible outcome for an experiment — say, every possible pair of dice rolls, or every possible 512-token continuation an LLM could produce. A random variable X is a **paint job**: it writes a number on each outcome in the bag. Draw an outcome at random and read the number — that number is itself random, because the outcome was.
 
-Discrete: the paint job labels outcomes with values from a countable set. The distribution is a histogram — a PMF. Sum of bars = 1.
+Now repeat the experiment many times. Some numbers show up often, some rarely. The **distribution of X** is the long-run pattern of *which numbers appear and how often* — literally a histogram if you ran the experiment forever.
 
-Continuous: the paint job labels outcomes with real numbers. The distribution is a smooth curve — a PDF. Area under the curve = 1. No single point has positive probability, but intervals do.
+- **Discrete** paint job: the numbers land in a **countable** set (a set you can list one by one — the integers 0, 1, 2, …, or the vocabulary of an LLM). The distribution is a histogram — one bar per possible number. The bar heights are the **PMF** p(x). All bars are ≥ 0, and the bars sum to 1 (something has to happen).
+- **Continuous** paint job: the numbers can be any real number in some range. The distribution is a **smooth curve** — no jumps, no gaps. This curve is the **PDF** f(x). The *area* under the curve equals 1. The chance of hitting any exact point is 0 (points are infinitely narrow); chance shows up as area over an *interval*.
 
-The **CDF** F(x) = P(X ≤ x) works for both: how much total probability lies at or below the value x? In the discrete case it&rsquo;s a step function; in the continuous case it&rsquo;s a smooth increasing function. The PDF is the derivative of the CDF (where the derivative exists); the PMF is the size of each jump in the CDF.
+The **CDF** F(x) = P(X ≤ x) answers "how much of the total probability is at or below x?". It works in either world:
+
+- Discrete case: F is a **step function** — flat between values, jumps up by p(x) each time you cross a value.
+- Continuous case: F is a **smooth increasing curve** from 0 to 1. Its slope (the **derivative** — how fast it is rising) is exactly the PDF f(x). So f = F′.
+
+Because the CDF is one clean object that always exists, it is the "universal representation" — every question about probabilities of intervals can be answered as F(b) − F(a).
 
 </Intuition>
 
-<Recall term="Sample space">
+<Recall term="Sample space Ω">
 
-Ω = the set of all possible outcomes. A random variable is a function X: Ω → ℝ. Every event about X (say &ldquo;X > 5&rdquo;) corresponds to a subset of Ω (all the outcomes whose X-value is greater than 5). Probabilities of RV events come from the underlying probability measure on Ω.
+The **sample space Ω** (Greek capital omega) is the set of every outcome that could happen in one run of your experiment. Two dice → Ω = &#123;(1,1), (1,2), …, (6,6)&#125;, so |Ω| = 36. A coin flip → Ω = &#123;H, T&#125;. An LLM producing a next token → Ω is the vocabulary. Every question about a random variable X (like "X > 5") is really a question about a **subset** of Ω — the outcomes whose X-value satisfies the condition. Probabilities for those subsets come from the underlying probability rule P assigned to Ω.
+
+</Recall>
+
+<Recall term="Distribution">
+
+The **distribution** of a random variable X is the full description of "which values X takes, and with what probabilities." For a discrete X, the distribution *is* the PMF. For a continuous X, it *is* the PDF (equivalently, the CDF). Two RVs with the same distribution are, for all probabilistic purposes, identical — even if their underlying sample spaces are different.
+
+</Recall>
+
+<Recall term="Countable vs uncountable">
+
+**Countable** = you can list the elements one by one, even if the list is infinite. Integers &#123;0, 1, 2, …&#125; are countable; so is the vocabulary of an LLM (finite → automatically countable). **Uncountable** = there are so many elements that no listing works, like every real number in an interval. Discrete RVs live on countable sets; continuous RVs on uncountable ones.
 
 </Recall>
 
 ## Discrete random variables and the PMF
 
-A **discrete random variable** takes values in a countable set — finite (a die roll) or countably infinite (a Poisson count). Its **probability mass function** is
+A **discrete random variable** takes values in a countable set — either finite (a die roll: values 1–6) or countably infinite (a **count** — how many events happened, values 0, 1, 2, …). The rule that tells you the probability of each value is the **probability mass function** (PMF):
 
 $$
 p(x) \;=\; P(X = x)
 $$
 
-for each value x in the support of X. It is a valid PMF iff two things hold:
+The **support** of X is the set of values x where p(x) > 0 — i.e., the numbers X can actually land on. A PMF is valid if and only if ("iff" is math shorthand for "if and only if" — both directions of implication) two conditions hold:
 
-- **Non-negativity**: p(x) ≥ 0 for every x.
-- **Normalization**: $\sum_x p(x) = 1$.
+- **Non-negativity**: p(x) ≥ 0 for every x. Probabilities cannot be negative.
+- **Normalization**: $\sum_x p(x) = 1$. Something must happen — the bars have to add up to a whole.
 
-Every probability question about X reduces to a sum of PMF values. P(X ∈ A) = Σ<sub>x ∈ A</sub> p(x). For X = sum of two dice, the PMF is a triangular histogram peaking at 7.
+Every probability question about X reduces to a **sum** of PMF values. For any set of values A, `P(X ∈ A) = sum over x ∈ A of p(x)`. Concrete example: if X = the sum of two fair dice, the PMF is a triangular histogram peaking at 7 (the most-likely sum) and dropping symmetrically to 1/36 at each end (only one way to get 2, only one way to get 12).
 
 <RunnableCode title="Building and using a PMF: sum of two dice" code={pmfCode} packages={["numpy"]} />
 
-**Common discrete RVs in ML.** Bernoulli (binary label), Binomial (count of successes), Categorical / Multinoulli (one-hot outcome from K classes — softmax lands here), Poisson (event counts per unit time). We&rsquo;ll catalog them in the next chapter.
+**A quick vocabulary of common discrete RVs you'll meet in ML** (the next chapter catalogues each one in detail; for now, know only the name → shape mapping):
+
+- **Bernoulli(p)** — one coin flip with success probability p. Values in &#123;0, 1&#125;. Every binary classification label is a Bernoulli.
+- **Binomial(n, p)** — how many successes in n independent Bernoulli(p) trials. Values in &#123;0, 1, …, n&#125;.
+- **Categorical (also called Multinoulli)** — one draw from K possible categories, with a probability for each. Values in &#123;1, 2, …, K&#125;. **This is what an LLM samples at each generation step** — a categorical over the vocabulary.
+- **Poisson(λ)** — how many events happened in a fixed window, when events arrive independently at average rate λ. Values in &#123;0, 1, 2, …&#125; (unbounded above).
 
 ## Continuous random variables and the PDF
 
-A **continuous random variable** takes values in an uncountable set, typically ℝ or a subset. For any specific value x, P(X = x) = 0 — there are simply too many points, and each carries no mass on its own. Probability instead lives on *intervals*, expressed via a **probability density function** f:
+A **continuous random variable** takes values in an *uncountable* set — usually the whole real line ℝ, or an interval like [0, 1]. Because there are infinitely many possible values crammed into any interval, the chance of hitting any **exact** value is zero: `P(X = 5.000000…) = 0`. Probability lives on **intervals**, and the tool that describes how it is spread is the **probability density function (PDF)**, written f(x). The rule is:
 
 $$
 P(a \leq X \leq b) \;=\; \int_a^b f(x) \, dx
 $$
 
-A valid PDF satisfies:
+The integral sign `∫ₐᵇ f(x) dx` just means "add up f(x) across all x from a to b" — mathematically, it is the **area under the curve of f between x = a and x = b**. (If you have not seen integrals before: for now, think of it as a smooth version of a sum; a later chapter on integration builds this from scratch.)
 
-- **Non-negativity**: f(x) ≥ 0 for every x.
-- **Normalization**: $\int_{-\infty}^{\infty} f(x) \, dx = 1$.
+A valid PDF has two properties, direct analogues of the PMF rules:
 
-**Density is not probability.** f(x) has units of probability *per unit x*, so it can be greater than 1 (a very narrow distribution has a very tall density). The number you should always ask for is the *integral over an interval*, not the density at a point.
+- **Non-negativity**: f(x) ≥ 0 for every x. The density curve never dips below zero.
+- **Normalization**: $\int_{-\infty}^{\infty} f(x) \, dx = 1$. The total area under the whole curve is 1 (something has to happen).
+
+**Density is NOT probability — this is the single trickiest idea in the chapter.** The value f(x) has units of "probability per unit of x." So if x is measured in metres, f(x) is "probability per metre." A very narrow, tall bump has a very large f(x) value — potentially much larger than 1 — but the *area* under it is still ≤ 1, so no rule is broken. Whenever you want an actual probability, integrate f over an interval; never quote f(x) itself as a probability.
 
 <RunnableCode title="Standard normal PDF: normalization, tail probabilities, samples" code={pdfCode} packages={["numpy", "scipy"]} />
 
-**Common continuous RVs in ML.** Uniform, Gaussian / normal, exponential, log-normal, Beta, Gamma, Dirichlet. All of these are cataloged in the next chapter. The Gaussian in particular is the workhorse: latent codes, weight initializations, gradient noise, most CLT-based analyses.
+**A quick vocabulary of common continuous RVs you'll meet in ML** (again, the next chapter goes into each one):
+
+- **Uniform(a, b)** — every value in [a, b] is equally likely. Flat PDF.
+- **Gaussian (also called Normal)** — the bell curve. Written 𝒩(μ, σ²), meaning "centred at μ, with spread σ." The single most important continuous distribution in ML — used for initialising neural network weights, modelling noise in diffusion models, and countless other places. (Reading `𝒩(0, I)` — the calligraphic N is just the letter used for "Normal," and `I` is the identity matrix, meaning "independent unit-variance noise in each dimension.")
+- **Exponential(λ)** — the time you wait between Poisson events. PDF drops off exponentially from 0.
+- **Log-normal** — what you get when you exponentiate a Gaussian. Positive-valued and skewed.
+- **Beta, Gamma, Dirichlet** — distributions used as **priors** in Bayesian inference (a prior is a distribution over an unknown parameter, before seeing data — covered in the MAP chapter). Beta puts probability on the interval [0, 1] (useful for probabilities themselves); Dirichlet does the same but for a whole probability vector.
 
 ## The CDF — the universal representation
 
-The **cumulative distribution function** is defined for any RV, discrete or continuous:
+The **cumulative distribution function** (CDF) is one clean object that works for every kind of RV — discrete, continuous, or a mix:
 
 $$
 F(x) \;=\; P(X \leq x).
 $$
 
-Properties:
+In words: F(x) is the probability of landing **at or below** the value x. It sweeps up all the probability mass from −∞ up through x.
 
-- Monotone non-decreasing.
-- F(−∞) = 0, F(+∞) = 1.
-- Right-continuous. For discrete RVs, F is a step function; for continuous, F is (usually) smooth and increasing.
-- **PDF is the derivative of the CDF** where it exists: f(x) = F′(x).
-- **PMF is the size of each jump** in the CDF at discrete atoms: p(x) = F(x) − F(x⁻).
-- **P(a &lt; X ≤ b) = F(b) − F(a)** — the most useful identity for interval probabilities.
+The properties that follow directly from the definition:
 
-The CDF is also the tool for **sampling from an arbitrary distribution**. If U ~ Uniform(0, 1), then X = F⁻¹(U) has CDF F. This inverse-CDF (or &ldquo;quantile&rdquo;) method is how libraries generate samples from any distribution whose CDF you can invert.
+- **Monotone non-decreasing**: as x grows, F(x) can only go up or stay flat — never down. (Makes sense: you cannot un-accumulate probability.)
+- **F(−∞) = 0, F(+∞) = 1**: nothing to the left of everything; everything to the left of infinity.
+- **Right-continuous**: at a jump, F takes the value from the right. (This is a technicality — for continuous RVs there are no jumps at all; for discrete RVs it just tells you which value F takes exactly *at* the jump.)
+- **Discrete case: step function.** F is flat between values, jumps up by p(x) whenever you cross a value in the support.
+- **Continuous case: smooth increasing curve.** The **slope** of F at x is the density f(x) — that is, `f(x) = F′(x)`, where F′ is the derivative. So knowing the CDF gives you the PDF by differentiation, and knowing the PDF gives you the CDF by integration.
+- **P(a &lt; X ≤ b) = F(b) − F(a)** — the single most useful identity. Any interval probability is just a difference of CDF values.
+
+The CDF is also the tool for **turning uniform random numbers into samples from any distribution you want** — the trick that basically every random-sampling library uses under the hood:
+
+**Inverse-CDF sampling** (also called the **quantile method**). The inverse function F⁻¹ (read "F inverse") is the **quantile function**: given a probability level q ∈ [0, 1], F⁻¹(q) returns the value x such that P(X ≤ x) = q. So F⁻¹(0.5) is the median; F⁻¹(0.95) is the 95th percentile. The recipe:
+
+1. Draw U from Uniform(0, 1) — trivial for any programming language.
+2. Compute X = F⁻¹(U).
+
+Then X has CDF F. Why does this work? For any y, `P(X ≤ y) = P(F⁻¹(U) ≤ y) = P(U ≤ F(y)) = F(y)` — exactly the CDF we wanted. This is *why* every sampler for a distribution with an invertible CDF (exponential, uniform, Cauchy, …) is a one-liner.
 
 <RunnableCode title="Empirical vs theoretical CDF; inverse-CDF for quantiles" code={cdfCode} packages={["numpy", "scipy"]} />
 
 ## Change of variables — how transformations reshape distributions
 
-If Y = g(X) for a smooth, monotone, invertible function g, the density of Y is
+You have a random variable X with a known density f_X, and you push it through some function g to get a new random variable Y = g(X). What is the density of Y?
+
+Three assumptions on g to keep the machinery clean:
+
+- **Smooth** — no jumps or corners (you can differentiate g).
+- **Monotone** — either always increasing or always decreasing. Not "goes up then down."
+- **Invertible** — every y in the output corresponds to exactly one x in the input, so there is a well-defined inverse function g⁻¹ (satisfying `g⁻¹(g(x)) = x`).
+
+Under those conditions:
 
 $$
 f_Y(y) \;=\; f_X(g^{-1}(y)) \cdot \left| \frac{d g^{-1}(y)}{dy} \right|.
 $$
 
-The `|dg⁻¹/dy|` factor is called the **Jacobian correction**. Without it, densities don&rsquo;t transform properly — they wouldn&rsquo;t integrate to 1 after the transform. The intuition: `g` compresses or stretches space; the density has to compensate so that mass is preserved.
+Read the formula piece by piece: to find the density of Y at some value y, (1) figure out which input x maps to it via x = g⁻¹(y); (2) look up the density there, f_X(g⁻¹(y)); (3) multiply by `|dg⁻¹/dy|`, the absolute value of the derivative of the inverse — the **Jacobian correction**.
 
-**Multidimensional generalization.** For Y = g(X) with X, Y ∈ ℝⁿ:
+**Why the correction?** The function g stretches or compresses space. If g takes a tiny slice of the x-axis and stretches it into a wide slice of the y-axis, the density in y-space has to *dilute* (spread the same probability over more space). If g compresses a wide slice into a narrow one, the density has to *concentrate*. The Jacobian factor `|dg⁻¹/dy|` is exactly the local stretch factor that keeps total probability equal to 1 after the transformation. Without it, the transformed density would not integrate to 1 — it would double-count or lose probability wherever g was uneven.
+
+(In one line: "density = probability per unit length," and change of variables changes what "unit length" means; the Jacobian is the conversion factor.)
+
+**Multidimensional generalization.** If X and Y are both n-dimensional (bold letters indicate vectors), and g is a smooth invertible map ℝⁿ → ℝⁿ:
 
 $$
 f_Y(\mathbf{y}) \;=\; f_X(g^{-1}(\mathbf{y})) \cdot |\det J_{g^{-1}}(\mathbf{y})|
 $$
 
-where J is the Jacobian matrix of g⁻¹. This determinant term is *exactly* what makes normalizing flows (RealNVP, Glow, IAF) trainable: the flow architecture ensures the Jacobian is easy to compute — typically triangular so its determinant is the product of diagonal entries — while allowing arbitrary invertible transforms of a base distribution into a complex learned one.
+The **Jacobian matrix** `J_{g⁻¹}(y)` is an n × n matrix of partial derivatives — entry (i, j) is the derivative of the i-th output of g⁻¹ with respect to the j-th input. Its **determinant** `det J` is a single number that measures how much g⁻¹ locally stretches n-dimensional volume. In 1D, a matrix reduces to a scalar and this reduces to the formula above.
 
-**Worked example**: X ~ 𝒩(0, 1), Y = exp(X). Then g⁻¹(y) = log(y) with derivative 1/y. So $f_Y(y) = \frac{1}{y\sqrt{2\pi}} \exp\left(-\frac{(\log y)^2}{2}\right)$ — the log-normal density.
+Deep-learning architectures called **normalizing flows** (a class of neural networks that transform a simple base distribution into a complex learned one; listed in NewConcepts above) are literally designed around this formula. They construct g as a sequence of layers whose Jacobians are triangular — that is, matrices with zeros above the diagonal — because for a triangular matrix the determinant equals the product of the diagonal entries, which is O(n) to compute instead of O(n³). That trick is what makes flows trainable at all.
+
+**Worked example.** Let X ~ 𝒩(0, 1) (standard normal) and Y = exp(X). Then g(x) = eˣ, so g⁻¹(y) = log(y), and the derivative of log(y) is 1/y. Plugging in:
+
+$$
+f_Y(y) \;=\; \underbrace{\frac{1}{\sqrt{2\pi}} \exp\!\left(-\frac{(\log y)^2}{2}\right)}_{f_X(\log y)} \cdot \underbrace{\frac{1}{y}}_{|d\log y / dy|}
+$$
+
+for y > 0 (and 0 for y ≤ 0, since exp(anything) is positive). That is the **log-normal** density — you have just derived it from the Gaussian by change of variables.
 
 <RunnableCode title="Change of variables: X ~ N(0,1), Y = exp(X) is log-normal" code={changeOfVarsCode} packages={["numpy", "scipy", "matplotlib"]} />
 
 ## The traps that matter
 
-**Density is not probability.** A density value f(x) has units of &ldquo;probability per unit x.&rdquo; It can be larger than 1. Never quote f(x) as if it were a probability. Always integrate.
+**Density is not probability.** Repeating this because it burns nearly everyone once. `f(x)` has units of "probability per unit x," so it can be arbitrarily large (a very narrow bump has a very tall peak). Never quote `f(x)` as a probability. If someone asks for a probability, integrate f over an interval.
 
-**Careful with discrete vs continuous when mixing.** If your RV has both point-mass atoms (e.g., a zero-inflated model with P(X = 0) &gt; 0) and continuous portion, use the CDF or a mixture representation. Pure PDF/PMF language breaks.
+**Mixing discrete and continuous — beware pure PMF/PDF language.** Some real-world RVs have both a **point-mass** (a specific value that happens with positive probability, like "$0 rainfall today") *and* a continuous portion (positive rainfall follows a smooth density). Such distributions are called **zero-inflated** (or more generally, **mixed**). Neither pure PMF nor pure PDF describes them; use the CDF (which handles both by jumping at the point-mass and sloping elsewhere) or write the distribution as a **mixture** — `α · (point mass at 0) + (1 − α) · (continuous density)`.
 
-**The Jacobian is mandatory in change of variables.** Every normalizing flow paper starts with `log p(x) = log p_z(z) + log |det J|`. Forget the determinant and your log-likelihoods will be off by an amount that depends on the transform.
+**The Jacobian is not optional in change of variables.** Every paper on generative models that uses change of variables has a line like `log p(x) = log p_z(z) + log |det J|`. Forget the determinant and your **log-likelihood** (the log of the probability the model assigns to the data — the quantity you would maximise to train it) will be wrong by an amount that depends on the transformation. Silent bug, hard to catch.
 
-**Sampling ≠ evaluating the density.** Some models (VAEs, normalizing flows) let you evaluate the density; some (score-based diffusion) only let you sample. Both are useful; know which one your model supports.
+**Sampling and density evaluation are different capabilities.** For some models you can compute f(x) at a given x — that is called **density evaluation**. For others you can only produce random draws — that is **sampling**. Normalizing flows and VAEs (see NewConcepts) let you do both; **score-based diffusion** (a diffusion-model variant that learns the gradient of log-density instead of the density itself) can sample but does not give you f(x) directly. Know which of the two your model supports before designing the pipeline around it.
 
-**Support matters.** The support of an RV is the set where its density (or mass) is positive. Log-normal has support (0, ∞); trying to evaluate its density at a negative number gives zero or NaN in a bad library, not a helpful error.
+**Watch the support.** The **support** of an RV is the set where its density (or mass) is positive. The log-normal has support (0, ∞) — you can never draw a negative number from it. Some libraries silently return `NaN` (or worse, a small positive number) when you evaluate a density outside its support; wrap such calls or assert on the input range.
 
-**Continuous CDFs are always continuous; PDFs may not be.** F is smooth iff the underlying density is (roughly) continuous. Distributions with sharp cutoffs (uniform, exponential at zero) have PDFs with jumps but CDFs that stay continuous.
+**Continuous CDFs are continuous, but PDFs can have jumps.** F is always a continuous curve when X is continuous. But f = F′ can have jumps at the boundaries of the support — the Uniform(0, 1) PDF is flat at 1 on [0, 1] and 0 outside, so it jumps at both endpoints even though its CDF is a smooth ramp.
 
 <RealWorldML title="Random variables everywhere: LLM sampling, diffusion noise, VAE latents">
 
-Three canonical GenAI systems, each with a distinct random-variable structure:
+Three canonical GenAI systems, each of which is really "some random variable, with some PMF or PDF, that we sample from." A one-line unpack of each piece of jargon on first use.
 
-**LLM next-token sampling.** At each generation step, the model produces logits over the vocabulary, softmax turns them into a categorical PMF, and the sampled token is a *discrete* random variable with that PMF. Temperature scales the logits (T &lt; 1 sharpens; T &gt; 1 flattens); top-k restricts the support; top-p (nucleus) restricts to the smallest set whose cumulative CDF exceeds p. Every decoding decision is a manipulation of the PMF or its CDF.
+**1. LLM next-token sampling (a discrete RV).**
 
-**Diffusion models.** The forward process at each step adds Gaussian noise ε ~ 𝒩(0, I): a *continuous* random variable, isotropic, mean zero, with a known PDF. The full noisy image x_t is a random variable whose distribution is a scaled + shifted version of x₀ plus noise. Training is: given a noisy x_t, predict the noise ε (equivalently, the score ∇ log p(x_t)). At sampling time, you invert this process — Markov chain of RVs going from pure noise back to a clean image.
+At each generation step, an LLM produces a vector of **logits** — one real number per word in the vocabulary. (A logit is just "the raw un-normalised score the model outputs for that word." Bigger logit = model thinks the word is more likely.) A function called **softmax** turns the logit vector into a proper probability distribution over the vocabulary — it exponentiates each logit and divides by the sum, so all entries end up in [0, 1] and add to 1. The result is a categorical PMF `p(word i) = exp(logit_i) / Σⱼ exp(logit_j)`. The next token is a **discrete random variable** drawn from this PMF.
 
-**VAE latent codes.** For each input x, the encoder outputs μ(x) and log σ²(x); the latent z is sampled as z = μ(x) + σ(x) · ε with ε ~ 𝒩(0, I) — the *reparameterization trick* that makes gradients flow through the sampling operation. z is a *continuous* random variable whose density is a Gaussian centered at μ(x). The decoder maps z back to reconstruction. The whole framework rests on interpreting z as an RV and its distribution as a learnable posterior q_ϕ(z | x).
+Every "decoding knob" you have ever heard of is a manipulation of this PMF or its CDF:
 
-The unifying principle: **every generative model is a change of variables from a simple base RV (Gaussian, uniform, or categorical) to a complex target distribution.** Diffusion learns a stochastic change of variables; flows learn a deterministic invertible one; VAEs learn a conditional latent variable. Change-of-variables + Jacobian corrections + density evaluation are the mathematical toolkit that runs the whole show.
+- **Temperature T.** Divide all logits by T before softmaxing. T &lt; 1 makes the distribution sharper (concentrates probability on the top few words → less random); T &gt; 1 flattens it (more random).
+- **Top-k.** Zero out every word except the k with the highest probability, then renormalise. Shrinks the **support** of the PMF to a fixed size.
+- **Top-p (nucleus).** Sort by probability descending, take the smallest set whose CDF crosses p (say 0.9), zero out the rest, renormalise. Shrinks the support adaptively — few candidates when the model is confident, many when uncertain.
+
+**2. Diffusion models (continuous RVs on ℝⁿ).**
+
+A diffusion model trains itself to reverse a noise-injection process. The **forward process** takes a clean image x₀ and at each timestep t adds a small amount of **Gaussian noise** ε — a continuous random variable drawn from `𝒩(0, I)`. Reading that notation: `𝒩` = normal (Gaussian); `0` = the mean vector (zero in every dimension); `I` = the identity covariance matrix, meaning each pixel gets independent noise of unit variance. Because the noise has the same variance in every direction, we say it is **isotropic** (Greek "iso-tropic" = "same in every direction").
+
+After T steps you have pure noise x_T. Training teaches a neural network: given a noisy x_t, predict ε (the noise added). This is equivalent to learning the **score** — a fancy name for the gradient of the log-density, `∇ log p(x_t)`, which points from low-probability regions toward high-probability ones. At **sampling time** you reverse the process: start from pure noise, use the learned score to step slightly toward more-likely-looking images, repeat until you land at a clean sample.
+
+The whole trajectory `x₀ → x₁ → … → x_T` is a **Markov chain** of random variables — "Markov" just means each step depends only on the previous state, not the whole history. Every diffusion checkpoint you have ever downloaded stores parameters for one such reverse-time Markov chain.
+
+**3. VAE latent codes (a conditional continuous RV).**
+
+A **Variational Autoencoder** (VAE — see NewConcepts) has two neural nets. The **encoder** looks at an input x (say an image) and produces two vectors: a mean μ(x) and a log-variance log σ²(x). Together those define a Gaussian distribution `𝒩(μ(x), σ²(x))` over a **latent** vector z — "latent" meaning "not observed directly, inferred from x."
+
+To sample z during training you cannot just call a random-number generator, because you need **gradients** (derivatives with respect to μ and σ) to flow back through the sampling step. The **reparameterisation trick** (see NewConcepts) fixes this by writing `z = μ(x) + σ(x) · ε` where `ε ~ 𝒩(0, I)` is fresh noise sampled outside the computation graph. Now z is a deterministic function of μ, σ, and the external random ε — gradients flow through μ and σ cleanly.
+
+The whole VAE framework treats z as a random variable whose distribution `q_ϕ(z | x)` is called the **approximate posterior**. (A **posterior** is a distribution over an unknown quantity *given observed data* — introduced formally in the Bayes-theorem and MAP chapters. Read `q_ϕ(z | x)` as "the encoder network with parameters ϕ approximates the true posterior over the latent z given input x.") A **decoder** network maps z back to a reconstruction of x.
+
+**The unifying picture.** Every generative model is *change of variables from a simple base RV to a complex target*:
+
+- **Normalizing flows**: deterministic invertible g; you can evaluate f(x) with a Jacobian correction and you can sample by pushing base samples through g.
+- **VAEs**: g is stochastic (adds noise inside), invertibility is only approximate; density is estimated, not exact.
+- **Diffusion**: g is a long chain of small noise steps and their learned inverses.
+- **LLMs**: the "change of variables" is discrete — a softmax mapping logits (real-valued, easy to model) into a categorical over the vocabulary (structured, what you actually want).
+
+Change of variables + Jacobians + PMF/PDF/CDF are the mathematical toolkit running underneath all four.
 
 </RealWorldML>
 
