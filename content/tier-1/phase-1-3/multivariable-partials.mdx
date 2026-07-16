@@ -88,6 +88,14 @@ print(f"gradient norm ||g|| = {np.linalg.norm(g):.4f}  <- the LARGEST directiona
   { href: "/learn/mathematics/vectors-space/projections-orthogonality", label: "Projections & orthogonality", blurb: "The gradient is perpendicular to the level set at every point — orthogonality is the geometric heart of gradient descent." },
 ]} />
 
+<NewConcepts
+  concepts={[
+    { name: "LLM (large language model)", blurb: "neural networks with billions of parameters. Each parameter is one axis of the loss landscape — a canonical multivariable-calculus setting." },
+    { name: "Adam / SGD optimizers", blurb: "the algorithms that update all parameters of a network simultaneously using the gradient vector. Deep-dive in Phase 1.6." },
+    { name: "linear regression via gradient descent", blurb: "the simplest end-to-end use of the multivariable gradient — the RealWorldML case study of this chapter." },
+  ]}
+/>
+
 <Motivation title="Every parameter of an LLM is one axis in a giant space">
 
 A modern LLM has hundreds of billions of parameters. The loss L is a scalar function of all of them: give the model a set of weights, it computes a loss. The optimization job is: **for each weight, how much does the loss change if I nudge just this one weight by a tiny amount?**

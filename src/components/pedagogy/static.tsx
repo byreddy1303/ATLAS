@@ -72,6 +72,83 @@ export function Prerequisites({
   );
 }
 
+/* ————————————————————— NewConcepts (out-of-curriculum heads-up) ————————————————————— */
+
+export function NewConcepts({
+  intro,
+  concepts = [],
+}: {
+  intro?: React.ReactNode;
+  concepts?: { name: string; blurb?: string }[];
+}) {
+  const defaultIntro = (
+    <>
+      This chapter references ideas that <b>haven&rsquo;t been covered</b> in the
+      earlier chapters of this curriculum. Skim them from an external source
+      (Wikipedia, a textbook, or a quick search) before continuing — then come
+      back and read on.
+    </>
+  );
+  return (
+    <section className="not-prose my-10">
+      <header className="mb-4 flex items-baseline gap-3">
+        <span
+          className="font-editorial text-[42px] leading-none"
+          style={{ color: "var(--rose)" }}
+        >
+          ⚑
+        </span>
+        <div>
+          <div className="label-mono" style={{ color: "var(--rose)" }}>
+            § New to you
+          </div>
+          <h3 className="mt-1 text-[20px] font-bold tracking-tight">
+            Look these up before continuing
+          </h3>
+        </div>
+      </header>
+      <div
+        className="relative overflow-hidden rounded-2xl border p-5"
+        style={{
+          borderColor: "color-mix(in oklch, var(--rose) 40%, transparent)",
+          background:
+            "color-mix(in oklch, var(--rose) 8%, transparent)",
+        }}
+      >
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -right-14 -top-14 h-32 w-32 rounded-full opacity-30 blur-2xl"
+          style={{ background: "var(--rose)" }}
+        />
+        <div className="relative">
+          <div className="mb-4 max-w-[68ch] text-[14.5px] leading-[1.6] text-ink-2">
+            {intro ?? defaultIntro}
+          </div>
+          {concepts.length ? (
+            <ul className="grid gap-2.5 md:grid-cols-2">
+              {concepts.map((c) => (
+                <li
+                  key={c.name}
+                  className="rounded-xl border border-line bg-bg-2 p-3.5"
+                >
+                  <div className="text-[14.5px] font-semibold text-ink">
+                    {c.name}
+                  </div>
+                  {c.blurb ? (
+                    <div className="mt-1 text-[13px] leading-[1.55] text-ink-2">
+                      {c.blurb}
+                    </div>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 /* ————————————————————— StudyDepth (drill vs. skim) ————————————————————— */
 
 export function StudyDepth({

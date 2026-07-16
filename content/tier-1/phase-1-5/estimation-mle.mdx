@@ -1,0 +1,524 @@
+---
+title: Estimation & maximum likelihood
+tier: 1
+phase: "1.5"
+---
+
+export const estimatorCode = `# An estimator is a function of the data that produces a guess for a parameter.
+# Compare two estimators of the mean of iid samples from a distribution.
+import numpy as np
+rng = np.random.default_rng(0)
+
+# True population: N(mu = 5, sigma^2 = 4).
+true_mu = 5.0
+n = 30
+
+# Estimator 1: sample mean.  Unbiased, consistent.
+# Estimator 2: median.  Also unbiased and consistent for a symmetric distribution,
+#              but with LARGER variance than the mean for Gaussian data.
+n_reps = 5000
+means, medians = [], []
+for _ in range(n_reps):
+    x = rng.normal(true_mu, 2.0, size=n)
+    means.append(x.mean())
+    medians.append(np.median(x))
+
+print(f"Estimator: sample mean")
+print(f"  mean of estimator across {n_reps} experiments = {np.mean(means):.4f}  (should equal true_mu = 5)")
+print(f"  variance of estimator                                    = {np.var(means):.4f}")
+
+print(f"\\nEstimator: sample median")
+print(f"  mean of estimator                                        = {np.mean(medians):.4f}")
+print(f"  variance of estimator                                    = {np.var(medians):.4f}")
+
+# Efficiency = variance ratio.  For Gaussian data, mean is more efficient than median.
+efficiency = np.var(means) / np.var(medians)
+print(f"\\nVariance ratio (mean / median) = {efficiency:.4f}")
+print("For Gaussian data, the sample mean has variance ~2/pi ~= 0.637 of the median's variance.")
+print("=> The mean is a more EFFICIENT estimator (smaller variance) for Gaussian populations.")`;
+
+export const likelihoodCode = `# Likelihood function: given data D and a parameter theta, L(theta) = P(D | theta).
+# For iid data, L(theta) = product of per-sample densities.
+# Log-likelihood: sum of log-densities.  Easier to work with (turns products into sums,
+# avoids underflow, and gradients become simpler).
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import norm
+rng = np.random.default_rng(0)
+
+# Observed data: 20 samples from N(mu = 3, sigma = 1).
+data = rng.normal(3.0, 1.0, size=20)
+print(f"Data (n = {len(data)}): mean = {data.mean():.4f}, std = {data.std():.4f}")
+
+# Try a grid of candidate values for mu (assume known sigma = 1).
+mu_grid = np.linspace(0, 6, 300)
+log_likelihood = np.array([np.sum(norm.logpdf(data, loc=mu, scale=1.0)) for mu in mu_grid])
+mle = mu_grid[np.argmax(log_likelihood)]
+
+print(f"\\nMLE for mu (grid search) = {mle:.4f}")
+print(f"Sample mean               = {data.mean():.4f}")
+print("(For a Gaussian with known sigma, the MLE for mu is exactly the sample mean.)")
+
+# Visualize the log-likelihood curve.  Peaks at MLE; curvature = precision.
+fig, ax = plt.subplots(figsize=(6.4, 3.6), facecolor="none")
+ax.set_facecolor("#0f0f14")
+ax.plot(mu_grid, log_likelihood, color="#c4f04b", lw=2)
+ax.axvline(mle, color="#f5cf3d", ls="--", label=f"MLE = {mle:.3f}")
+ax.axvline(3.0, color="#8a8a82", ls=":", label="true mu = 3")
+ax.set_xlabel("mu (parameter guess)", color="#dcdcd6")
+ax.set_ylabel("log-likelihood", color="#dcdcd6")
+ax.set_title("Log-likelihood function; MLE = argmax", color="#dcdcd6")
+ax.legend(facecolor="#181820", edgecolor="#2a2a35", labelcolor="#dcdcd6")
+ax.tick_params(colors="#dcdcd6")
+for spine in ax.spines.values():
+    spine.set_color("#2a2a35")
+plt.tight_layout()
+plt.show()`;
+
+export const mleBernoulliCode = `# MLE for Bernoulli(p): derive by hand, then verify numerically.
+# Data: n coin flips, k of which are heads (successes).
+# L(p) = product of p^(x_i) * (1-p)^(1-x_i) = p^k * (1-p)^(n-k)
+# log L(p) = k * log(p) + (n - k) * log(1 - p)
+# d/dp log L = k/p - (n-k)/(1-p) = 0
+# =>  k(1-p) = (n-k)p  =>  k - kp = np - kp  =>  k = np  =>  p = k / n.
+# MLE for a Bernoulli's success probability is just the empirical frequency.
+import numpy as np
+from scipy.optimize import minimize_scalar
+rng = np.random.default_rng(0)
+
+# Simulate a biased coin with true p = 0.35, observe 100 flips.
+true_p = 0.35
+n = 100
+data = rng.binomial(1, true_p, size=n)
+k = data.sum()
+
+# Closed-form MLE.
+p_mle = k / n
+print(f"Data: {k} heads in {n} flips.")
+print(f"Closed-form MLE: p_hat = k/n = {p_mle:.4f}")
+
+# Verify by numerical optimization of the negative log-likelihood.
+def neg_log_likelihood(p):
+    if p <= 0 or p >= 1:
+        return np.inf
+    return -(k * np.log(p) + (n - k) * np.log(1 - p))
+
+result = minimize_scalar(neg_log_likelihood, bounds=(1e-6, 1 - 1e-6), method="bounded")
+print(f"Numerical MLE (via scipy):                {result.x:.4f}")
+print(f"True parameter (would be unknown in practice): {true_p}")
+
+# The MLE is a random variable -- its value depends on the sample.
+# For large n, MLE for Bernoulli has variance p*(1-p)/n (Cramer-Rao bound).
+CRB_var = true_p * (1 - true_p) / n
+print(f"\\nCramer-Rao lower bound for Var(p_hat): {CRB_var:.6f}")
+
+# Verify empirically by repeating the experiment 5000 times.
+mles = [rng.binomial(1, true_p, size=n).sum() / n for _ in range(5000)]
+print(f"Empirical Var(p_hat) over 5000 experiments: {np.var(mles):.6f}   (matches CRB up to sampling noise)")`;
+
+export const mleGaussianCode = `# MLE for Gaussian N(mu, sigma^2) with iid data x_1, ..., x_n.
+# log L(mu, sigma^2) = sum_i log( (1 / (sigma * sqrt(2*pi))) * exp(-(x_i - mu)^2 / (2 sigma^2)) )
+#                    = -n/2 * log(2*pi*sigma^2) - sum_i (x_i - mu)^2 / (2 sigma^2)
+# Take partial derivatives:
+#   d/dmu: sum_i (x_i - mu) / sigma^2 = 0   =>   mu_MLE = mean(x_i)  =: mu_hat
+#   d/d(sigma^2): -n/(2 sigma^2) + sum_i (x_i - mu_hat)^2 / (2 sigma^4) = 0
+#                  =>   sigma^2_MLE = mean((x_i - mu_hat)^2)  (uses N, NOT N-1 in denominator)
+#
+# NOTE: MLE for variance uses N (biased-low estimator).  The unbiased estimator uses N-1.
+# For large N the difference vanishes; for small N it matters.
+import numpy as np
+rng = np.random.default_rng(0)
+
+true_mu, true_sigma = 3.0, 2.0
+n = 50
+data = rng.normal(true_mu, true_sigma, size=n)
+
+mu_mle = data.mean()
+sigma2_mle_uses_N = ((data - mu_mle) ** 2).mean()          # MLE -- N in denominator
+sigma2_unbiased  = ((data - mu_mle) ** 2).sum() / (n - 1)   # Bessel-corrected
+
+print(f"True: mu = {true_mu}, sigma^2 = {true_sigma**2}")
+print(f"MLE for mu:     mu_hat = {mu_mle:.4f}")
+print(f"MLE for sigma^2:        {sigma2_mle_uses_N:.4f}   (uses N, biased-low)")
+print(f"Unbiased sigma^2:       {sigma2_unbiased:.4f}     (uses N-1)")
+
+# MSE loss in ML regression = MLE for Gaussian noise with fixed sigma.
+# The connection: minimizing sum_i (y_i - f(x_i))^2 is equivalent to maximizing
+# log-likelihood under y_i ~ N(f(x_i), sigma^2) with sigma fixed.
+n_train = 100
+X = rng.normal(size=(n_train, 3))
+w_true = np.array([1.5, -2.0, 0.8])
+y = X @ w_true + rng.normal(0, 0.5, size=n_train)
+
+# MLE = least squares.
+w_ls, *_ = np.linalg.lstsq(X, y, rcond=None)
+print(f"\\nLinear regression via MLE (= least squares): w_hat = {w_ls}")
+print(f"True w:                                            {w_true}")
+print("Every regression loss you write in ML is a Gaussian log-likelihood.")`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/probability/random-variables", label: "Random variables & distributions", blurb: "MLE assumes a distributional family for the data; you need PMF/PDF fluency to write down the likelihood." },
+  { href: "/learn/mathematics/probability/clt-lln", label: "Law of large numbers & CLT", blurb: "MLE properties (consistency, asymptotic normality) follow from LLN and CLT applied to the score function." },
+]} />
+
+<NewConcepts
+  concepts={[
+    { name: "Fisher information", blurb: "the expected curvature of the log-likelihood; measures how &lsquo;sharp&rsquo; the peak is and appears in the asymptotic MLE variance formula." },
+    { name: "Cramér–Rao lower bound", blurb: "the theoretical minimum variance any unbiased estimator can achieve; MLE achieves this bound in the large-n limit." },
+    { name: "Score matching", blurb: "the training objective of modern diffusion models — they learn ∇ log p(x). A special case of MLE-like estimation for generative models." },
+    { name: "InfoNCE / contrastive losses (SimCLR)", blurb: "self-supervised losses that reformulate to a classifier of positive-vs-negative pairs — MLE under the hood." },
+    { name: "Exponential family", blurb: "a broad class of distributions (Gaussian, Bernoulli, Poisson, Gamma, …) with a unified MLE structure. Elegant theory; look up when curious." },
+  ]}
+/>
+
+<Motivation title="Every ML training loop is maximum likelihood estimation">
+
+Maximum likelihood is the single most important idea in Phase 1.5. Almost every loss function you meet in ML is a negative log-likelihood in disguise:
+
+- **MSE regression** = MLE assuming Gaussian noise with fixed variance. Minimizing Σ (yᵢ − ŷᵢ)² *is* maximizing the log-likelihood of the data under y_i ~ 𝒩(ŷ_i, σ²).
+- **Cross-entropy classification** = MLE assuming Categorical outputs. Minimizing −Σ log p(y_i) *is* maximizing the log-likelihood of the labels under the model&rsquo;s Categorical distribution over classes.
+- **VAE ELBO** = a lower bound on the marginal log-likelihood of the data. Diffusion models are trained with a related bound. Both are MLE-in-spirit.
+- **Language-model pretraining** = MLE. Next-token cross-entropy is the negative log-likelihood of each token under the model&rsquo;s Categorical over the vocabulary. GPT&rsquo;s objective is `L = -sum log P(x_t | x_<t)` — a direct chain-rule log-likelihood.
+- **Contrastive losses (InfoNCE, SimCLR)** = MLE of a classifier that distinguishes positive from negative pairs. Reformulate and you find likelihood underneath.
+
+Understanding MLE means understanding *why* these losses are the right objectives — not just accepting them as recipes. It also tells you the properties you get for free: consistency (with enough data, the estimator finds the truth), efficiency (near-optimal use of the samples), and asymptotic normality (predictable error bars).
+
+This chapter derives MLE for the two most-used distributions (Bernoulli, Gaussian) by hand, shows why MLE is what every gradient step in ML is climbing, and gives you the vocabulary to spot MLE hiding inside a research paper you read next month.
+
+</Motivation>
+
+<Intuition title="MLE = 'pick the parameter that makes the data you actually saw the least surprising'">
+
+Concrete first. You flip a coin 10 times and see 7 heads. What&rsquo;s a reasonable guess for the true probability of heads?
+
+Try a few candidates. If the true probability were p = 0.5, then P(7 heads in 10 flips) = C(10, 7) · 0.5⁷ · 0.5³ ≈ 0.117. If instead p = 0.7, P(same outcome) = C(10, 7) · 0.7⁷ · 0.3³ ≈ 0.267. That&rsquo;s more than 2× more likely under p = 0.7 than under p = 0.5. Now try p = 0.9: P = C(10, 7) · 0.9⁷ · 0.1³ ≈ 0.057. So among &#123;0.5, 0.7, 0.9&#125;, the observation is most probable under p = 0.7.
+
+The **maximum likelihood estimator** is the p that maximizes this &ldquo;probability of the data.&rdquo; If we search over every p in [0, 1] instead of just three values, we&rsquo;ll find that p̂ = 7/10 = 0.7 exactly. That&rsquo;s the MLE — the value under which the observed data was least surprising.
+
+Generalizing: you&rsquo;ve chosen a distribution family (Gaussian, Bernoulli, Categorical, etc.) — that&rsquo;s the *model*. Its shape depends on a parameter θ. Different values of θ predict different amounts of probability (or density) for the specific data D you observed. **Maximum likelihood picks the θ that assigns highest probability to the observed data.**
+
+Formally, the *likelihood function* L(θ) = P(D | θ) is a function of θ with D fixed. The MLE is
+
+$$
+\hat\theta_{\text{MLE}} \;=\; \arg\max_{\theta}\; L(\theta) \;=\; \arg\max_\theta \sum_i \log p(x_i \mid \theta).
+$$
+
+We work with the **log-likelihood** because it turns a product over samples into a sum, which is numerically stable (products of tiny probabilities underflow to zero) and easier to differentiate. The log is monotonic, so the argmax is unchanged. Almost everything downstream operates on log-likelihood.
+
+The picture: L(θ) plotted as a function of θ has a peak somewhere; MLE finds that peak. Statistical properties of the estimator (variance, bias, uncertainty) come from how *sharp* that peak is (its second derivative, formally called the *Fisher information*).
+
+</Intuition>
+
+<Recall term="Estimator">
+
+An estimator T is a function of the data (T = T(X_1, …, X_n)) that produces a guess for a population parameter θ. It is itself a random variable — its value depends on which sample you happened to draw. The distribution of T over hypothetical resamples is called its **sampling distribution**. Bias = E[T] − θ. Variance = Var(T). Mean squared error = Bias² + Variance.
+
+</Recall>
+
+## Estimators: bias, variance, consistency, efficiency
+
+An **estimator** is a rule for turning data into a guess about an underlying parameter. Different estimators can target the same parameter — they have different quality characteristics:
+
+- **Bias** = E[T] − θ. An estimator is *unbiased* if its expected value equals the true parameter. Sample mean is unbiased for μ; sample variance with denominator N is biased-low (needs N − 1 to be unbiased).
+- **Variance** = Var(T). How much does the estimator swing across resamples? Smaller = more precise.
+- **Consistency** = as N → ∞, T converges in probability to θ. All useful estimators are consistent; inconsistent ones are broken.
+- **Efficiency** = ratio of your estimator&rsquo;s variance to the minimum-possible variance (the *Cramér–Rao lower bound*). An estimator is *efficient* if it achieves the bound. MLEs are asymptotically efficient — they achieve the Cramér-Rao lower bound in the large-N limit.
+- **Robustness** = how much bad data (outliers) breaks the estimator. Median is robust; mean is not.
+
+**Mean squared error decomposition**: MSE(T) = Bias(T)² + Var(T). This is the same identity from the expectation-variance chapter, now applied to estimators. Reducing bias often increases variance and vice versa — a classical bias-variance trade-off.
+
+<RunnableCode title="Compare estimators: sample mean vs sample median for a Gaussian population" code={estimatorCode} packages={["numpy"]} />
+
+## The likelihood function
+
+Fix a parametric family (Bernoulli(p), Gaussian(μ, σ²), Categorical(π), …) and iid data D = (x_1, …, x_n). The **likelihood function** is
+
+$$
+L(\theta) \;=\; p(D \mid \theta) \;=\; \prod_{i=1}^n p(x_i \mid \theta).
+$$
+
+*L is a function of θ, with D fixed.* When p is a PDF (continuous case), L can be greater than 1 — remember, densities aren&rsquo;t probabilities. What matters is *comparing* L across values of θ.
+
+The **log-likelihood** is
+
+$$
+\ell(\theta) \;=\; \log L(\theta) \;=\; \sum_{i=1}^n \log p(x_i \mid \theta).
+$$
+
+Three reasons we work in log-space:
+
+1. **Numerical stability.** Multiplying n densities produces astronomically small numbers that underflow to zero. Adding n log-densities produces a finite number.
+2. **Simple derivatives.** Log of a product = sum of logs. Derivative of a sum = sum of derivatives.
+3. **Additivity across iid samples.** ℓ(θ) is a sum of per-sample contributions, matching the mini-batch structure of stochastic gradient descent.
+
+<RunnableCode title="Likelihood and log-likelihood of Gaussian μ with known σ" code={likelihoodCode} packages={["numpy", "scipy", "matplotlib"]} />
+
+## Deriving MLE for Bernoulli — by hand
+
+Data: n coin flips with outcomes x_i ∈ &#123;0, 1&#125;. Let k = Σ x_i be the number of heads. Model: X_i ~ Bernoulli(p) iid.
+
+$$
+L(p) \;=\; \prod_{i=1}^n p^{x_i} (1-p)^{1-x_i} \;=\; p^k (1-p)^{n-k}.
+$$
+
+Take log:
+
+$$
+\ell(p) \;=\; k \log p + (n - k) \log(1 - p).
+$$
+
+Differentiate with respect to p and set to zero:
+
+$$
+\frac{d \ell}{d p} \;=\; \frac{k}{p} - \frac{n - k}{1 - p} \;=\; 0
+$$
+
+Cross-multiplying: k(1 − p) = (n − k) p, so k = np, and
+
+$$
+\boxed{\;\hat p_{\text{MLE}} \;=\; \frac{k}{n}\;}
+$$
+
+— just the empirical frequency of heads. Obvious in hindsight; but the MLE derivation is your check that "obvious" is actually correct. **This is also the naive Bayes classifier&rsquo;s per-class word probability, and the standard n-gram counts in language modeling** — same MLE, different context.
+
+<RunnableCode title="MLE for Bernoulli(p): closed-form + numerical verification + CRB variance" code={mleBernoulliCode} packages={["numpy", "scipy"]} />
+
+## Deriving MLE for Gaussian — the ML regression foundation
+
+Data: n samples x_i ~ 𝒩(μ, σ²) iid. Log-likelihood:
+
+$$
+\ell(\mu, \sigma^2) \;=\; -\frac{n}{2} \log(2\pi \sigma^2) - \frac{1}{2\sigma^2} \sum_i (x_i - \mu)^2.
+$$
+
+Take partial derivatives.
+
+**MLE for μ**:
+
+$$
+\frac{\partial \ell}{\partial \mu} \;=\; \frac{1}{\sigma^2} \sum_i (x_i - \mu) \;=\; 0 \;\Rightarrow\; \boxed{\;\hat \mu_{\text{MLE}} \;=\; \bar x\;}
+$$
+
+The sample mean. Independent of σ² — even if you don&rsquo;t know σ², the MLE for μ is still the sample mean.
+
+**MLE for σ²**:
+
+$$
+\frac{\partial \ell}{\partial \sigma^2} \;=\; -\frac{n}{2\sigma^2} + \frac{1}{2\sigma^4} \sum_i (x_i - \hat\mu)^2 \;=\; 0
+$$
+
+Solving:
+
+$$
+\boxed{\;\hat \sigma^2_{\text{MLE}} \;=\; \frac{1}{n} \sum_i (x_i - \hat \mu)^2\;}
+$$
+
+**The MLE for variance uses N, not N − 1.** So the MLE for σ² is biased-low; the *unbiased* estimator uses (N − 1) (Bessel&rsquo;s correction). MLE is asymptotically unbiased but small-N biased for variance.
+
+**The ML connection**: linear regression via least squares is *exactly* MLE assuming Gaussian noise. If y_i = f(x_i, w) + ε_i with ε_i ~ 𝒩(0, σ²), then the log-likelihood is
+
+$$
+\ell(w) = -\frac{n}{2} \log(2\pi\sigma^2) - \frac{1}{2\sigma^2} \sum_i (y_i - f(x_i, w))^2.
+$$
+
+Maximizing over w is equivalent to *minimizing* Σ (y_i − f(x_i, w))² — the squared-error loss. Every MSE loss you write down is quietly assuming Gaussian noise around your predictions.
+
+<RunnableCode title="MLE for Gaussian(μ, σ²) — closed-form + connection to least squares" code={mleGaussianCode} packages={["numpy"]} />
+
+## MLE properties for large N
+
+MLEs have three beautiful asymptotic properties, all of which are why we use them:
+
+1. **Consistency**: $\hat\theta_{\text{MLE}} \to \theta$ in probability as n → ∞. Given enough data, MLE finds the truth.
+2. **Asymptotic normality**: $\sqrt{n} (\hat\theta_{\text{MLE}} - \theta) \to \mathcal{N}(0, I(\theta)^{-1})$, where I(θ) is the **Fisher information**. So for large n, $\hat\theta$ is approximately Gaussian around the true value, with variance approximately 1 / (n · I(θ)).
+3. **Asymptotic efficiency**: MLE achieves the Cramér–Rao lower bound in the limit. No other consistent estimator has smaller variance.
+
+The **Fisher information** is the expected curvature of the log-likelihood: $I(\theta) = -E[\partial^2 \ell / \partial \theta^2]$. Intuitively, a sharply-peaked log-likelihood has high curvature → high Fisher information → low estimator variance (we&rsquo;re very certain about θ). Flat log-likelihood → low Fisher information → high variance.
+
+For engineering purposes, this justifies the practice of using MLE and reporting error bars using estimated Fisher information (or its equivalent, the Hessian at the MLE). Every optimizer in `scipy.optimize` and every deep-learning training loop is implicitly finding this peak.
+
+## The traps that matter
+
+**Likelihood is not probability.** L(θ | D) is a function of θ, not a probability distribution over θ. Sums or integrals over θ don&rsquo;t equal 1. You cannot say &ldquo;this θ has probability 0.9 of being right&rdquo; from L alone — that&rsquo;s a Bayesian statement requiring a prior.
+
+**MLE can be sensitive to model misspecification.** If your assumed distribution family doesn&rsquo;t contain the true distribution, MLE finds the θ that&rsquo;s closest (in KL sense) — but that&rsquo;s not the same as the truth. Real data usually violates our model assumptions; check the fit.
+
+**Zero-probability observations kill MLE.** If your model assigns zero density to any observed x_i, log-likelihood → −∞. In practice: use additive smoothing (Laplace, add-α) for count models, ensure your distribution family covers all possible observations, or use a mixture that has global support.
+
+**MLE for variance is biased.** As shown, MLE uses N in the denominator; unbiased uses N − 1. For small N (say &lt; 30) this matters. Deep-learning training often uses MLE variance (or a fixed variance) without concern because N is large.
+
+**MLE can overfit.** For flexible models (deep nets), MLE alone will fit training data too well. Regularization (next chapter: MAP with priors) or early stopping restrains this.
+
+**Numerical implementation matters.** Working in log-space isn&rsquo;t optional. `log_softmax` + `nll_loss` is more stable than `softmax` + `log`. `logsumexp` is more stable than `log(sum(exp(...)))`. Modern libraries have these built-in for a reason.
+
+<RealWorldML title="Every ML training objective is a maximum-likelihood problem in disguise">
+
+Take three canonical setups and unpack the likelihood:
+
+**Cross-entropy classification.** Model outputs π(x, w) = softmax(logits), a Categorical over K classes. Given labeled data (x_i, y_i) with y_i ∈ &#123;1, …, K&#125;, likelihood is:
+
+$$
+L(w) = \prod_i \pi_{y_i}(x_i, w).
+$$
+
+Log-likelihood:
+
+$$
+\ell(w) = \sum_i \log \pi_{y_i}(x_i, w).
+$$
+
+Negative log-likelihood is the standard *cross-entropy loss*. Minimizing it *is* MLE for the parameters w of the classifier under the assumption that outputs are Categorical.
+
+**Language model pretraining.** Model outputs a Categorical over the vocabulary V given the preceding tokens. Chain-rule joint over a sentence x = (x_1, …, x_T):
+
+$$
+L(w) = \prod_t P(x_t \mid x_{<t}, w).
+$$
+
+Log-likelihood: L_LM = Σ_t log P(x_t | x_&lt;t, w). Negating gives the token-level cross-entropy. Every LLM pre-training run is MLE on trillions of tokens.
+
+**Diffusion model score matching.** For a noisy image x_t (produced by forward diffusion), the model learns to predict the noise ε. The training loss is E[|ε − ε_θ(x_t, t)|²] = squared-error, which is MLE for Gaussian noise around the prediction. So diffusion training is *also* MLE — a specific parameterization of the Gaussian likelihood on the noise variable.
+
+Recognizing MLE inside a paper unlocks a lot: you can predict properties of the trained model (asymptotically unbiased, low variance), understand why the loss function looks the way it does, and know what happens as you scale data (LLN, CLT applied to the score).
+
+Every ML training loop is a numerical optimization on a log-likelihood surface. Understanding that is the difference between "here&rsquo;s the loss function they gave me" and "here&rsquo;s the likelihood assumption they made."
+
+</RealWorldML>
+
+<StudyDepth
+  intro={<>MLE is the single most important idea in Phase 1.5. Master it and every ML loss function is transparently a log-likelihood; ignore it and losses are magic.</>}
+  drill={[
+    <>Likelihood L(θ) = P(D | θ) as function of θ with D fixed; log-likelihood ℓ(θ) is the numerically stable form</>,
+    <>MLE = argmax_θ ℓ(θ); differentiate ℓ, set to zero, solve</>,
+    <>MLE for Bernoulli: p̂ = k/n (empirical frequency). MLE for Gaussian: μ̂ = mean, σ̂² = 1/n Σ (x_i − μ̂)² (biased-low; use N − 1 for unbiased)</>,
+    <>MSE loss = MLE assuming Gaussian noise; cross-entropy = MLE assuming Categorical outputs; LLM pretraining = MLE on chain-rule tokens</>,
+    <>Estimator quality: bias, variance, MSE = Bias² + Var; consistency; efficiency (Cramér-Rao bound)</>,
+    <>MLE is consistent, asymptotically normal (with variance 1/(n·I(θ))), and asymptotically efficient</>,
+  ]}
+  skim={[
+    <>Full Fisher-information derivations — needed for asymptotic confidence intervals from MLE, but scipy computes them</>,
+    <>Method-of-moments as an alternative estimation approach — historical interest, mostly superseded by MLE and Bayes</>,
+    <>Sufficient statistics and the exponential-family unification — beautiful theory, rarely engineering-critical</>,
+  ]}
+/>
+
+<CodeItYourself title="Three drills — bias/variance, likelihood surface, MLE for a Poisson">
+
+1. **Bias-variance of variance estimators.** Draw 5000 samples of size N = 10 from 𝒩(0, 1). For each, compute both the MLE variance (N in denominator) and the unbiased variance (N − 1). Empirically compute the bias and variance of each estimator. The MLE should have LOWER variance (that&rsquo;s why we might use it) but HIGHER absolute bias (biased low). MSE of the two may be close because bias² is small.
+
+2. **Log-likelihood surface for a 2-parameter Gaussian.** Given 30 samples from 𝒩(3, 4), plot the log-likelihood as a function of (μ, σ²) over a grid. Mark the MLE and the true parameters. Notice the peak is elongated — the log-likelihood is less curved along σ² than along μ, meaning σ² is *harder* to estimate (higher variance) than μ from the same amount of data.
+
+3. **MLE for Poisson(λ).** Derive the MLE for λ by hand. (Hint: L(λ) = product of λ^x_i e^(-λ) / x_i!, log L = Σ x_i log λ − nλ + const, dℓ/dλ = 0 → λ̂ = mean(x_i).) Verify numerically for a simulated Poisson(3) sample of size 100.
+
+</CodeItYourself>
+
+<Summary>
+
+- **Estimator** = a function of the data that guesses a population parameter. Its distribution over resamples is its sampling distribution; bias, variance, and MSE describe its quality.
+- **Likelihood** L(θ) = P(D | θ) is a function of θ with data fixed. **Log-likelihood** ℓ(θ) = Σ log p(x_i | θ) is what we actually optimize.
+- **Maximum likelihood estimator** θ̂_MLE = argmax_θ ℓ(θ). Take derivatives, set to zero, solve.
+- **Bernoulli MLE**: p̂ = k/n (empirical frequency).
+- **Gaussian MLE**: μ̂ = sample mean; σ̂² = (1/n) Σ (x_i − μ̂)² (uses N, biased-low — the unbiased estimator uses N − 1).
+- **Every ML loss is MLE**: MSE ↔ Gaussian, cross-entropy ↔ Categorical, LM pretraining ↔ chain-rule Categorical.
+- **MLE properties**: consistent, asymptotically normal (variance 1/(n · Fisher info)), asymptotically efficient.
+- **Traps**: likelihood ≠ probability; zero-density observations kill ℓ; MLE overfits without regularization (see next chapter: MAP + priors).
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>Given the data 0, 1, 0, 0, 1, 1, 1, 0, 0, 0 (10 coin flips), compute the MLE for the probability of heads.</>,
+      hint: <>MLE for Bernoulli(p) is the empirical frequency: number of successes / n.</>,
+      answer: <>Count: 4 heads (the 1s) out of 10 flips. <br /> MLE: p̂ = k/n = <b>4/10 = 0.4</b>. <br /> With only 10 observations, this estimate has substantial uncertainty. The Cramér-Rao lower bound on variance is p(1 − p)/n = 0.4 · 0.6 / 10 = 0.024, so the standard error is about √0.024 ≈ 0.155. A 95% CI (via CLT) would be roughly 0.4 ± 0.30 — very wide with only 10 samples.</>,
+    },
+    {
+      difficulty: "easy",
+      q: <>You observe 3.2, 2.8, 4.1, 3.6, 3.0 from 𝒩(μ, σ²). Compute the MLE for μ and σ² (using both the biased and unbiased formulas).</>,
+      hint: <>μ̂ = mean; σ̂²_MLE uses N in denominator; unbiased σ̂² uses N − 1.</>,
+      answer: <>Sample: n = 5. <br /> μ̂ = (3.2 + 2.8 + 4.1 + 3.6 + 3.0) / 5 = 16.7 / 5 = <b>3.34</b>. <br /> Squared deviations from 3.34: 0.0196, 0.2916, 0.5776, 0.0676, 0.1156. Sum = 1.072. <br /> σ̂²_MLE = 1.072 / 5 = <b>0.2144</b> (uses N, biased-low). <br /> σ̂²_unbiased = 1.072 / 4 = <b>0.2680</b> (uses N − 1). <br /> Notice the 25% difference — for small N, the choice matters. For large N, both converge to the true value.</>,
+    },
+    {
+      difficulty: "medium",
+      q: <>Show that MSE = Bias² + Variance for any estimator T of a parameter θ.</>,
+      hint: <>MSE(T) = E[(T − θ)²]. Add and subtract E[T] inside the square.</>,
+      answer: <>Let μ_T = E[T]. Then T − θ = (T − μ_T) + (μ_T − θ). <br /> Square: (T − θ)² = (T − μ_T)² + 2 (T − μ_T)(μ_T − θ) + (μ_T − θ)². <br /> Take expectations (with θ constant, μ_T constant): <br /> E[(T − θ)²] = E[(T − μ_T)²] + 2 (μ_T − θ) E[T − μ_T] + (μ_T − θ)². <br /> Now E[T − μ_T] = 0 (definition of μ_T), so the middle term vanishes. E[(T − μ_T)²] = Var(T). (μ_T − θ)² = Bias(T)². Result: <br /> <b>MSE(T) = Var(T) + Bias(T)²</b>. ∎ <br /><br /> Practical takeaway: reducing bias often increases variance and vice versa (classical bias-variance trade-off). Sometimes accepting a small bias for a large variance reduction is optimal for MSE — this is what shrinkage estimators (ridge regression, empirical Bayes) do.</>,
+    },
+    {
+      difficulty: "medium",
+      q: <>Derive the MLE for the rate λ of a Poisson distribution, given iid data x_1, …, x_n.</>,
+      hint: <>L(λ) = Π λ^x_i · e^(−λ) / x_i!. Take log, differentiate, set to zero.</>,
+      answer: <>L(λ) = product of (λ^x_i · e^(−λ) / x_i!). <br /> log L(λ) = Σ (x_i log λ − λ − log x_i!) = (Σ x_i) log λ − n λ − Σ log x_i!. <br /> Differentiate: <br /> dℓ/dλ = (Σ x_i) / λ − n = 0. <br /> Solve: λ̂ = (Σ x_i) / n = <b>x̄</b> — the sample mean. <br /><br /> For Poisson, MLE (=empirical mean) is unbiased AND is the minimum-variance unbiased estimator of λ. Also, since Poisson has variance = mean, the empirical mean is efficient. This is the estimator every rate-based Poisson regression uses under the hood.</>,
+    },
+    {
+      difficulty: "hard",
+      q: <>Show that cross-entropy loss for K-class classification is the negative log-likelihood under a Categorical output. Given one-hot label y ∈ {"{0, 1}"}^K and predicted probabilities π = softmax(logits), the loss is L = −Σ_k y_k log π_k.</>,
+      hint: <>Write down the likelihood of the label under the Categorical distribution and take the log.</>,
+      answer: <>Model: given input x, the output distribution is Categorical(π(x, w)) over K classes. <br /> Likelihood of observed label y: <br /> P(y | x, w) = product over k of π_k(x, w)^y_k <br /> where y_k = 1 for the true class, 0 elsewhere. <br /><br /> Log-likelihood: <br /> log P(y | x, w) = Σ_k y_k log π_k(x, w) = log π_{"{true class}"}(x, w) <br /> since only the true-class y_k = 1 contributes. <br /><br /> Negative log-likelihood: <br /> -log P(y | x, w) = -Σ_k y_k log π_k = <b>cross-entropy loss</b>. ∎ <br /><br /> Summing over a training set gives the batch cross-entropy loss, which is what optimizers minimize. This is why cross-entropy is *the* right loss for classification — it&rsquo;s just MLE with a Categorical assumption. Alternatives (hinge loss for SVMs, focal loss for imbalanced data) modify or replace this likelihood but generally lose the elegant probabilistic interpretation.</>,
+    },
+    {
+      difficulty: "hard",
+      q: <>Prove that MLE is invariant under reparameterization: if τ = g(θ) is a one-to-one reparameterization, then τ̂_MLE = g(θ̂_MLE).</>,
+      hint: <>Rewrite the likelihood as a function of τ using the change of variable θ = g⁻¹(τ). Compare the argmax.</>,
+      answer: <>Given L(θ) = P(D | θ) and τ = g(θ) with g invertible, define L*(τ) = P(D | g⁻¹(τ)) = L(g⁻¹(τ)). <br /><br /> Since g is one-to-one, argmax_τ L*(τ) = g(argmax_θ L(θ)). To see this: <br /> τ̂ = argmax_τ L(g⁻¹(τ)) <br /> Let θ = g⁻¹(τ). As τ ranges over all values, so does θ (bijectively). So the max over τ is the max over the corresponding θ, transformed by g. <br /> Formally: L*(τ) = L(g⁻¹(τ)), so <br /> argmax_τ L*(τ) = g(argmax_θ L(θ)) = <b>g(θ̂_MLE)</b>. ∎ <br /><br /> <b>Consequence</b>: if you estimate the standard deviation σ, you can equivalently estimate the variance σ² directly (σ̂²_MLE = (σ̂_MLE)²) or the precision 1/σ² (precision̂ = 1/σ̂²_MLE). All are the &ldquo;same&rdquo; MLE up to reparameterization. Contrast with unbiasedness, which is NOT invariant under reparameterization — the unbiased σ̂² (Bessel) is not the square of the unbiased σ̂.</>,
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "The maximum likelihood estimator (MLE) of a parameter θ is:",
+      choices: [
+        { text: "The mean of the observed data" },
+        { text: "The value of θ that maximizes the likelihood of the observed data", correct: true },
+        { text: "The value with highest prior probability" },
+        { text: "The Bayesian posterior mean" },
+      ],
+      explanation: <>MLE picks the parameter value that makes the observed data <em>most likely</em>. It doesn&rsquo;t use any prior; that&rsquo;s what MAP (next chapter) adds. For some models (e.g., Gaussian mean estimation), MLE happens to coincide with the sample mean, but in general MLE is a general optimization principle, not a specific formula.</>,
+    },
+    {
+      q: "For iid data x_1, …, x_n from 𝒩(μ, σ²), the MLE for μ is:",
+      choices: [
+        { text: "The sample median" },
+        { text: "The sample mean x̄", correct: true },
+        { text: "The value that minimizes 1/n · Σ (x_i − μ)²" },
+        { text: "Options 2 and 3 are both correct (and equivalent)" },
+      ],
+      explanation: <>The sample mean is both the MLE for μ and the minimizer of 1/n Σ (x_i − μ)² — the two are equivalent because differentiating either objective gives the same equation. Option 4 is technically the most-correct answer if you spot the equivalence; option 2 is directly stated.</>,
+    },
+    {
+      q: "The MSE of an estimator T decomposes as:",
+      choices: [
+        { text: "MSE = Bias · Variance" },
+        { text: "MSE = Bias² + Variance", correct: true },
+        { text: "MSE = Bias + Variance" },
+        { text: "MSE = Bias² − Variance" },
+      ],
+      explanation: <>Standard decomposition. Reducing bias typically increases variance and vice versa (the classical bias-variance trade-off). Sometimes accepting a small bias for large variance reduction reduces total MSE — this is what regularization (next chapter) exploits.</>,
+    },
+    {
+      q: "Cross-entropy loss for K-class classification is:",
+      choices: [
+        { text: "An ad-hoc engineering choice with no probabilistic meaning" },
+        { text: "The negative log-likelihood under a Categorical output distribution", correct: true },
+        { text: "The KL divergence to a uniform target" },
+        { text: "The squared error on one-hot labels" },
+      ],
+      explanation: <>Cross-entropy is the negative log-likelihood of the observed label under the model&rsquo;s Categorical over classes. Minimizing it is MLE for the parameters that determine the output logits. This connection is why cross-entropy is <em>the</em> loss for classification and why softmax is the natural output activation.</>,
+    },
+    {
+      q: "MLE is asymptotically:",
+      choices: [
+        { text: "Unbiased, but with unbounded variance" },
+        { text: "Consistent, normally distributed, and efficient (achieves the Cramér–Rao lower bound)", correct: true },
+        { text: "Only consistent if the sample size exceeds 1000" },
+        { text: "Guaranteed to find the global optimum" },
+      ],
+      explanation: <>These three asymptotic properties (consistency + normality + efficiency) are why MLE is the default estimator in classical statistics and modern ML. Small-N MLE can be biased (e.g., MLE variance uses N instead of N − 1); large-N MLE achieves the theoretical optimal variance. Note the &ldquo;asymptotic&rdquo; caveat — for small samples or misspecified models, MLE&rsquo;s guarantees weaken.</>,
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/statistics/estimation-mle" title="Estimation & maximum likelihood" />

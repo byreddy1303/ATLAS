@@ -196,6 +196,14 @@ print("fib(60) =", fib(60))  # would take forever without cache`;
   { href: "/learn/foundations/python-craft/control-flow-data-model", label: "Control flow & the data model", blurb: "Iteration is the substrate — comprehensions and generators both consume iterables." },
 ]} />
 
+<NewConcepts
+  concepts={[
+    { name: "PyTorch", blurb: "ML framework whose training-step decorators (`@torch.no_grad`, `@torch.compile`) are a canonical use of Python decorators. Tier 3." },
+    { name: "LLM training pipelines", blurb: "modern LLM pretraining streams tokens through generator-based data loaders. This chapter&rsquo;s generator idioms are what makes that work at scale." },
+    { name: "transformer model definitions", blurb: "typical `nn.Module` subclasses in a transformer use decorators, generators, and comprehensions throughout. Referenced here as a forward-looking use-case." },
+  ]}
+/>
+
 <Motivation title="Why Python isn't just 'C with indentation'">
 
 Three moves separate scripting Python from **Pythonic** Python: **comprehensions** turn multi-line loops into single expressions, **generators** turn those loops into memory-cheap streams that never materialize their full output, and **decorators** turn common wrappers (timing, caching, retries, registration) into one-line annotations.

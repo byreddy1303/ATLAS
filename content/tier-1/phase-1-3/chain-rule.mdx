@@ -138,6 +138,16 @@ print(f"loss after one step: {loss2:.4f}  (should be smaller than {loss:.4f})")`
   { href: "/learn/mathematics/calculus/gradient-descent-intuition", label: "Gradient descent — the intuition", blurb: "The chain rule is what lets gradient descent walk through a many-layered function; this chapter is the engine of that walker." },
 ]} />
 
+<NewConcepts
+  concepts={[
+    { name: "backpropagation (backprop)", blurb: "the algorithm that computes gradients by applying the chain rule to a computation graph. Full chapter later in this phase (backprop-as-chain-rule)." },
+    { name: "autograd (PyTorch, JAX)", blurb: "automatic-differentiation frameworks — chain rule executed at runtime for arbitrary code." },
+    { name: "transformer / LLM depth", blurb: "modern LLMs stack 30–100+ layers; each is a differentiable function whose gradient flows via the chain rule." },
+    { name: "softmax + attention", blurb: "differentiable operations inside a transformer. Their gradients propagate through the chain rule during training." },
+    { name: "SGD (stochastic gradient descent)", blurb: "the optimizer that consumes chain-rule-computed gradients to update parameters. Phase 1.6." },
+  ]}
+/>
+
 <Motivation title="Every layer of an LLM is a link in one giant chain">
 
 A transformer with 96 layers is a composition of 96 functions: the token embedding is transformed by layer 1, whose output feeds layer 2, whose output feeds layer 3, all the way to the final softmax logits. From the perspective of a single loss value at the top, the model is one enormous nested function of every learnable weight.

@@ -205,6 +205,14 @@ print(gray.round(1))`;
   { href: "/learn/foundations/python-craft/control-flow-data-model", label: "Control flow & data model", blurb: "You should recognize iteration and the difference between a list and a tuple." },
 ]} />
 
+<NewConcepts
+  concepts={[
+    { name: "PyTorch tensors", blurb: "the GPU-accelerated array type modeled directly on NumPy&rsquo;s ndarray. Same shape / broadcasting semantics; a &lsquo;PyTorch is NumPy on the GPU&rsquo; framing. Tier 3." },
+    { name: "autograd (automatic differentiation)", blurb: "PyTorch/JAX's mechanism for tracking gradients on tensor operations — the successor to plain-NumPy for ML. Full context in Phase 1.3 backprop chapter." },
+    { name: "attention mechanism", blurb: "the LLM building block. Under the hood it&rsquo;s just batched matrix multiplication + softmax — vectorized ops on tensors. Tier 4." },
+  ]}
+/>
+
 <Motivation title="Everything you'll touch as a GenAI engineer is an ndarray">
 
 PyTorch's `Tensor` is an ndarray with autograd and a GPU pointer. pandas' `Series` is an ndarray with an index. scikit-learn's `X` is literally an ndarray. Every embedding API — OpenAI, Cohere, Sentence-Transformers — hands you vectors that you immediately wrap with `np.array(...)` before doing similarity search. Learn the ndarray once, here, and every one of those libraries becomes legible. That's why every notebook in the world starts with `import numpy as np`.

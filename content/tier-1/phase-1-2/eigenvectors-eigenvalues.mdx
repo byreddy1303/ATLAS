@@ -153,6 +153,15 @@ print("explained variance ratio =", np.round(vals / vals.sum(), 3))`;
   { href: "/learn/mathematics/vectors-space/projections-orthogonality", label: "Projections & orthogonality", blurb: "Symmetric matrices have orthogonal eigenvectors — Q^T = Q⁻¹ and coordinates become dot products." },
 ]} />
 
+<NewConcepts
+  concepts={[
+    { name: "PCA (principal component analysis)", blurb: "dimensionality reduction via eigen-decomposition of the covariance matrix. Full chapter later in this phase (pca-from-linear-algebra)." },
+    { name: "power iteration", blurb: "a simple algorithm that finds the dominant eigenvector by repeatedly multiplying and normalizing. Used inside PageRank and modern iterative solvers." },
+    { name: "spectral theorem", blurb: "the theorem that every symmetric real matrix has real eigenvalues and orthogonal eigenvectors. Foundational for PCA and PD-matrix theory (later chapters)." },
+    { name: "LoRA (Low-Rank Adaptation)", blurb: "efficient LLM fine-tuning built on low-rank updates. Full context in the SVD chapter." },
+  ]}
+/>
+
 <Motivation title="The DNA of a matrix — the two questions every eigenvalue answers">
 
 Given a big matrix A, two questions come up over and over in modern ML: (1) if I keep applying A — say, computing A^k or a Markov chain or an RNN's hidden-state update — where does it converge? (2) if I want to *summarize* A by a small number of directions and magnitudes, which ones matter most?

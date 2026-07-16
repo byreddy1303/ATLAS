@@ -1,0 +1,427 @@
+---
+title: Sample spaces, events & axioms
+tier: 1
+phase: "1.4"
+---
+
+export const enumerationCode = `# Sample space Omega = all possible outcomes; an event is any subset of Omega.
+# Two coin flips: Omega has 4 outcomes.
+from itertools import product
+
+omega = list(product(["H", "T"], repeat=2))
+print("Sample space Omega =", omega)
+print("|Omega| =", len(omega))
+
+# Event A: "at least one head"
+A = [w for w in omega if "H" in w]
+print("\\nEvent A (at least one H) =", A)
+print("P(A) = |A| / |Omega| =", len(A) / len(omega))
+
+# Event B: "both tosses agree"
+B = [w for w in omega if w[0] == w[1]]
+print("\\nEvent B (both agree) =", B)
+print("P(B) =", len(B) / len(omega))
+
+# Set operations on events (they are subsets, so use set semantics)
+A_set, B_set = set(A), set(B)
+print("\\nA union B =", A_set | B_set, "  P =", len(A_set | B_set) / len(omega))
+print("A intersect B =", A_set & B_set, "  P =", len(A_set & B_set) / len(omega))
+print("A complement =", set(omega) - A_set, "  P =", len(set(omega) - A_set) / len(omega))`;
+
+export const axiomsCode = `# The three Kolmogorov axioms, verified numerically.
+# (1) P(E) is non-negative for every event E.
+# (2) P(Omega) = 1.
+# (3) For disjoint events, P(E1 or E2) = P(E1) + P(E2).
+import numpy as np
+
+# Roll a fair 6-sided die: sample space is {1, 2, 3, 4, 5, 6}.
+outcomes = np.arange(1, 7)
+probs = np.full(6, 1/6)              # uniform measure
+
+# Axiom 1: every P(E) >= 0.  Take any subset -- probability is a sum of non-negatives.
+E1 = outcomes < 3                    # event "roll < 3", i.e., outcome is 1 or 2
+p_E1 = probs[E1].sum()
+print(f"P(roll < 3) = {p_E1:.4f}  (non-negative? {p_E1 >= 0})")
+
+# Axiom 2: P(Omega) = 1.
+p_omega = probs.sum()
+print(f"P(Omega) = {p_omega:.4f}  (= 1? {np.isclose(p_omega, 1.0)})")
+
+# Axiom 3: disjoint additivity.  Let E1 = 'roll < 3', E2 = 'roll >= 5'.  Disjoint.
+E2 = outcomes >= 5
+p_E2 = probs[E2].sum()
+p_union = probs[E1 | E2].sum()
+print(f"\\nP(E1) + P(E2) = {p_E1:.4f} + {p_E2:.4f} = {p_E1 + p_E2:.4f}")
+print(f"P(E1 or E2)   = {p_union:.4f}   (matches sum for disjoint events)")
+
+# For NON-disjoint events, use inclusion-exclusion.
+E3 = outcomes % 2 == 0               # "even"
+E4 = outcomes >= 4                   # "at least 4"
+p_intersect = probs[E3 & E4].sum()
+p_union_inc = probs[E3].sum() + probs[E4].sum() - p_intersect
+p_union_direct = probs[E3 | E4].sum()
+print(f"\\nNon-disjoint case: E3 = even, E4 = at least 4")
+print(f"P(E3) + P(E4) - P(E3 and E4) = {p_union_inc:.4f}")
+print(f"P(E3 or E4) directly         = {p_union_direct:.4f}")`;
+
+export const simulationCode = `# When a sample space is huge, enumeration is impractical -- use Monte Carlo simulation.
+# Question: draw 5 cards from a standard 52-card deck.  What is P(at least one Ace)?
+import numpy as np
+rng = np.random.default_rng(0)
+
+# Analytical answer for comparison: P(no Ace) = C(48, 5) / C(52, 5)
+from math import comb
+p_no_ace  = comb(48, 5) / comb(52, 5)
+p_at_least_one = 1 - p_no_ace
+print(f"Analytical P(at least one Ace) = {p_at_least_one:.6f}")
+
+# Now estimate by simulation.
+deck = np.arange(52)             # cards 0..51; call 0..3 the Aces
+n_trials = 100_000
+hits = 0
+for _ in range(n_trials):
+    hand = rng.choice(deck, size=5, replace=False)
+    if (hand < 4).any():
+        hits += 1
+p_hat = hits / n_trials
+print(f"Empirical    P(at least one Ace) = {p_hat:.6f}   (from {n_trials:,} trials)")
+print(f"Absolute error = {abs(p_hat - p_at_least_one):.5f}")
+
+# Vectorized version -- 100x faster.
+n_trials = 1_000_000
+hands = np.array([rng.choice(deck, size=5, replace=False) for _ in range(n_trials)])
+p_hat_vec = (hands < 4).any(axis=1).mean()
+print(f"\\nVectorized   P(at least one Ace) = {p_hat_vec:.6f}   ({n_trials:,} trials)")`;
+
+export const llmSamplingCode = `# LLM token sampling as a probability measure over a vocabulary sample space.
+# The sample space Omega is the entire vocabulary; softmax gives a probability
+# measure on Omega, and sampling strategies define events we choose to sample from.
+import numpy as np
+
+# Toy vocabulary and a set of logits from the model for the next token.
+vocab = ["the", "a", "cat", "dog", "runs", "sleeps", "eats", "quickly", "<end>"]
+logits = np.array([2.1, 1.8, 2.9, 1.3, 0.7, 0.4, -0.2, -0.8, 0.1])
+
+# Softmax -> probability measure P on Omega = vocab (sums to 1, each P(w) >= 0).
+def softmax(x, temperature=1.0):
+    x = x / temperature
+    x = x - x.max()              # log-sum-exp stability
+    p = np.exp(x)
+    return p / p.sum()
+
+p = softmax(logits, temperature=1.0)
+print("Probability measure over vocabulary (temperature=1.0):")
+for w, pw in zip(vocab, p):
+    print(f"  P({w!r:>10}) = {pw:.4f}")
+print(f"  sum = {p.sum():.6f}  (axiom 2: P(Omega) = 1)")
+
+# Event: "the next token is a noun" (subset of the sample space).
+noun_indices = [i for i, w in enumerate(vocab) if w in {"cat", "dog"}]
+p_noun = p[noun_indices].sum()
+print(f"\\nEvent 'next token is a noun': P = {p_noun:.4f}")
+
+# top-k sampling = restrict Omega to the k most probable tokens, renormalize.
+def top_k(probs, k=3):
+    idx = np.argsort(probs)[-k:]
+    restricted = np.zeros_like(probs)
+    restricted[idx] = probs[idx]
+    return restricted / restricted.sum()
+
+p_topk = top_k(p, k=3)
+print("\\ntop-3 sampling (a new measure supported on the top-3 tokens):")
+for w, pw in zip(vocab, p_topk):
+    if pw > 0:
+        print(f"  P({w!r:>10}) = {pw:.4f}")
+
+# Temperature changes the measure: high T flattens, low T sharpens.
+for T in [0.5, 1.0, 2.0]:
+    p_T = softmax(logits, temperature=T)
+    entropy = -np.sum(p_T * np.log(p_T + 1e-12))
+    print(f"\\nT={T}: entropy = {entropy:.3f} bits-nats  (higher = flatter distribution)")`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/linear-algebra/vectors-space", label: "Vectors & vector space", blurb: "A probability distribution is a vector of non-negative numbers summing to 1 — the language of vectors carries over directly." },
+]} />
+
+<NewConcepts
+  concepts={[
+    { name: "measure theory / σ-algebras", blurb: "the rigorous mathematical foundation of probability — needed for proofs, not for engineering. Skim the intuition only." },
+    { name: "score-based generative models", blurb: "diffusion / score-matching models trained to estimate ∇ log p(x). Mentioned in Motivation as an ML application of probability." },
+    { name: "attention weights", blurb: "the softmax-normalized weights inside a transformer attention layer. We cover transformers in Tier 4; here it&rsquo;s a forward reference." },
+    { name: "α-stable laws", blurb: "generalized limit distributions when the variance is infinite (heavy tails); replaces the Gaussian limit in the CLT for such data." },
+  ]}
+/>
+
+<Motivation title="Every probability question in ML starts with 'what is the outcome universe?'">
+
+Probability is the language your model speaks. Every softmax output, every sampling decision, every train/test split, every RAG confidence score, every data augmentation — all of it is defined against a **sample space** of possible outcomes and a **probability measure** that assigns weight to each. If the sample space is wrong or you don't know what it is, everything downstream is guesswork.
+
+For a GenAI engineer, this chapter shows up in every day of work:
+
+- **LLM token sampling.** The vocabulary is the sample space (30k–200k tokens); the softmax over logits is a probability measure on that space; top-k, top-p, temperature, and greedy decoding are all *events* or *restricted measures* you choose to sample from.
+- **RAG retrieval.** The corpus of documents is a sample space; a similarity score defines an implicit measure over it; picking the top-N documents is picking a small event.
+- **Data splits.** Train/val/test partitions are literally a partition of a sample space (your dataset) into disjoint events. The Kolmogorov additivity axiom is why "the total probability equals 1" survives partitioning.
+- **Evaluation.** Test-set accuracy is an empirical probability estimate — a Monte Carlo estimator of a population probability under an assumed sampling model.
+
+You cannot skip the vocabulary. Two lines of math ("Ω is the set of outcomes; P assigns a number in [0, 1] to every event") do more downstream lifting than any single fancy technique. The whole rest of Phase 1.4 rests on this chapter.
+
+</Motivation>
+
+<Intuition title="Probability = 'how much of the outcome universe does this event cover?'">
+
+Picture the sample space Ω as a rectangle with area 1. Every possible outcome lives somewhere inside. An **event** is a shape drawn on that rectangle — a subset of outcomes. Its **probability** is the area of that shape. The axioms fall out immediately from that picture: areas are non-negative, the whole rectangle has area 1, and the area of two non-overlapping shapes is the sum of their areas.
+
+This "measure over an outcome universe" framing is why "probability" and "measure theory" are the same subject in mathematics. You don't need the measure-theory machinery to work in ML, but the picture is exactly right. Everything from Naive Bayes to score-based generative models to attention weights obeys the same three rules — the rest is which sample space you're on and which measure you've defined on it.
+
+</Intuition>
+
+<Recall term="Set operations">
+
+Given subsets A, B of a universe Ω:
+
+- **Union** A ∪ B — outcomes in A OR B (or both).
+- **Intersection** A ∩ B — outcomes in A AND B.
+- **Complement** Aᶜ — outcomes NOT in A. Equals Ω \\ A.
+- **Disjoint** — A ∩ B = ∅ (empty set); the two share no outcomes.
+- **Partition** — a collection of disjoint sets whose union is Ω.
+
+Every event operation in probability reduces to one of these set operations on the sample space.
+
+</Recall>
+
+## Sample space and events
+
+The **sample space** Ω is the set of all possible outcomes of an experiment. Every question begins by choosing Ω. Examples:
+
+- Single coin flip: $\Omega = \\{H, T\\}$ — two outcomes.
+- Two coin flips: $\Omega = \\{HH, HT, TH, TT\\}$ — four outcomes.
+- One roll of a six-sided die: $\Omega = \\{1, 2, 3, 4, 5, 6\\}$.
+- Draw one card: $\Omega$ = the 52 cards. |Ω| = 52.
+- Sampling a next token from an LLM: $\Omega$ = the vocabulary. |Ω| = 32,000 (Llama) or ~200,000 (GPT-4 class).
+- Position of a physical particle in a room: $\Omega$ = a 3-D continuous set — Ω is uncountably infinite.
+
+An **event** is any subset of Ω. If the outcome of the experiment lands inside the subset, we say "the event occurred." Some events have names (rolling an even number, drawing an Ace) but formally an event is just a set of outcomes.
+
+- $A = \\{2, 4, 6\\}$ is the event "the die shows even."
+- $B$ = "at least one head in two flips" $= \\{HH, HT, TH\\}$.
+- $C$ = "the LLM's next token is a punctuation mark" is the subset of the vocabulary that is punctuation.
+
+<RunnableCode title="Enumerate a sample space and compute event probabilities" code={enumerationCode} packages={[]} />
+
+For finite sample spaces where every outcome is equally likely, the probability of an event is just a counting ratio: P(A) = |A| / |Ω|. This is the "classical" definition of probability that Laplace worked with; it's still how most textbook problems are solved.
+
+## The three Kolmogorov axioms
+
+Andrey Kolmogorov (1933) formalized probability with three axioms. Any function P mapping events to numbers that satisfies these axioms is a valid probability measure:
+
+$$
+\begin{aligned}
+\text{(1) Non-negativity:} \quad & P(A) \geq 0 \text{ for every event } A. \\\\
+\text{(2) Normalization:} \quad & P(\Omega) = 1. \\\\
+\text{(3) Countable additivity:} \quad & P(A_1 \cup A_2 \cup \cdots) = \sum_i P(A_i) \text{ if the } A_i \text{ are pairwise disjoint.}
+\end{aligned}
+$$
+
+Every property you know about probability follows from these three. Two important corollaries:
+
+**Complement rule.** For any event A, $P(A^c) = 1 - P(A)$. Proof: A and Aᶜ are disjoint and their union is Ω, so P(A) + P(Aᶜ) = P(Ω) = 1.
+
+**Inclusion–exclusion.** For any events A, B: $P(A \cup B) = P(A) + P(B) - P(A \cap B)$. Proof: split A ∪ B into three disjoint pieces (A only, B only, both), apply axiom 3, count each piece the right number of times.
+
+These two identities plus the axioms will solve most probability problems you meet in ML.
+
+<RunnableCode title="Verify the three Kolmogorov axioms empirically" code={axiomsCode} packages={["numpy"]} />
+
+## Computing probabilities: enumeration vs simulation
+
+There are two ways to compute the probability of an event:
+
+**Enumeration.** List Ω, list the event A, compute |A| / |Ω| (equal-outcome case) or sum P(ω) over ω in A. Feasible when Ω is small — coin flips, single die rolls, small card problems.
+
+**Simulation (Monte Carlo).** Sample many outcomes from Ω according to the measure P, count how often the event occurs, divide. The **law of large numbers** (a later chapter) guarantees this estimate converges to the true probability as the number of samples grows. Feasible when Ω is astronomically large but you can draw samples cheaply.
+
+For a GenAI engineer, simulation is the dominant tool: token sequences, image latents, dialog trajectories — none of these can be enumerated, but they can be sampled. Monte Carlo estimates back much of the evaluation and diagnostic tooling.
+
+<RunnableCode title="Monte Carlo probability estimation for a card problem" code={simulationCode} packages={["numpy"]} />
+
+The relative error of a Monte Carlo estimate shrinks as 1/√N — quadruple the samples for half the error. This is a fundamental scaling law you meet everywhere: A/B test sample sizes, SGD mini-batch noise, Bayesian posterior sampling, RL policy evaluation.
+
+## Frequentist vs Bayesian readings
+
+The **axioms** don't care how you *interpret* probability — but two rival interpretations coexist in practice:
+
+**Frequentist.** P(A) is the long-run fraction of trials in which A occurs, if you could repeat the experiment infinitely many times. Speaks only about *repeatable* experiments. Common in classical statistics, hypothesis testing, and much of the ML evaluation literature ("this model achieves 87% accuracy" is a frequentist statement — an average over held-out samples).
+
+**Bayesian.** P(A) is a *degree of belief* in A given the information you have. Can assign probabilities to one-off events ("P(this specific hypothesis is true)") because probability is subjective and updates with evidence via Bayes' theorem. Dominant in Bayesian ML, decision theory under uncertainty, and modern LLM calibration research.
+
+The axioms hold for both. The disagreement is only about which events are *allowed* to have a probability. Practical ML uses whichever framing is more useful for the problem — cross-validation is frequentist-flavoured, Bayesian optimization is Bayesian-flavoured, and both live inside the same measure-theoretic framework.
+
+## The traps that matter
+
+**Choose Ω before doing anything else.** Half of probability mistakes come from ambiguity about the sample space. "Given a family with two children, at least one is a boy — what's the probability both are?" has different answers depending on whether Ω = &#123;BB, BG, GB, GG&#125; or Ω = &#123;families with at least one boy&#125;. Always write down Ω explicitly.
+
+**Equally-likely is an assumption, not a default.** The uniform measure P(ω) = 1/|Ω| is convenient but *assumed*. Real experiments rarely have exactly uniform outcomes; you need domain knowledge or data to justify the measure.
+
+**Empty events have probability zero, but zero-probability events aren&rsquo;t always empty.** In continuous sample spaces (Ω = the real line, say) every specific point has probability zero even though the set is not empty. This is why continuous probability uses **densities** instead of point probabilities — the topic of the random-variables chapter.
+
+**Countable vs uncountable additivity.** Kolmogorov's third axiom allows countably infinite disjoint unions but not uncountably many. This is a measure-theoretic subtlety you rarely hit in practice, but it&rsquo;s the reason not every subset of ℝ has a well-defined probability — some pathological sets escape.
+
+**Simulation-based estimates come with noise.** A Monte Carlo estimate is itself random. Report a confidence interval or standard error, not just a point estimate. Standard error of a proportion estimate: sqrt(p(1−p)/N).
+
+<RealWorldML title="LLM sampling as a probability measure over a vocabulary sample space">
+
+Every autoregressive text generation is a walk through a sequence of probability measures. At each step:
+
+- **Sample space** Ω = the vocabulary V (say 32,000 tokens for a Llama-class model).
+- **Probability measure** P at that step = softmax(logits / T) where the logits are the model's output for the next token and T is the temperature. This measure satisfies all three Kolmogorov axioms: each P(token) is non-negative, they sum to 1, and disjoint token subsets add.
+- **Events** = subsets of the vocabulary you might care about: "the next token is a noun," "the next token starts a new sentence," "the next token is `&lt;end&gt;`."
+- **Sampling strategies** = restricted measures.
+  - *Greedy* = point-mass on the argmax; P(top token) = 1, others 0. (A valid but degenerate measure.)
+  - *top-k* = restrict support to the k most probable tokens and renormalize. New sample space is a k-element subset of V.
+  - *top-p (nucleus)* = restrict to the smallest set of tokens whose cumulative probability is at least p, then renormalize.
+  - *Temperature* = smooth adjustment to the measure. High T flattens (approaches uniform); low T sharpens (approaches the argmax point-mass).
+
+Every design choice for a decoding strategy is a choice about *which measure on Ω to sample from*. This clarity — that decoding is measure design, not just "picking a token" — is what lets you reason cleanly about phenomena like mode collapse (measure too sharp), repetitive text (measure ignores recent history), and hallucination (measure places positive mass on off-manifold outputs).
+
+</RealWorldML>
+
+<RunnableCode title="LLM sampling as a probability measure on a vocabulary" code={llmSamplingCode} packages={["numpy"]} />
+
+<StudyDepth
+  intro={<>Every subsequent chapter in probability (conditional, Bayes, random variables, distributions, CLT) rests on this vocabulary. Master the sample-space / event / measure trio and the rest becomes bookkeeping.</>}
+  drill={[
+    <>Sample space Ω = the set of all outcomes; an event is a subset; probabilities are numbers in [0, 1] assigned to events</>,
+    <>Kolmogorov axioms: P(E) ≥ 0, P(Ω) = 1, disjoint additivity</>,
+    <>Complement rule P(Aᶜ) = 1 − P(A) and inclusion–exclusion P(A ∪ B) = P(A) + P(B) − P(A ∩ B)</>,
+    <>Equal-outcome shortcut P(A) = |A| / |Ω| when justified; otherwise sum P(ω) over ω ∈ A</>,
+    <>Monte Carlo estimation error shrinks as 1/√N — 4× samples for 2× precision</>,
+    <>Frequentist vs Bayesian is an interpretation choice, not a rule difference — the axioms hold either way</>,
+  ]}
+  skim={[
+    <>Measure-theoretic subtleties (σ-algebras, non-measurable sets) — needed for rigorous proofs, not for engineering</>,
+    <>Historical fights between Bayesians and frequentists — instrumental, not important today</>,
+    <>Uncountable vs countable additivity — a pathology you almost never hit in ML</>,
+  ]}
+/>
+
+<CodeItYourself title="Three drills — enumeration, axioms, simulation">
+
+1. **Enumerate a 3-flip sample space.** Build Ω for three fair coin flips (8 outcomes). Compute the probability of each of: "all heads," "exactly two heads," "at least two heads," "no two consecutive heads." Verify by two methods: counting and Monte Carlo (100,000 trials). The empirical estimates should be within roughly 1/√N of the true values.
+
+2. **Verify inclusion–exclusion for three events.** Prove numerically that P(A ∪ B ∪ C) = P(A) + P(B) + P(C) − P(A ∩ B) − P(A ∩ C) − P(B ∩ C) + P(A ∩ B ∩ C). Pick a die-roll example (Ω = 1..6, three overlapping events like "even," "≥ 4," "prime").
+
+3. **Estimate a hard probability by simulation.** Birthday paradox: in a room of N people, what is the probability that two share a birthday? Simulate for N = 5, 15, 23, 50 with 10,000 trials each. Compare to the closed-form 1 − 365! / ((365 − N)! · 365ᴺ). Notice the sharp transition around N = 23 — this is a canonical example of non-intuitive probability answers.
+
+</CodeItYourself>
+
+<Summary>
+
+- **Sample space** Ω = the set of all outcomes of an experiment. Choose it first, always.
+- **Event** = any subset of Ω. "The die shows even" is the event &#123;2, 4, 6&#125;.
+- **Probability measure** P assigns a number in [0, 1] to each event, satisfying the Kolmogorov axioms.
+- **Three axioms**: (1) P(E) ≥ 0, (2) P(Ω) = 1, (3) disjoint additivity — the union of pairwise-disjoint events has probability equal to the sum of the individual probabilities.
+- **Complement rule**: P(Aᶜ) = 1 − P(A).
+- **Inclusion–exclusion**: P(A ∪ B) = P(A) + P(B) − P(A ∩ B). Generalizes to three or more events with alternating signs.
+- **Enumeration** works for small finite Ω; **simulation** (Monte Carlo) works for anything you can sample from.
+- **Frequentist vs Bayesian** interpretations both obey the same axioms; the difference is which events you're willing to assign probabilities to.
+- Every LLM decoding strategy is a *choice of probability measure* on the vocabulary sample space.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>A fair die is rolled once. Let A = &quot;even&quot; and B = &quot;at least 4.&quot; Compute P(A), P(B), P(A ∩ B), P(A ∪ B) — first by counting outcomes, then verify by inclusion–exclusion.</>,
+      hint: <>Ω = &#123;1, 2, 3, 4, 5, 6&#125;; A = &#123;2, 4, 6&#125;; B = &#123;4, 5, 6&#125;.</>,
+      answer: <>A ∩ B = &#123;4, 6&#125;. So P(A ∩ B) = 2/6 = 1/3. <br /> A ∪ B = &#123;2, 4, 5, 6&#125;. So P(A ∪ B) = 4/6 = 2/3. <br /> P(A) = 3/6 = 1/2; P(B) = 3/6 = 1/2. <br /> Inclusion–exclusion check: P(A) + P(B) − P(A ∩ B) = 1/2 + 1/2 − 1/3 = 1 − 1/3 = <b>2/3</b>. ✓</>,
+    },
+    {
+      difficulty: "easy",
+      q: <>A bag contains 3 red, 4 blue, 5 green marbles. One marble is drawn at random. What is P(not red)?</>,
+      hint: <>Use the complement rule; it&rsquo;s faster than summing blue + green.</>,
+      answer: <>|Ω| = 12; |red| = 3, so P(red) = 3/12 = 1/4. <br /> P(not red) = 1 − P(red) = 1 − 1/4 = <b>3/4</b>. <br /> Sanity check by direct count: |not red| = 4 + 5 = 9, so P(not red) = 9/12 = 3/4. ✓</>,
+    },
+    {
+      difficulty: "medium",
+      q: <>Two fair dice are rolled. What is P(the sum is 7)? What is P(both show the same number)?</>,
+      hint: <>|Ω| = 36 for two distinguishable dice. List favorable outcomes.</>,
+      answer: <>|Ω| = 6 · 6 = 36 (ordered pairs). <br /> Sum = 7: pairs (1,6), (2,5), (3,4), (4,3), (5,2), (6,1). Six outcomes. P = 6/36 = <b>1/6</b>. <br /> Both same: (1,1), (2,2), (3,3), (4,4), (5,5), (6,6). Six outcomes. P = 6/36 = <b>1/6</b>. <br /> Note that the events &quot;sum = 7&quot; and &quot;doubles&quot; are disjoint (a double cannot sum to 7, since twice anything from 1..6 is 2, 4, 6, 8, 10, or 12). So P(sum = 7 OR double) = 6/36 + 6/36 = 12/36 = 1/3.</>,
+    },
+    {
+      difficulty: "medium",
+      q: <>Prove the complement rule P(Aᶜ) = 1 − P(A) directly from the three Kolmogorov axioms.</>,
+      hint: <>Consider A and Aᶜ as disjoint events whose union is Ω.</>,
+      answer: <>A and Aᶜ are disjoint by definition (nothing is both in A and not in A). Their union is Ω (every outcome is either in A or not in A). <br /> Apply axiom 3 (disjoint additivity): <br /> P(A ∪ Aᶜ) = P(A) + P(Aᶜ). <br /> But P(A ∪ Aᶜ) = P(Ω) = 1 by axiom 2. So P(A) + P(Aᶜ) = 1, giving <br /> <b>P(Aᶜ) = 1 − P(A)</b>. ∎</>,
+    },
+    {
+      difficulty: "hard",
+      q: <>Prove the inclusion–exclusion identity for two events: P(A ∪ B) = P(A) + P(B) − P(A ∩ B). Then extend to three events.</>,
+      hint: <>Partition A ∪ B into three disjoint pieces: A only, B only, both. Apply axiom 3 and count how many times each piece appears when you write P(A) + P(B).</>,
+      answer: <>Partition A ∪ B into three disjoint sets: <br />  A \\ B (in A only), B \\ A (in B only), A ∩ B (in both). Their union is A ∪ B, and they are pairwise disjoint. By axiom 3: <br /> P(A ∪ B) = P(A \\ B) + P(B \\ A) + P(A ∩ B). <br /> Also, A = (A \\ B) ∪ (A ∩ B) (disjoint union), so P(A) = P(A \\ B) + P(A ∩ B), meaning P(A \\ B) = P(A) − P(A ∩ B). Similarly P(B \\ A) = P(B) − P(A ∩ B). Substituting: <br /> P(A ∪ B) = P(A) − P(A ∩ B) + P(B) − P(A ∩ B) + P(A ∩ B) <br /> = <b>P(A) + P(B) − P(A ∩ B)</b>. ∎ <br /><br /> For three events: <br /> P(A ∪ B ∪ C) = P(A) + P(B) + P(C) − P(A ∩ B) − P(A ∩ C) − P(B ∩ C) + P(A ∩ B ∩ C). <br /> Same idea, applied twice: split C into &quot;C ∩ (A ∪ B)&quot; and &quot;C only,&quot; then recurse. The alternating-sign pattern is the general inclusion–exclusion principle.</>,
+    },
+    {
+      difficulty: "hard",
+      q: <>You have a bag of 10 balls, 3 of which are red. Draw 3 balls without replacement. What is P(at least one red)? Solve two ways: directly by summing cases, and via the complement.</>,
+      hint: <>Complement of &quot;at least one red&quot; is &quot;no reds.&quot; The direct sum has three cases (exactly 1, 2, or 3 reds).</>,
+      answer: <><b>Complement method (fast).</b> <br /> P(no reds) = C(7, 3) / C(10, 3) = 35 / 120 = 7/24. <br /> P(at least one red) = 1 − 7/24 = <b>17/24</b>. <br /><br /> <b>Direct method (slow).</b> <br /> P(exactly 1 red) = C(3,1) · C(7,2) / C(10,3) = 3 · 21 / 120 = 63/120. <br /> P(exactly 2 reds) = C(3,2) · C(7,1) / C(10,3) = 3 · 7 / 120 = 21/120. <br /> P(exactly 3 reds) = C(3,3) · C(7,0) / C(10,3) = 1 · 1 / 120 = 1/120. <br /> Sum = (63 + 21 + 1) / 120 = 85/120 = <b>17/24</b>. ✓ <br /><br /> The complement is always faster when &quot;at least one X&quot; type questions arise. Remember it.</>,
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "The sample space Ω is:",
+      choices: [
+        { text: "The most likely outcome of an experiment" },
+        { text: "The set of all possible outcomes of an experiment", correct: true },
+        { text: "The event with the highest probability" },
+        { text: "A synonym for probability distribution" },
+      ],
+      explanation: <>Ω enumerates every possible outcome. An <em>event</em> is a subset of Ω. A <em>probability distribution</em> is a function that assigns a number to each event. All three are distinct concepts and should not be conflated.</>,
+    },
+    {
+      q: "Which of the following is one of the three Kolmogorov axioms?",
+      choices: [
+        { text: "P(A ∩ B) = P(A) · P(B)" },
+        { text: "P(A ∪ B) = P(A) + P(B) − P(A ∩ B)" },
+        { text: "For pairwise disjoint events, P(union) = sum of P(each)", correct: true },
+        { text: "P(A | B) = P(B | A) · P(A) / P(B)" },
+      ],
+      explanation: <>The third axiom is <em>countable additivity for disjoint events</em>. The other options are all theorems (inclusion–exclusion, independence, Bayes) that follow from or interact with the axioms, but they are not axioms themselves.</>,
+    },
+    {
+      q: "For any event A, P(Aᶜ) equals:",
+      choices: [
+        { text: "P(A)" },
+        { text: "1 − P(A)", correct: true },
+        { text: "P(A) − 1" },
+        { text: "0 (always)" },
+      ],
+      explanation: <>Since A and its complement are disjoint and together cover Ω, axiom 3 gives P(A) + P(Aᶜ) = P(Ω) = 1 (axiom 2). Rearranging: P(Aᶜ) = 1 − P(A). This is the &quot;complement rule&quot; and is the single most useful trick for &quot;at least one&quot; problems.</>,
+    },
+    {
+      q: "The standard error of a Monte Carlo probability estimate scales as:",
+      choices: [
+        { text: "1/N (linear improvement)" },
+        { text: "1/√N (need 4× samples for 2× precision)", correct: true },
+        { text: "1/log(N) (very slow)" },
+        { text: "It doesn&rsquo;t depend on N" },
+      ],
+      explanation: <>The standard error of an average of N iid Bernoulli samples is √(p(1 − p)/N), which scales as 1/√N. This is a fundamental scaling law you meet in A/B testing, SGD noise floors, RL policy evaluation, and Bayesian posterior sampling. Do not confuse with the 1/N rate of variance shrinkage — the <em>standard deviation</em> shrinks as 1/√N, and it is the standard deviation you compare against effect sizes.</>,
+    },
+    {
+      q: "In LLM decoding, top-k sampling is best described as:",
+      choices: [
+        { text: "Ignoring the model output" },
+        { text: "Restricting the sample space to the k most probable tokens and renormalizing", correct: true },
+        { text: "Sampling k tokens simultaneously" },
+        { text: "Choosing the argmax token every time" },
+      ],
+      explanation: <>Every decoding strategy is a choice of probability measure on the vocabulary sample space. top-k restricts support to the top k tokens (a subset of Ω) and renormalizes so the restricted measure still sums to 1. Greedy is the k=1 special case (a point mass on the argmax). This measure-design perspective is why decoding strategies are interchangeable pieces of a larger design vocabulary.</>,
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/probability/sample-spaces-events" title="Sample spaces, events & axioms" />

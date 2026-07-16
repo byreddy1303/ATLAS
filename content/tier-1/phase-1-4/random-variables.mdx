@@ -1,0 +1,426 @@
+---
+title: Random variables & distributions
+tier: 1
+phase: "1.4"
+---
+
+export const pmfCode = `# A random variable is a function from the sample space to a number.
+# For a DISCRETE random variable, the probability mass function (PMF)
+# gives P(X = x) for each possible value x.
+import numpy as np
+
+# X = sum of two fair dice.  Compute the PMF by enumeration.
+from collections import Counter
+from itertools import product
+
+outcomes = list(product(range(1, 7), repeat=2))
+sums = [d1 + d2 for d1, d2 in outcomes]
+counts = Counter(sums)
+pmf = {s: counts[s] / 36 for s in sorted(counts)}
+
+print("PMF of X = d1 + d2:")
+for x, p in pmf.items():
+    bar = "#" * int(p * 100)
+    print(f"  P(X = {x:>2}) = {p:.4f}   {bar}")
+
+# Verify it is a valid PMF: non-negative and sums to 1.
+print(f"\\nSum of PMF values = {sum(pmf.values()):.6f}   (must equal 1)")
+print(f"All values non-negative? {all(p >= 0 for p in pmf.values())}")
+
+# Compute a probability of an event using the PMF.
+# P(X >= 10) = P(X = 10) + P(X = 11) + P(X = 12)
+p_at_least_10 = sum(p for x, p in pmf.items() if x >= 10)
+print(f"\\nP(X >= 10) = {p_at_least_10:.4f}   (analytical 6/36 = 0.1667)")`;
+
+export const pdfCode = `# For a CONTINUOUS random variable, we use a probability DENSITY function (PDF).
+# P(X = x) is exactly 0 for any specific x; probability comes from integrating
+# the density over an interval: P(a <= X <= b) = integral from a to b of f(x) dx.
+import numpy as np
+from scipy.stats import norm
+
+# Standard normal N(0, 1): f(x) = (1/sqrt(2*pi)) * exp(-x^2 / 2).
+x_grid = np.linspace(-5, 5, 1000)
+f = norm.pdf(x_grid)
+
+# Numerical integration -- should equal 1.
+area = np.trapezoid(f, x_grid)
+print(f"Integral of PDF over R (approx by grid) = {area:.6f}   (must equal 1)")
+
+# Probability of an interval.
+p_interval = norm.cdf(1.96) - norm.cdf(-1.96)
+print(f"P(-1.96 <= X <= 1.96) = {p_interval:.4f}   (the 95% interval)")
+
+# Density values -- can be LARGER than 1!  Density is not a probability.
+print(f"\\nf(0) = {norm.pdf(0):.4f}   (0.3989, > 0 but < 1 here; for narrow distributions f can exceed 1)")
+print(f"Narrow normal f(0) with std=0.1: {norm.pdf(0, scale=0.1):.4f}   (~3.99 -- density above 1)")
+print("Density is a rate of probability per unit length; not a probability itself.")
+
+# Empirical verification: sample many draws, plot histogram, compare to PDF.
+rng = np.random.default_rng(0)
+samples = rng.normal(size=100_000)
+counts, edges = np.histogram(samples, bins=60, density=True)   # density=True normalizes
+centers = 0.5 * (edges[:-1] + edges[1:])
+print(f"\\nEmpirical vs PDF at x=0: histogram {counts[len(counts)//2]:.4f} vs PDF {norm.pdf(0):.4f}")`;
+
+export const cdfCode = `# The cumulative distribution function is universal: works for both
+# discrete and continuous RVs.  F(x) = P(X <= x), a monotone step function
+# (discrete) or a smooth increasing function (continuous), always in [0, 1].
+import numpy as np
+from scipy.stats import norm
+rng = np.random.default_rng(0)
+
+# 1) Empirical CDF of standard normal from samples.
+samples = np.sort(rng.normal(size=1000))
+n = len(samples)
+empirical = np.arange(1, n + 1) / n
+
+# 2) Theoretical CDF.
+theoretical = norm.cdf(samples)
+
+# Show they agree in the middle and at the tails.
+for i in [50, 250, 500, 750, 950]:
+    print(f"x = {samples[i]:+.3f}:  empirical F = {empirical[i]:.4f},  theoretical F = {theoretical[i]:.4f}")
+
+# 3) Use the CDF for probability calculations.
+# P(a < X <= b) = F(b) - F(a).
+a, b = -1.0, 2.0
+print(f"\\nP({a} < X <= {b}) = F({b}) - F({a}) = {norm.cdf(b) - norm.cdf(a):.4f}")
+
+# 4) Inverse CDF (quantile function) for sampling and confidence intervals.
+# Percent-point function gives F^-1(q).
+q_lo, q_hi = norm.ppf(0.025), norm.ppf(0.975)
+print(f"95% central interval:  ({q_lo:.4f}, {q_hi:.4f})   (approximately +-1.96)")`;
+
+export const changeOfVarsCode = `# Change of variables: if Y = g(X) is a monotone transformation and g^-1
+# exists, the density of Y is f_Y(y) = f_X(g^-1(y)) * |dg^-1(y)/dy|.
+# This is the Jacobian correction.  Fails without it -- densities don't just
+# push through transformations like probabilities of events do.
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import norm, lognorm
+rng = np.random.default_rng(0)
+
+# X ~ N(0, 1).  Y = exp(X) is log-normal.
+n = 100_000
+X = rng.normal(size=n)
+Y = np.exp(X)
+
+# Empirical density of Y (histogram) vs theoretical log-normal density.
+y_grid = np.linspace(0.01, 6, 400)
+# Change-of-variables computed by hand.  y = exp(x), so x = log(y),
+# dx/dy = 1/y.  Then f_Y(y) = f_X(log y) * (1/y).
+f_Y_by_hand = norm.pdf(np.log(y_grid)) / y_grid
+f_Y_scipy = lognorm.pdf(y_grid, s=1)
+
+print("Change of variables verified numerically:")
+print(f"  Max abs error between hand-derived and scipy log-normal: {np.abs(f_Y_by_hand - f_Y_scipy).max():.6f}")
+
+# Visualize.
+fig, ax = plt.subplots(figsize=(6.6, 3.8), facecolor="none")
+ax.set_facecolor("#0f0f14")
+ax.hist(Y, bins=80, range=(0, 6), density=True, alpha=0.35, color="#c4f04b", label="samples of exp(N(0,1))")
+ax.plot(y_grid, f_Y_by_hand, "-", color="#c4f04b", lw=2.2, label="f_Y from change-of-vars")
+ax.set_xlabel("y", color="#dcdcd6")
+ax.set_ylabel("density", color="#dcdcd6")
+ax.legend(facecolor="#181820", edgecolor="#2a2a35", labelcolor="#dcdcd6")
+ax.tick_params(colors="#dcdcd6")
+for spine in ax.spines.values():
+    spine.set_color("#2a2a35")
+plt.tight_layout()
+plt.show()
+print("\\nWithout the |dx/dy| = 1/y Jacobian, the transformed density would not integrate to 1.")`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/probability/sample-spaces-events", label: "Sample spaces, events & axioms", blurb: "A random variable is a function from a sample space to numbers — you need Ω and event vocabulary first." },
+  { href: "/learn/mathematics/calculus/derivatives-single-var", label: "Derivatives (single-variable)", blurb: "PDFs relate to CDFs via differentiation; change-of-variables uses the derivative of the inverse transform." },
+]} />
+
+<NewConcepts
+  concepts={[
+    { name: "Variational Autoencoders (VAEs)", blurb: "generative models with a learned Gaussian latent-variable posterior. Mentioned in RealWorldML as a canonical continuous-RV example; deep-dive in Tier 3–4." },
+    { name: "Diffusion models (DDPM)", blurb: "generative models built as a Markov chain of Gaussian noise-injection then denoising. Referenced here for their ε ~ 𝒩(0, I) noise; full treatment in Tier 6." },
+    { name: "Normalizing flows (RealNVP, Glow, IAF, MAF)", blurb: "invertible neural networks that transform a base distribution into a complex target via change-of-variables. Mentioned as the direct engineering application of the Jacobian formula." },
+    { name: "Reparameterization trick", blurb: "the z = μ + σ·ε trick that makes gradients flow through a sampling operation, foundational to VAE training." },
+  ]}
+/>
+
+<Motivation title="Random variables turn events into numbers you can compute with">
+
+A random variable X is just a function from the sample space Ω to numbers. It gives you a scalar (or vector) label for every outcome, which is the shape you actually need to compute expectations, losses, distributions of predictions, and every other numerical quantity in ML. Sample-space language talks about events (subsets); random-variable language talks about *the number you get* — and numbers are what our tools eat.
+
+Every distribution you meet in ML lives inside this framework:
+
+- **Softmax output** = a random variable over the vocabulary, with PMF P(next token = wᵢ) equal to the softmax weight of the i-th logit. Every LLM sampling step draws one realization of this RV.
+- **Diffusion noise ε ~ 𝒩(0, I)** = a multivariate continuous random variable. The forward diffusion process is a scheduled sequence of noisy random variables; the reverse process learns to invert it.
+- **Model prediction error** = a random variable indexed by data point. Its distribution controls loss, calibration, and confidence intervals.
+- **Latent code z in a VAE** = a continuous random variable, usually parameterized as 𝒩(μ, σ²) per data point.
+
+You need two representations. For **discrete** RVs (categorical, count, tokenwise), a **probability mass function** P(X = x) that assigns weight to each possible value. For **continuous** RVs (real-valued, on ℝ or ℝⁿ), a **probability density function** f(x) that says how much probability is packed per unit length — and where P(X = x) = 0 for any single point, but ∫ f(x) dx over an interval gives a real probability. The **cumulative distribution function** F(x) = P(X ≤ x) unifies both.
+
+This chapter builds those three tools (PMF, PDF, CDF) plus the change-of-variables formula that underpins every normalizing-flow and diffusion architecture.
+
+</Motivation>
+
+<Intuition title="A random variable is a labeling of outcomes; a distribution is the histogram of those labels weighted by probability">
+
+Picture the sample space Ω one more time. A random variable X paints a number on every outcome. If you draw an outcome from Ω according to the probability measure P, X gives you a number — that number is itself random. The **distribution of X** is the pattern of numbers you&rsquo;d see if you repeated the experiment many times, weighted by their probabilities.
+
+Discrete: the paint job labels outcomes with values from a countable set. The distribution is a histogram — a PMF. Sum of bars = 1.
+
+Continuous: the paint job labels outcomes with real numbers. The distribution is a smooth curve — a PDF. Area under the curve = 1. No single point has positive probability, but intervals do.
+
+The **CDF** F(x) = P(X ≤ x) works for both: how much total probability lies at or below the value x? In the discrete case it&rsquo;s a step function; in the continuous case it&rsquo;s a smooth increasing function. The PDF is the derivative of the CDF (where the derivative exists); the PMF is the size of each jump in the CDF.
+
+</Intuition>
+
+<Recall term="Sample space">
+
+Ω = the set of all possible outcomes. A random variable is a function X: Ω → ℝ. Every event about X (say &ldquo;X > 5&rdquo;) corresponds to a subset of Ω (all the outcomes whose X-value is greater than 5). Probabilities of RV events come from the underlying probability measure on Ω.
+
+</Recall>
+
+## Discrete random variables and the PMF
+
+A **discrete random variable** takes values in a countable set — finite (a die roll) or countably infinite (a Poisson count). Its **probability mass function** is
+
+$$
+p(x) \;=\; P(X = x)
+$$
+
+for each value x in the support of X. It is a valid PMF iff two things hold:
+
+- **Non-negativity**: p(x) ≥ 0 for every x.
+- **Normalization**: $\sum_x p(x) = 1$.
+
+Every probability question about X reduces to a sum of PMF values. P(X ∈ A) = Σ<sub>x ∈ A</sub> p(x). For X = sum of two dice, the PMF is a triangular histogram peaking at 7.
+
+<RunnableCode title="Building and using a PMF: sum of two dice" code={pmfCode} packages={["numpy"]} />
+
+**Common discrete RVs in ML.** Bernoulli (binary label), Binomial (count of successes), Categorical / Multinoulli (one-hot outcome from K classes — softmax lands here), Poisson (event counts per unit time). We&rsquo;ll catalog them in the next chapter.
+
+## Continuous random variables and the PDF
+
+A **continuous random variable** takes values in an uncountable set, typically ℝ or a subset. For any specific value x, P(X = x) = 0 — there are simply too many points, and each carries no mass on its own. Probability instead lives on *intervals*, expressed via a **probability density function** f:
+
+$$
+P(a \leq X \leq b) \;=\; \int_a^b f(x) \, dx
+$$
+
+A valid PDF satisfies:
+
+- **Non-negativity**: f(x) ≥ 0 for every x.
+- **Normalization**: $\int_{-\infty}^{\infty} f(x) \, dx = 1$.
+
+**Density is not probability.** f(x) has units of probability *per unit x*, so it can be greater than 1 (a very narrow distribution has a very tall density). The number you should always ask for is the *integral over an interval*, not the density at a point.
+
+<RunnableCode title="Standard normal PDF: normalization, tail probabilities, samples" code={pdfCode} packages={["numpy", "scipy"]} />
+
+**Common continuous RVs in ML.** Uniform, Gaussian / normal, exponential, log-normal, Beta, Gamma, Dirichlet. All of these are cataloged in the next chapter. The Gaussian in particular is the workhorse: latent codes, weight initializations, gradient noise, most CLT-based analyses.
+
+## The CDF — the universal representation
+
+The **cumulative distribution function** is defined for any RV, discrete or continuous:
+
+$$
+F(x) \;=\; P(X \leq x).
+$$
+
+Properties:
+
+- Monotone non-decreasing.
+- F(−∞) = 0, F(+∞) = 1.
+- Right-continuous. For discrete RVs, F is a step function; for continuous, F is (usually) smooth and increasing.
+- **PDF is the derivative of the CDF** where it exists: f(x) = F′(x).
+- **PMF is the size of each jump** in the CDF at discrete atoms: p(x) = F(x) − F(x⁻).
+- **P(a &lt; X ≤ b) = F(b) − F(a)** — the most useful identity for interval probabilities.
+
+The CDF is also the tool for **sampling from an arbitrary distribution**. If U ~ Uniform(0, 1), then X = F⁻¹(U) has CDF F. This inverse-CDF (or &ldquo;quantile&rdquo;) method is how libraries generate samples from any distribution whose CDF you can invert.
+
+<RunnableCode title="Empirical vs theoretical CDF; inverse-CDF for quantiles" code={cdfCode} packages={["numpy", "scipy"]} />
+
+## Change of variables — how transformations reshape distributions
+
+If Y = g(X) for a smooth, monotone, invertible function g, the density of Y is
+
+$$
+f_Y(y) \;=\; f_X(g^{-1}(y)) \cdot \left| \frac{d g^{-1}(y)}{dy} \right|.
+$$
+
+The `|dg⁻¹/dy|` factor is called the **Jacobian correction**. Without it, densities don&rsquo;t transform properly — they wouldn&rsquo;t integrate to 1 after the transform. The intuition: `g` compresses or stretches space; the density has to compensate so that mass is preserved.
+
+**Multidimensional generalization.** For Y = g(X) with X, Y ∈ ℝⁿ:
+
+$$
+f_Y(\mathbf{y}) \;=\; f_X(g^{-1}(\mathbf{y})) \cdot |\det J_{g^{-1}}(\mathbf{y})|
+$$
+
+where J is the Jacobian matrix of g⁻¹. This determinant term is *exactly* what makes normalizing flows (RealNVP, Glow, IAF) trainable: the flow architecture ensures the Jacobian is easy to compute — typically triangular so its determinant is the product of diagonal entries — while allowing arbitrary invertible transforms of a base distribution into a complex learned one.
+
+**Worked example**: X ~ 𝒩(0, 1), Y = exp(X). Then g⁻¹(y) = log(y) with derivative 1/y. So $f_Y(y) = \frac{1}{y\sqrt{2\pi}} \exp\left(-\frac{(\log y)^2}{2}\right)$ — the log-normal density.
+
+<RunnableCode title="Change of variables: X ~ N(0,1), Y = exp(X) is log-normal" code={changeOfVarsCode} packages={["numpy", "scipy", "matplotlib"]} />
+
+## The traps that matter
+
+**Density is not probability.** A density value f(x) has units of &ldquo;probability per unit x.&rdquo; It can be larger than 1. Never quote f(x) as if it were a probability. Always integrate.
+
+**Careful with discrete vs continuous when mixing.** If your RV has both point-mass atoms (e.g., a zero-inflated model with P(X = 0) &gt; 0) and continuous portion, use the CDF or a mixture representation. Pure PDF/PMF language breaks.
+
+**The Jacobian is mandatory in change of variables.** Every normalizing flow paper starts with `log p(x) = log p_z(z) + log |det J|`. Forget the determinant and your log-likelihoods will be off by an amount that depends on the transform.
+
+**Sampling ≠ evaluating the density.** Some models (VAEs, normalizing flows) let you evaluate the density; some (score-based diffusion) only let you sample. Both are useful; know which one your model supports.
+
+**Support matters.** The support of an RV is the set where its density (or mass) is positive. Log-normal has support (0, ∞); trying to evaluate its density at a negative number gives zero or NaN in a bad library, not a helpful error.
+
+**Continuous CDFs are always continuous; PDFs may not be.** F is smooth iff the underlying density is (roughly) continuous. Distributions with sharp cutoffs (uniform, exponential at zero) have PDFs with jumps but CDFs that stay continuous.
+
+<RealWorldML title="Random variables everywhere: LLM sampling, diffusion noise, VAE latents">
+
+Three canonical GenAI systems, each with a distinct random-variable structure:
+
+**LLM next-token sampling.** At each generation step, the model produces logits over the vocabulary, softmax turns them into a categorical PMF, and the sampled token is a *discrete* random variable with that PMF. Temperature scales the logits (T &lt; 1 sharpens; T &gt; 1 flattens); top-k restricts the support; top-p (nucleus) restricts to the smallest set whose cumulative CDF exceeds p. Every decoding decision is a manipulation of the PMF or its CDF.
+
+**Diffusion models.** The forward process at each step adds Gaussian noise ε ~ 𝒩(0, I): a *continuous* random variable, isotropic, mean zero, with a known PDF. The full noisy image x_t is a random variable whose distribution is a scaled + shifted version of x₀ plus noise. Training is: given a noisy x_t, predict the noise ε (equivalently, the score ∇ log p(x_t)). At sampling time, you invert this process — Markov chain of RVs going from pure noise back to a clean image.
+
+**VAE latent codes.** For each input x, the encoder outputs μ(x) and log σ²(x); the latent z is sampled as z = μ(x) + σ(x) · ε with ε ~ 𝒩(0, I) — the *reparameterization trick* that makes gradients flow through the sampling operation. z is a *continuous* random variable whose density is a Gaussian centered at μ(x). The decoder maps z back to reconstruction. The whole framework rests on interpreting z as an RV and its distribution as a learnable posterior q_ϕ(z | x).
+
+The unifying principle: **every generative model is a change of variables from a simple base RV (Gaussian, uniform, or categorical) to a complex target distribution.** Diffusion learns a stochastic change of variables; flows learn a deterministic invertible one; VAEs learn a conditional latent variable. Change-of-variables + Jacobian corrections + density evaluation are the mathematical toolkit that runs the whole show.
+
+</RealWorldML>
+
+<StudyDepth
+  intro={<>Random variables are the interface between sample-space probability and numerical ML. PMF/PDF/CDF are the three representations, and change-of-variables is the tool that connects distributions across transformations. Master these and every generative model becomes an exercise in RV manipulation.</>}
+  drill={[
+    <>Random variable = function from Ω to a number; distribution of X is inherited from P via X&rsquo;s preimage sets</>,
+    <>PMF p(x) = P(X = x) for discrete RVs; non-negative and sums to 1</>,
+    <>PDF f(x) for continuous RVs; density, not probability; P(a ≤ X ≤ b) = ∫ f from a to b</>,
+    <>CDF F(x) = P(X ≤ x); universal representation; P(a &lt; X ≤ b) = F(b) − F(a); f = F′ where it exists</>,
+    <>Change of variables: f_Y(y) = f_X(g⁻¹(y)) · |dg⁻¹/dy| — the Jacobian correction is not optional</>,
+    <>Inverse-CDF sampling: X = F⁻¹(U) with U ~ Uniform(0, 1) generates draws from any distribution whose CDF you can invert</>,
+  ]}
+  skim={[
+    <>Measure-theoretic construction of random variables (σ-algebras, Borel sets) — for rigorous proofs, not for engineering</>,
+    <>Distributions with pathological CDFs (Cantor, singular continuous) — never seen in ML</>,
+    <>The full catalog of specific distributions — covered in the next chapter (distributions-catalog)</>,
+  ]}
+/>
+
+<CodeItYourself title="Three drills — PMF, PDF, CDF">
+
+1. **PMF of the max of two dice.** X = max of two independent fair-die rolls. Compute the PMF by enumerating 36 outcomes. Verify normalization and non-negativity. Compute P(X ≥ 5) two ways: from the PMF, and by the complement rule 1 − P(X ≤ 4).
+
+2. **Empirical vs theoretical CDF for exponential.** Sample 5,000 draws from an exponential distribution with rate λ = 2 (mean = 0.5). Plot the empirical CDF and compare to the theoretical F(x) = 1 − exp(−λx). Also plot the empirical PDF (histogram) vs the theoretical f(x) = λ exp(−λx). Comment on where they disagree (should be tails, due to sample scarcity).
+
+3. **Change of variables from uniform to any distribution.** Use inverse-CDF sampling: draw U ~ Uniform(0, 1) and transform Y = F⁻¹(U) for a target distribution — try F⁻¹(u) = −log(1 − u) / λ (the exponential quantile). Verify by histogram that Y has the exponential distribution with rate λ. This is exactly how numpy&rsquo;s exponential sampler works under the hood.
+
+</CodeItYourself>
+
+<Summary>
+
+- **Random variable** X: Ω → ℝ. Turns outcomes into numbers you can compute with.
+- **Discrete RVs** have a **PMF** p(x) = P(X = x). Non-negative, sums to 1. Every probability is a sum of PMF values.
+- **Continuous RVs** have a **PDF** f(x). Non-negative, integrates to 1 over the support. Density, not probability — can exceed 1. Probabilities of intervals via integration.
+- **CDF** F(x) = P(X ≤ x). Universal, always exists, monotone in [0, 1]. Discrete: step function. Continuous: smooth. PDF = F′ where it exists; PMF = jump sizes.
+- **Change of variables**: f_Y(y) = f_X(g⁻¹(y)) · |dg⁻¹/dy|. The Jacobian correction preserves normalization under transforms.
+- **Inverse-CDF sampling**: X = F⁻¹(U), U ~ Uniform(0, 1) generates draws from any distribution whose CDF you can invert.
+- **Every generative model** is a change of variables from a base RV to a complex target: flows (deterministic invertible), VAEs (learned Gaussian latents), diffusion (stochastic Markov chain).
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>Let X take values in &#123;0, 1, 2, 3&#125; with p(0) = 0.1, p(1) = 0.3, p(2) = 0.4, p(3) = 0.2. Verify this is a valid PMF and compute P(X ≥ 2).</>,
+      hint: <>Check non-negativity and sum-to-1; use the PMF to sum probabilities for the event.</>,
+      answer: <>All p(x) ≥ 0. Sum = 0.1 + 0.3 + 0.4 + 0.2 = 1.0. Valid PMF. <br /> P(X ≥ 2) = p(2) + p(3) = 0.4 + 0.2 = <b>0.6</b>.</>,
+    },
+    {
+      difficulty: "easy",
+      q: <>The PDF of a continuous RV X on [0, 2] is f(x) = kx for some constant k, and f(x) = 0 elsewhere. Find k, then compute P(X ≤ 1).</>,
+      hint: <>Use the normalization condition ∫ f = 1 to solve for k. Then integrate f from 0 to 1.</>,
+      answer: <>Normalization: ∫₀² kx dx = k · [x²/2]₀² = k · 2 = 1, so <b>k = 1/2</b>. <br /> P(X ≤ 1) = ∫₀¹ (x/2) dx = [x²/4]₀¹ = <b>1/4 = 0.25</b>. <br /> Sanity check: since more mass sits at larger x (f is increasing), only 1/4 of the total lies in the lower half, matching intuition.</>,
+    },
+    {
+      difficulty: "medium",
+      q: <>If F(x) is the CDF of a continuous RV X, show that Y = F(X) is uniformly distributed on [0, 1]. (This is the &ldquo;probability integral transform.&rdquo;)</>,
+      hint: <>Compute the CDF of Y: G(y) = P(Y ≤ y) = P(F(X) ≤ y) = P(X ≤ F⁻¹(y)) (assuming F is invertible).</>,
+      answer: <>Assume F is continuous and strictly increasing so F⁻¹ exists. Then for y ∈ [0, 1]: <br /> G(y) = P(Y ≤ y) = P(F(X) ≤ y) = P(X ≤ F⁻¹(y)) = F(F⁻¹(y)) = <b>y</b>. <br /> So Y has CDF G(y) = y on [0, 1] — that&rsquo;s the CDF of Uniform(0, 1). ∎ <br /><br /> <b>Practical use</b>: this fact is why we can test whether a probabilistic prediction is calibrated. Given predicted CDF F̂ for observed values x, compute u_i = F̂(x_i). If the model is well-calibrated, the u_i should look like uniform(0, 1) samples. Deviation from uniformity signals miscalibration. This is the basis of &ldquo;probability integral transform (PIT)&rdquo; diagnostics in forecast evaluation.</>,
+    },
+    {
+      difficulty: "medium",
+      q: <>X ~ Uniform(0, 1). Let Y = −log(1 − X). Find the density of Y.</>,
+      hint: <>Use the change-of-variables formula. Y is a monotone function of X.</>,
+      answer: <>Let g(x) = −log(1 − x), so g⁻¹(y) = 1 − exp(−y) with derivative dg⁻¹/dy = exp(−y). <br /> f_X on [0, 1] is 1 (uniform), and 0 elsewhere. <br /> f_Y(y) = f_X(1 − exp(−y)) · |exp(−y)| = 1 · exp(−y) = <b>exp(−y)</b> for y ≥ 0. <br /> That&rsquo;s the standard exponential distribution with rate 1. <br /><br /> This is inverse-CDF sampling in disguise: F(y) = 1 − exp(−y) is the CDF of Exp(1), and F⁻¹(u) = −log(1 − u). Feeding uniform draws through F⁻¹ gives exponential draws.</>,
+    },
+    {
+      difficulty: "hard",
+      q: <>Let X ~ 𝒩(μ, σ²). Show that Y = (X − μ) / σ ~ 𝒩(0, 1). (This is the standardization transform.)</>,
+      hint: <>Use change of variables. Y = g(X) with g(x) = (x − μ) / σ.</>,
+      answer: <>g(x) = (x − μ)/σ has inverse g⁻¹(y) = σy + μ with derivative dg⁻¹/dy = σ. <br /> The PDF of X is f_X(x) = (1/(σ√(2π))) exp(−(x−μ)²/(2σ²)). <br /> Change of variables: <br /> f_Y(y) = f_X(σy + μ) · |σ| = (1/(σ√(2π))) exp(−((σy + μ − μ)²)/(2σ²)) · σ <br /> = (1/(σ√(2π))) exp(−y²/2) · σ <br /> = <b>(1/√(2π)) exp(−y²/2)</b>. <br /> That is the standard normal density N(0, 1). ∎ <br /><br /> This is why we always standardize inputs and outputs to zero-mean-unit-variance before modeling: the transformation X → (X − μ)/σ takes any Gaussian to the standard Gaussian, whose properties (percentiles, tail probabilities, moment formulas) are tabulated and universal.</>,
+    },
+    {
+      difficulty: "hard",
+      q: <>A normalizing flow transforms a base distribution z ~ 𝒩(0, I) via an invertible map x = g(z). Show that log p_x(x) = log p_z(z) − log |det J_g(z)|. Explain why the sign in front of the Jacobian log-determinant is negative.</>,
+      hint: <>Start from the multivariate change-of-variables formula and take logs. The sign flip appears because we&rsquo;re going from z to x rather than from x to z.</>,
+      answer: <>Multivariate change of variables: <br /> f_X(x) = f_Z(g⁻¹(x)) · |det J_{"{g⁻¹}"}(x)|. <br /> Let z = g⁻¹(x). By the inverse function theorem, J_{"{g⁻¹}"}(x) = J_g(z)⁻¹, so |det J_{"{g⁻¹}"}(x)| = 1 / |det J_g(z)|. <br /> Substitute: f_X(x) = f_Z(z) / |det J_g(z)|. Take logs: <br /> <b>log p_x(x) = log p_z(z) − log |det J_g(z)|.</b> ∎ <br /><br /> The negative sign is because the Jacobian J_g measures how g <em>expands</em> volume from z-space to x-space. If g expands volume (|det| &gt; 1), the density gets diluted in x-space, so log p_x is smaller than log p_z. If g contracts volume (|det| &lt; 1), density concentrates, so log p_x is larger. The correction preserves total mass at 1. <br /><br /> Every flow architecture (RealNVP, Glow, IAF, MAF, neural spline flows) is designed so that the Jacobian is triangular or has some other structure that makes log |det J| cheap to compute — otherwise training would be O(n³) per step.</>,
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "A random variable X is:",
+      choices: [
+        { text: "A single outcome of an experiment" },
+        { text: "A function from the sample space Ω to numbers", correct: true },
+        { text: "A synonym for probability" },
+        { text: "The variance of a distribution" },
+      ],
+      explanation: <>An RV is a function X: Ω → ℝ (or ℝⁿ). It assigns a number to every outcome. The distribution of X is inherited from the probability measure on Ω via the preimages of numeric events. &ldquo;Random&rdquo; is a bit of a misnomer — the function itself is deterministic; the randomness comes from the underlying outcome we don&rsquo;t know.</>,
+    },
+    {
+      q: "For a continuous random variable, P(X = 5) equals:",
+      choices: [
+        { text: "The density f(5)" },
+        { text: "Always 0", correct: true },
+        { text: "1 / (range of X)" },
+        { text: "Depends on the distribution" },
+      ],
+      explanation: <>For any continuous RV, the probability of hitting an exact point is zero — points have measure zero. Probability lives on intervals, obtained by integrating the PDF. Density values can be larger than 1 without violating this fact.</>,
+    },
+    {
+      q: "The CDF F(x) satisfies which of the following?",
+      choices: [
+        { text: "It is non-monotone in general" },
+        { text: "F(x) ∈ [0, 1] for all x, is non-decreasing, and satisfies F(−∞) = 0 and F(+∞) = 1", correct: true },
+        { text: "It is only defined for discrete random variables" },
+        { text: "It is always equal to the PDF" },
+      ],
+      explanation: <>The CDF is monotone non-decreasing, bounded in [0, 1], and has the standard limiting values. It is defined for every random variable (discrete, continuous, or mixed). The PDF is the derivative of the CDF where it exists, not the CDF itself.</>,
+    },
+    {
+      q: "The change-of-variables formula for Y = g(X) with monotone invertible g in one dimension is:",
+      choices: [
+        { text: "f_Y(y) = f_X(g⁻¹(y))" },
+        { text: "f_Y(y) = f_X(g⁻¹(y)) · |d g⁻¹(y) / dy|", correct: true },
+        { text: "f_Y(y) = f_X(y) · g(y)" },
+        { text: "f_Y(y) = f_X(g(y))" },
+      ],
+      explanation: <>The Jacobian |dg⁻¹/dy| corrects for how much g stretches or compresses space. Without it, densities would not integrate to 1 after transformation. In multiple dimensions the correction becomes |det J_{"{g⁻¹}"}(y)| — the determinant of the Jacobian matrix. Every normalizing-flow architecture is built around making this determinant cheap to compute.</>,
+    },
+    {
+      q: "Inverse-CDF sampling generates a draw from a distribution with CDF F by:",
+      choices: [
+        { text: "Drawing U ~ Uniform(0, 1) and setting X = F(U)" },
+        { text: "Drawing U ~ Uniform(0, 1) and setting X = F⁻¹(U)", correct: true },
+        { text: "Drawing X directly from any distribution and applying F" },
+        { text: "Computing E[X] and returning it" },
+      ],
+      explanation: <>The probability integral transform says F(X) is uniform, so X = F⁻¹(U) with U uniform gives a draw from F. This is the standard method inside most random-number libraries for continuous distributions with tractable inverse CDFs. When F⁻¹ is intractable (e.g., normal), other methods (Box–Muller, Ziggurat, rejection) are used.</>,
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/probability/random-variables" title="Random variables & distributions" />

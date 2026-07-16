@@ -1,0 +1,486 @@
+---
+title: MAP estimation & regularization
+tier: 1
+phase: "1.5"
+---
+
+export const mapVsMleCode = `# MAP = MLE + a prior term.  For Bernoulli(p) with a Beta(alpha, beta) prior,
+# the MAP estimate is (k + alpha - 1) / (n + alpha + beta - 2).
+# Compare MLE and MAP when data is sparse.
+import numpy as np
+from scipy.stats import beta as beta_dist
+rng = np.random.default_rng(0)
+
+true_p = 0.05        # rare event (5% success rate)
+alpha0, beta0 = 2, 20    # prior belief: mean = 2/22 ~= 9%, moderately confident
+
+print(f"True p = {true_p}, prior = Beta({alpha0}, {beta0}), prior mean = {alpha0/(alpha0+beta0):.4f}")
+
+# Show how MLE vs MAP behave at various sample sizes.
+for n in [5, 20, 100, 1000]:
+    k = rng.binomial(n, true_p)
+    p_mle = k / n
+    # MAP for Bernoulli with Beta prior:
+    p_map = (k + alpha0 - 1) / (n + alpha0 + beta0 - 2)
+    # Posterior mean (Bayesian point estimate, uses full posterior):
+    p_post_mean = (k + alpha0) / (n + alpha0 + beta0)
+    print(f"n = {n:>4}, k = {k:>3}:  MLE = {p_mle:.4f},  MAP = {p_map:.4f},  posterior mean = {p_post_mean:.4f}")
+
+print("\\nWith small n, MLE is unstable (0 successes in 5 trials -> p_hat = 0);")
+print("MAP pulls the estimate toward the prior mean.  With large n, both converge.")
+print("This is regularization in the pure statistics sense.")`;
+
+export const l2RidgeCode = `# L2 regularization = Gaussian prior on weights.
+# Minimize (1/2) * ||y - X w||^2 + (lambda / 2) * ||w||^2.
+# This IS the negative log-posterior under y | X, w ~ N(X w, sigma^2 I) and w ~ N(0, tau^2 I),
+# with lambda = sigma^2 / tau^2 -- so shrinking lambda toward zero = wide prior = MLE.
+import numpy as np
+from sklearn.linear_model import LinearRegression, Ridge
+rng = np.random.default_rng(0)
+
+# Ill-conditioned regression problem: 100 samples, 20 features, but only 5 features
+# are truly non-zero.  Add moderate noise.
+n, d = 100, 20
+X = rng.normal(size=(n, d))
+true_w = np.zeros(d)
+true_w[:5] = np.array([2.0, -1.5, 0.8, -0.6, 1.2])
+y = X @ true_w + rng.normal(0, 0.3, size=n)
+
+# Ordinary least squares -- unregularized MLE.
+w_mle = LinearRegression(fit_intercept=False).fit(X, y).coef_
+
+# Ridge -- MAP with a Gaussian prior on w.  The lambda coefficient controls prior strength.
+w_ridge_small = Ridge(alpha=0.01, fit_intercept=False).fit(X, y).coef_
+w_ridge_large = Ridge(alpha=10.0, fit_intercept=False).fit(X, y).coef_
+
+for name, w in [("true w", true_w), ("MLE (OLS)", w_mle), ("Ridge (lambda=0.01)", w_ridge_small), ("Ridge (lambda=10)", w_ridge_large)]:
+    print(f"{name:>20}: ||w||_2 = {np.linalg.norm(w):.4f}")
+
+print("\\nHow well does each fit UNSEEN data?")
+X_test = rng.normal(size=(2000, d))
+y_test = X_test @ true_w + rng.normal(0, 0.3, size=2000)
+for name, w in [("MLE (OLS)", w_mle), ("Ridge (lambda=0.01)", w_ridge_small), ("Ridge (lambda=10)", w_ridge_large)]:
+    mse = ((X_test @ w - y_test) ** 2).mean()
+    print(f"  {name:>20}: test MSE = {mse:.4f}")
+
+print("\\nModerate lambda -> smaller ||w||, better test MSE (bias-variance tradeoff).")
+print("The Gaussian prior is doing shrinkage: pulling all coefficients toward zero.")`;
+
+export const l1LassoCode = `# L1 regularization = Laplace prior on weights.
+# Minimize (1/2) * ||y - X w||^2 + lambda * ||w||_1.
+# Laplace prior: p(w_j) ~ exp(-|w_j| / b).  Its density is peaked at zero with heavier tails
+# than Gaussian, which makes the MAP prefer sparse (exactly zero) solutions.
+import numpy as np
+from sklearn.linear_model import Lasso
+rng = np.random.default_rng(0)
+
+n, d = 100, 20
+X = rng.normal(size=(n, d))
+true_w = np.zeros(d)
+true_w[:5] = np.array([2.0, -1.5, 0.8, -0.6, 1.2])
+y = X @ true_w + rng.normal(0, 0.3, size=n)
+
+# Try several lambda values.
+for lam in [0.001, 0.05, 0.2, 0.5]:
+    lasso = Lasso(alpha=lam, fit_intercept=False, max_iter=20000).fit(X, y)
+    n_nonzero = np.sum(np.abs(lasso.coef_) > 1e-6)
+    print(f"lambda = {lam}: ||w||_1 = {np.abs(lasso.coef_).sum():.4f}, non-zero coefs = {n_nonzero}/20")
+    if lam == 0.05:
+        best_coef = lasso.coef_
+
+# Compare recovered coefficients at a moderate lambda to the truth.
+print("\\nRecovery at lambda = 0.05:")
+for j in range(d):
+    marker = "<-- true nonzero" if abs(true_w[j]) > 1e-6 else ""
+    print(f"  w[{j:>2}]: true = {true_w[j]:+.3f},  Lasso = {best_coef[j]:+.4f}    {marker}")
+print("\\nLasso identifies (approximately) the 5 truly-nonzero coefficients, driving the rest to zero.")
+print("This automatic feature-selection behavior is why L1 is used when you suspect sparsity.")`;
+
+export const conjugatePriorCode = `# Conjugate priors: if the posterior is in the same family as the prior, math is closed-form.
+# Beta is conjugate to Bernoulli: Beta(alpha, beta) + k successes in n trials -> Beta(alpha + k, beta + n - k).
+# Watch the posterior update as data streams in.
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import beta as beta_dist
+rng = np.random.default_rng(0)
+
+true_p = 0.3
+alpha0, beta0 = 2, 2   # weak prior -- Beta(2,2) is bump-shaped, mean 0.5
+
+# Simulate a stream of coin flips; at N = 0, 5, 20, 100 flips, plot the posterior.
+sizes = [0, 5, 20, 100]
+data = rng.binomial(1, true_p, size=max(sizes))
+p_grid = np.linspace(0.001, 0.999, 400)
+
+fig, axes = plt.subplots(1, len(sizes), figsize=(11, 3), facecolor="none", sharey=True)
+for ax, n in zip(axes, sizes):
+    ax.set_facecolor("#0f0f14")
+    k = data[:n].sum()
+    a, b = alpha0 + k, beta0 + n - k
+    ax.plot(p_grid, beta_dist.pdf(p_grid, a, b), color="#c4f04b", lw=2)
+    ax.axvline(true_p, color="#f5cf3d", ls="--", lw=1)
+    ax.set_title(f"n = {n}, k = {k}\\nposterior = Beta({a}, {b})", color="#dcdcd6", fontsize=10)
+    ax.set_xlabel("p", color="#dcdcd6")
+    ax.tick_params(colors="#dcdcd6")
+    for spine in ax.spines.values():
+        spine.set_color("#2a2a35")
+axes[0].set_ylabel("posterior density", color="#dcdcd6")
+
+plt.suptitle("Conjugate updating: Beta -> Beta, closed-form", color="#dcdcd6")
+plt.tight_layout()
+plt.show()
+
+# Point estimates from the posterior.
+n_final = 100
+k_final = data.sum()
+a_final, b_final = alpha0 + k_final, beta0 + n_final - k_final
+posterior_mean = a_final / (a_final + b_final)
+map_estimate = (a_final - 1) / (a_final + b_final - 2)
+print(f"\\nAfter {n_final} flips: k = {k_final}")
+print(f"MLE:               {k_final / n_final:.4f}")
+print(f"MAP:               {map_estimate:.4f}")
+print(f"Posterior mean:    {posterior_mean:.4f}   (Bayes-optimal under squared-error loss)")
+print(f"True p:            {true_p}")`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/statistics/estimation-mle", label: "Estimation & maximum likelihood", blurb: "MAP is MLE with an added prior term — you need the likelihood machinery first." },
+  { href: "/learn/mathematics/probability/bayes-theorem", label: "Bayes' theorem", blurb: "MAP is the mode of the Bayesian posterior; the derivation is Bayes-rule in log-space." },
+]} />
+
+<NewConcepts
+  concepts={[
+    { name: "RLHF & DPO", blurb: "Reinforcement Learning from Human Feedback and Direct Preference Optimization — how modern LLMs are fine-tuned to human preferences. Referenced here for their KL regularization term (a policy prior)." },
+    { name: "Classifier-free guidance (CFG)", blurb: "a diffusion-sampling trick that scales the conditional score. Interpretable as a &lsquo;tempered posterior&rsquo; — a Bayesian view of the guidance strength γ." },
+    { name: "AdamW", blurb: "the &lsquo;decoupled-weight-decay&rsquo; variant of Adam used to train every modern transformer. Its weight_decay parameter is a Gaussian prior on the weights." },
+    { name: "MC Dropout", blurb: "run dropout at inference time and average predictions — Yarin Gal (2016) showed this approximates a Bayesian posterior sample. Cheap uncertainty estimation." },
+    { name: "Label smoothing", blurb: "replace one-hot targets with a slightly-uniform-mixed target during classification training. Equivalent to a Dirichlet prior on the label distribution; improves calibration." },
+  ]}
+/>
+
+<Motivation title="Every regularization term is a prior — and knowing that unlocks the whole toolkit">
+
+Regularization in ML is not a mysterious &ldquo;anti-overfitting&rdquo; trick. Every common regularizer is a *prior belief* about parameter values expressed in log-space. Making this connection precise unlocks three things at once:
+
+- **L2 (weight decay) = Gaussian prior**. Adding λ ||w||² / 2 to the loss is *exactly* MAP with w ~ 𝒩(0, σ² I) for some σ.
+- **L1 (lasso) = Laplace prior**. Adding λ ||w||₁ is MAP with w_j ~ Laplace(0, b) for some b. Laplace is heavier-tailed than Gaussian and has a spike at zero, which is *why* L1 produces exactly-zero (sparse) coefficients.
+- **Data augmentation, dropout, early stopping, label smoothing** — all of these can be reinterpreted as noise-injection priors, and each corresponds to a specific probabilistic assumption.
+
+For a GenAI engineer, three specific payoffs:
+
+- **Weight decay in transformer training** is a Gaussian prior on every parameter. AdamW&rsquo;s "decoupled weight decay" makes this even more explicit — it&rsquo;s literally subtracting λw from the gradient at every step, which is the gradient of −log 𝒩(w | 0, I).
+- **KL regularization in RLHF / DPO** is a prior over policies. The penalty β · KL(π || π_ref) says "believe a priori that the fine-tuned policy stays close to the reference."
+- **Prior conditioning in diffusion / classifier-free guidance** literally uses a prior on the class label. The knob γ (guidance strength) is the prior strength.
+
+MAP is the bridge between two worlds: **the frequentist MLE that most ML training uses, and the fully Bayesian posterior distributions that principled uncertainty quantification requires**. Once you see the bridge, you can move between the two.
+
+</Motivation>
+
+<Intuition title="Two sources of belief, combined into one: what the data says + what you thought before">
+
+Suppose a coworker tells you a new coin came out heads 7 times in 10 flips. What&rsquo;s the fairness of the coin? Two voices in your head:
+
+- **Voice 1 (the data)**: &ldquo;7 out of 10 is more than half — the coin looks biased toward heads.&rdquo;
+- **Voice 2 (prior belief)**: &ldquo;But almost every coin I&rsquo;ve ever seen is basically fair. Maybe this is just luck.&rdquo;
+
+MAP is the formal way to combine these two voices. Voice 1 is the **likelihood** — a function that scores each candidate value of the parameter by how well it explains the data. Voice 2 is the **prior** — your beliefs about which parameter values were plausible before you saw any data. MAP multiplies the two, then picks the peak.
+
+Bayes&rsquo; theorem is the recipe:
+
+$$
+p(\theta \mid D) \;=\; \frac{p(D \mid \theta) \cdot p(\theta)}{p(D)}.
+$$
+
+The numerator is (likelihood × prior). The denominator p(D) is a normalizer that doesn&rsquo;t depend on θ, so it drops out when we&rsquo;re just looking for the peak. Take log to turn products into sums:
+
+$$
+\log p(\theta \mid D) \;=\; \underbrace{\log p(D \mid \theta)}_{\text{likelihood term}} + \underbrace{\log p(\theta)}_{\text{prior term}} + \text{const}.
+$$
+
+**MAP** = argmax_θ of that. The likelihood term pulls θ toward values that explain the data; the prior term pulls θ toward values you thought plausible *before* seeing data. **MLE is the special case where the prior is flat** — treating every parameter value as equally plausible before seeing data, so the prior term is a constant and disappears.
+
+For point estimation, MAP gives a single θ̂. For full uncertainty quantification, you&rsquo;d want the whole posterior distribution — MAP is a summary, not the whole picture. But the summary is often exactly what a training loss needs.
+
+</Intuition>
+
+<Recall term="Prior">
+
+A prior is a distribution p(θ) over parameters that encodes your beliefs *before* seeing data. Uninformative priors are flat (uniform on a bounded range, or improper &ldquo;flat over ℝ&rdquo;). Informative priors carry substantive belief (e.g., "weights should be near zero," "success rates should be near 0.5"). All Bayesian conclusions depend on which prior you choose.
+
+</Recall>
+
+## MAP = MLE + prior term
+
+Given data D and a probabilistic model with parameter θ:
+
+$$
+\hat\theta_{\text{MAP}} \;=\; \arg\max_\theta \big[ \log p(D \mid \theta) + \log p(\theta) \big].
+$$
+
+- If p(θ) is uniform (flat) over the feasible set, the second term is constant and MAP = MLE.
+- If p(θ) is 𝒩(0, σ²) (Gaussian centered at zero), the second term is −||θ||² / (2σ²) + const — this is the L2 regularizer.
+- If p(θ) is Laplace(0, b), the second term is −||θ||₁ / b + const — this is the L1 regularizer.
+- If p(θ) is a peaked prior at some θ₀, MAP is pulled toward θ₀ when data is scarce.
+
+**Small-N behavior**: MAP is more robust than MLE because the prior dampens overfitting. E.g., Bernoulli(p) with Beta(2, 2) prior and 0 successes in 5 trials gives p̂_MAP = (0 + 1)/(5 + 2) ≈ 0.14, whereas MLE gives p̂ = 0. The prior *keeps the estimator away from degenerate values*.
+
+**Large-N behavior**: as data accumulates, the likelihood dominates and MAP → MLE. This is the Bayesian analog of consistency: with enough data, the prior no longer matters.
+
+<RunnableCode title="MLE vs MAP for Bernoulli: MAP is more robust with small samples" code={mapVsMleCode} packages={["numpy", "scipy"]} />
+
+## L2 regularization = Gaussian prior
+
+Consider a linear regression setup: y = Xw + ε with ε ~ 𝒩(0, σ² I). MLE finds w to minimize
+
+$$
+\frac{1}{2\sigma^2} \sum_i (y_i - x_i^\top w)^2 \;=\; \frac{1}{2\sigma^2} \| y - Xw \|^2.
+$$
+
+Add a Gaussian prior w ~ 𝒩(0, τ² I). The log-prior is:
+
+$$
+\log p(w) \;=\; -\frac{1}{2\tau^2} \|w\|^2 + \text{const}.
+$$
+
+MAP objective (negative log-posterior, up to constants):
+
+$$
+\frac{1}{2\sigma^2} \| y - Xw \|^2 + \frac{1}{2\tau^2} \|w\|^2.
+$$
+
+Multiply by σ² and let λ = σ² / τ²:
+
+$$
+\boxed{\;\text{MAP objective} \;=\; \frac{1}{2} \| y - Xw \|^2 + \frac{\lambda}{2} \|w\|^2\;}
+$$
+
+This is **ridge regression**, exactly. The knob λ trades likelihood fit vs prior strength. λ = 0: MLE (OLS). λ → ∞: prior dominates, w → 0.
+
+**Practical use**: weight decay in every modern deep-learning optimizer (AdamW, SGD with L2, RMSProp with weight decay) is this Gaussian prior in disguise. In PyTorch: `optimizer = torch.optim.AdamW(model.parameters(), lr=..., weight_decay=1e-2)`. The `weight_decay` parameter is λ (up to a factor).
+
+<RunnableCode title="Ridge regression: Gaussian prior shrinks coefficients, improves generalization" code={l2RidgeCode} packages={["numpy", "sklearn"]} />
+
+## L1 regularization = Laplace prior
+
+Replace the Gaussian prior with a **Laplace** (double-exponential) prior on each coefficient independently: $w_j \sim \text{Laplace}(0, b)$. The Laplace density is
+
+$$
+p(w_j) \;=\; \frac{1}{2b} \exp(-|w_j| / b).
+$$
+
+Log-prior:
+
+$$
+\log p(w) \;=\; -\frac{1}{b} \sum_j |w_j| + \text{const} \;=\; -\frac{1}{b} \|w\|_1 + \text{const}.
+$$
+
+MAP objective:
+
+$$
+\boxed{\;\text{MAP objective} \;=\; \frac{1}{2\sigma^2} \|y - Xw\|^2 + \frac{1}{b} \|w\|_1\;}
+$$
+
+Let λ = σ² / b:
+
+$$
+\text{Lasso objective} \;=\; \frac{1}{2} \|y - Xw\|^2 + \lambda \|w\|_1.
+$$
+
+**Why L1 produces sparsity**: the Laplace prior has a *spike* (non-smooth peak) at zero. The negative log-prior |w_j| is not differentiable at zero — the subgradient at w_j = 0 is [−1, +1]. This creates a *thresholding* effect: for small enough coefficient values, the optimum sets them exactly to zero. Gaussian priors don&rsquo;t have this — L2 shrinks coefficients but rarely to exactly zero.
+
+**Practical use**: L1 is used when you suspect sparsity (only a few features actually matter). Lasso, Elastic Net (L1 + L2), and structured sparsity are all L1-flavored. In transformers, L1 is used less than L2 (which pairs well with SGD/Adam), but shows up in sparse-attention and MoE routing losses.
+
+<RunnableCode title="Lasso: Laplace prior gives sparse solutions" code={l1LassoCode} packages={["numpy", "sklearn"]} />
+
+## Conjugate priors — where math stays closed-form
+
+A prior is **conjugate** to a likelihood if the posterior is in the same family as the prior. Then Bayesian updating is closed-form: no numerical integration, no MCMC needed.
+
+**Beta–Bernoulli**: prior p ~ Beta(α, β), likelihood iid Bernoulli(p) with k successes in n trials, posterior:
+
+$$
+p \mid D \sim \text{Beta}(\alpha + k, \beta + n - k).
+$$
+
+Both posterior mean and MAP are closed-form:
+
+$$
+E[p \mid D] = \frac{\alpha + k}{\alpha + \beta + n}, \quad \hat p_{\text{MAP}} = \frac{\alpha + k - 1}{\alpha + \beta + n - 2}.
+$$
+
+Same pattern for other conjugate pairs:
+
+- **Dirichlet–Multinomial** (K-class version of Beta–Bernoulli). Prior π ~ Dirichlet(α), likelihood Multinomial(π), posterior Dirichlet(α + counts).
+- **Gaussian–Gaussian** with known variance. Prior μ ~ 𝒩(μ_0, σ_0²), likelihood x_i ~ 𝒩(μ, σ²), posterior is another Gaussian with precision-weighted mean.
+- **Gamma–Poisson**. Prior λ ~ Gamma, likelihood Poisson(λ), posterior Gamma.
+- **Inverse-Gamma–Gaussian variance**. Prior on σ² is Inverse-Gamma.
+
+Conjugate priors are less common in modern deep learning (where models are non-conjugate and inference is variational or MCMC), but they&rsquo;re everywhere in classical Bayesian statistics and in the theory that justifies specific regularizers.
+
+<RunnableCode title="Beta-Bernoulli conjugate updating: watch the posterior sharpen" code={conjugatePriorCode} packages={["numpy", "scipy", "matplotlib"]} />
+
+## The traps that matter
+
+**MAP is not the posterior mean.** For symmetric unimodal posteriors, they agree. For skewed posteriors (Beta with α ≠ β), MAP is the mode and the posterior mean is elsewhere. Posterior mean minimizes squared-error loss and is often preferred as a point estimate in Bayes.
+
+**MAP is not invariant under reparameterization.** MLE is (from the previous chapter&rsquo;s problem set); MAP is not. If you transform parameters (e.g., from σ to log σ), the location of the posterior mode changes because the Jacobian appears. This is a subtle bug source — always be explicit about which parameterization your prior is on.
+
+**Improper priors can produce proper posteriors, but be careful.** &ldquo;Flat over ℝ&rdquo; is not a valid probability distribution (doesn&rsquo;t normalize), but sometimes the posterior it induces is proper. Modern practice: use proper priors, even if they&rsquo;re very weak.
+
+**Regularization strength must be tuned.** λ is a hyperparameter — grid-searched or cross-validated. Setting it too high underfits; too low overfits. In deep-learning practice, weight decay values like 1e-2 to 1e-4 are typical.
+
+**Priors are subjective (and that&rsquo;s OK).** Different priors give different answers, especially with small data. Bayesians embrace this — the prior is your explicit domain knowledge. Frequentists sometimes object; if it bothers you, run a sensitivity analysis with a few different priors and see how much your answer changes.
+
+**Regularization ≠ Bayesian estimation** in general. MAP is a point estimator; full Bayes gives you a distribution. If you need uncertainty quantification, you need the posterior, not just its mode.
+
+<RealWorldML title="Weight decay in transformers, KL regularization in RLHF, and priors everywhere">
+
+**Weight decay in transformer pretraining.** Every modern LLM (GPT, Llama, Claude-family) trains with weight decay ~ 0.1 (large!) using AdamW. This is a Gaussian prior on every model parameter with variance ~ 10. The prior is strong because there are billions of parameters and only a moderate amount of data — the prior helps prevent memorization and keeps the loss surface well-conditioned. Without weight decay, transformers overfit hard.
+
+**KL regularization in RLHF and DPO.** When fine-tuning a language model with reinforcement learning (PPO in RLHF) or preference optimization (DPO), you add a term β · KL(π_θ || π_ref) to the objective — a divergence penalty from the fine-tuned policy back to a reference (pretrained) policy. This is a prior over policies: &ldquo;a priori, the new policy should be close to the reference.&rdquo; β controls prior strength. Too small: policy drifts far, potentially into hallucination. Too large: barely fine-tunes anything.
+
+**Classifier-free guidance in diffusion.** When generating conditional samples, the guidance scale γ effectively re-weights the conditional vs unconditional score. Mathematically, this is a *tempered* posterior — raising the class-conditional likelihood to a power. It&rsquo;s a way of dialing up the strength of the "class label" prior at sample-time. γ = 1: standard conditional. γ &gt; 1: sharper conditioning (looks more like the class); γ &lt; 1: closer to unconditional generation.
+
+**Label smoothing** replaces the hard target &#123;0, 0, 1, 0, …&#125; with a smoothed target that puts a bit of probability mass on non-true classes. The Bayesian interpretation: it&rsquo;s a Dirichlet prior on the label distribution, making the model prefer softer output distributions. Empirically improves calibration and reduces overconfidence.
+
+**Dropout as a Bayesian approximation.** Yarin Gal&rsquo;s "Dropout as Bayesian Approximation" (2016) formalized dropout as approximate variational inference — it&rsquo;s equivalent to placing a specific structured prior on the weights and doing a specific variational posterior fit. This is why "MC Dropout" (running dropout at test time and averaging predictions) gives useful uncertainty estimates: it&rsquo;s literally sampling from an approximate posterior.
+
+The theme: **every "regularization" or "auxiliary loss" in modern ML has a Bayesian interpretation**. Even if you don&rsquo;t use the interpretation to train, having it in your head unlocks a lot of intuition about what these tricks are actually doing and when to reach for which one.
+
+</RealWorldML>
+
+<StudyDepth
+  intro={<>MAP is the bridge from MLE to Bayes. Master &ldquo;regularization = prior&rdquo; and every modern ML training trick becomes principled instead of empirical.</>}
+  drill={[
+    <>MAP: argmax_θ (log-likelihood + log-prior); MLE is MAP with a flat prior</>,
+    <>L2 regularization = Gaussian prior on parameters (weight decay = Gaussian prior with λ = σ²/τ²)</>,
+    <>L1 regularization = Laplace prior (heavy-tailed, spiked at zero → sparse solutions)</>,
+    <>Beta–Bernoulli conjugacy: prior Beta(α, β) + k/n data → posterior Beta(α+k, β+n−k), closed-form</>,
+    <>Small-N: MAP is stable, MLE can be degenerate. Large-N: MAP → MLE (prior washes out)</>,
+    <>KL penalty in RLHF is a policy prior; label smoothing is a Dirichlet prior; classifier-free guidance is tempered conditioning</>,
+  ]}
+  skim={[
+    <>Full inventory of conjugate priors (Dirichlet–Multinomial, Inverse-Gamma–Gaussian variance, etc.) — reference material, look up when needed</>,
+    <>Improper priors + Jeffreys priors — needed for rigorous frequentist–Bayesian bridge, not for engineering</>,
+    <>Empirical Bayes (learning hyperpriors from data) — advanced topic, useful for hierarchical models</>,
+  ]}
+/>
+
+<CodeItYourself title="Three drills — MAP updating, L2 vs L1 comparison, conjugate posteriors">
+
+1. **MAP for a small-N Bernoulli.** You have 5 Bernoulli trials with 0 successes. Compute MLE and MAP with two priors: Beta(1, 1) (uniform, "no prior belief") and Beta(2, 20) (skeptical, believes success rate is low). Confirm the MAP under the skeptical prior gives a non-zero estimate (a good thing for downstream computations).
+
+2. **Ridge vs Lasso on the same data.** Generate a dataset with 100 samples, 30 features, only 3 truly non-zero. Fit OLS (unregularized), Ridge with λ=1, Lasso with λ=0.05. Report ||w||_1, ||w||_2, and the number of non-zero coefficients for each. Compare fit quality on held-out test data. Lasso should find (roughly) 3 non-zero weights matching the truth; Ridge shrinks all weights but keeps them all non-zero.
+
+3. **Beta posterior update loop.** Start with a Beta(1, 1) prior. Simulate 20 Bernoulli(0.4) draws one at a time. After each draw, update the posterior (Beta(α + 1, β) if you saw a success, Beta(α, β + 1) if not) and record the MAP estimate. Plot the MAP trajectory as a function of the number of observations — it should converge to 0.4.
+
+</CodeItYourself>
+
+<Summary>
+
+- **MAP** = argmax_θ (log-likelihood + log-prior). Bayes&rsquo; theorem in log-space, with the evidence dropped.
+- **MLE is MAP with a flat prior**. Adding an informative prior changes the estimator; more data eventually washes it out.
+- **L2 regularization = Gaussian prior on parameters**. λ (weight-decay strength) = σ²/τ² where σ² is noise variance and τ² is prior variance.
+- **L1 regularization = Laplace prior on parameters**. Spike at zero → sparse (exactly-zero) coefficients.
+- **Conjugate priors** give closed-form Bayesian updates: Beta–Bernoulli, Dirichlet–Multinomial, Gaussian–Gaussian, Gamma–Poisson.
+- **MAP small-N**: robust, stable. Large-N: MAP → MLE.
+- **Every ML regularization is a prior**: weight decay = Gaussian, sparsity = Laplace, KL penalty = policy prior, label smoothing = Dirichlet, dropout ≈ variational posterior sampling.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>You have Beta(3, 5) prior for a click-through rate. Observe 20 clicks in 100 impressions. Compute the posterior and its mean.</>,
+      hint: <>Beta + Bernoulli/Binomial data → Beta(α + k, β + n − k). Posterior mean = α / (α + β).</>,
+      answer: <>Posterior: Beta(3 + 20, 5 + 100 − 20) = <b>Beta(23, 85)</b>. <br /> Posterior mean = 23 / (23 + 85) = 23 / 108 = <b>0.213</b>. <br /> Compare to MLE k/n = 20/100 = 0.20 and prior mean 3/8 = 0.375. Posterior mean sits between them, pulled toward the MLE because we now have 100 data points and only 3 + 5 = 8 &ldquo;prior samples.&rdquo;</>,
+    },
+    {
+      difficulty: "easy",
+      q: <>In ridge regression with objective (1/2) ||y − Xw||² + (λ/2) ||w||², what happens to the estimated w as λ → ∞ and as λ → 0?</>,
+      hint: <>Think about which term dominates in each limit.</>,
+      answer: <>λ → 0: the regularization term vanishes; objective reduces to (1/2) ||y − Xw||². This is <b>ordinary least squares (MLE)</b>. <br /> λ → ∞: the regularization term dominates; only ||w||² matters, so the optimum is <b>w = 0</b> (all coefficients zero). <br /> The λ knob interpolates between these extremes. Cross-validation picks the sweet spot.</>,
+    },
+    {
+      difficulty: "medium",
+      q: <>Derive the MAP estimate for w in linear regression y = Xw + ε with ε ~ 𝒩(0, σ² I) and w ~ 𝒩(0, τ² I). Show it equals the ridge solution (Xᵀ X + λ I)⁻¹ Xᵀ y with λ = σ² / τ².</>,
+      hint: <>Take the log-posterior; set the gradient to zero.</>,
+      answer: <>Log-posterior (up to constants): <br /> log p(w | D) ∝ −(1/(2σ²)) ||y − Xw||² − (1/(2τ²)) ||w||² <br /><br /> Gradient with respect to w: <br /> ∇ = (1/σ²) Xᵀ(Xw − y) + (1/τ²) w <br /><br /> Set to zero: <br /> (1/σ²) Xᵀ X w + (1/τ²) w = (1/σ²) Xᵀ y <br /> Multiply by σ²: <br /> (Xᵀ X + (σ²/τ²) I) w = Xᵀ y <br /><br /> Let λ = σ²/τ². Then: <br /> <b>w_MAP = (Xᵀ X + λ I)⁻¹ Xᵀ y</b>. ∎ <br /><br /> This is the closed-form solution used inside `sklearn.linear_model.Ridge`. It differs from OLS by the +λI term, which regularizes the matrix inversion — even when Xᵀ X is singular (near collinearity), Xᵀ X + λI is invertible.</>,
+    },
+    {
+      difficulty: "medium",
+      q: <>Show that adding L2 regularization λ ||w||² / 2 to a training loss is equivalent to shrinking the weights by (1 − ηλ) per SGD step (approximately, for small learning rate η).</>,
+      hint: <>Compute the gradient of the L2 term. Substitute into the SGD update.</>,
+      answer: <>Total loss: L_total(w) = L_data(w) + (λ/2) ||w||². <br /> Gradient of L_total: ∇L_total = ∇L_data + λw. <br /><br /> SGD update: <br /> w_new = w − η ∇L_total = w − η (∇L_data + λw) <br />         = w (1 − ηλ) − η ∇L_data. <br /><br /> This is <b>&ldquo;weight decay&rdquo;</b>: at every step, multiply the weight vector by (1 − ηλ) then subtract η · gradient-of-loss. In PyTorch, AdamW does this <em>decoupled</em> weight decay (separately from the adaptive gradient step) rather than folding it into the loss — this is a subtle but important improvement over the naive &ldquo;add L2 to loss and use Adam&rdquo; approach, which entangles the weight-decay with the adaptive step-size.</>,
+    },
+    {
+      difficulty: "hard",
+      q: <>Show why the Laplace prior produces sparse MAP solutions. Specifically, consider a 1-D problem: minimize (1/2)(y − w)² + λ|w|. Solve for the optimal w as a function of y and λ.</>,
+      hint: <>The gradient is undefined at w = 0. Consider the subgradient there; look at three regions: y &gt; λ, |y| ≤ λ, y &lt; −λ.</>,
+      answer: <>Objective: f(w) = (1/2)(y − w)² + λ|w|. <br /><br /> For w &gt; 0: f'(w) = -(y − w) + λ = w − y + λ. Setting to 0: <b>w = y − λ</b>, valid when y − λ &gt; 0 i.e. y &gt; λ. <br /> For w &lt; 0: f'(w) = -(y − w) − λ = w − y − λ. Setting to 0: <b>w = y + λ</b>, valid when y + λ &lt; 0 i.e. y &lt; −λ. <br /> For w = 0: the subgradient of λ|w| at 0 is the interval [−λ, +λ]. The subgradient of the whole objective is (0 − y) + [−λ, +λ] = [−y − λ, −y + λ]. Zero lies in this interval iff |y| ≤ λ. In that case, w = 0 is optimal. <br /><br /> Solution (the <b>soft-thresholding</b> operator): <br /> w* = sign(y) · max(|y| − λ, 0). <br /><br /> The interval |y| ≤ λ produces an exactly-zero solution — that&rsquo;s where the sparsity comes from. Contrast with L2: the Ridge solution for the same 1-D problem is w = y/(1+λ), which is exactly zero only if y is exactly zero. This is <em>why</em> L1 produces sparse coefficients and L2 doesn&rsquo;t.</>,
+    },
+    {
+      difficulty: "hard",
+      q: <>Show that in the limit of an uninformative (very wide) Gaussian prior τ² → ∞, the MAP for a linear model approaches the MLE. And in the limit of a very tight prior τ² → 0, MAP approaches w = 0 regardless of data.</>,
+      hint: <>Look at how λ = σ²/τ² behaves in each limit.</>,
+      answer: <>Ridge MAP: w_MAP = (Xᵀ X + λ I)⁻¹ Xᵀ y with λ = σ²/τ². <br /><br /> Limit τ² → ∞ (very wide prior): λ → 0. The identity term vanishes: w_MAP → (Xᵀ X)⁻¹ Xᵀ y = <b>w_MLE</b>. The prior contributes negligibly. <br /><br /> Limit τ² → 0 (very tight prior at zero): λ → ∞. Xᵀ X + λI ≈ λI, so w_MAP → (λI)⁻¹ Xᵀ y = (1/λ) Xᵀ y → <b>0</b>. The prior dominates; data is ignored. <br /><br /> Any practical setting is between these extremes. Cross-validation picks τ² (equivalently λ) so that the trade-off gives the best generalization. This trade-off is exactly the bias-variance regularization curve: increasing λ increases bias but decreases variance; the sweet spot depends on data amount and quality.</>,
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "MAP estimation is:",
+      choices: [
+        { text: "The same as MLE" },
+        { text: "The argmax of the posterior — equivalently, argmax of (log-likelihood + log-prior)", correct: true },
+        { text: "The mean of the Bayesian posterior" },
+        { text: "The variance of the estimator" },
+      ],
+      explanation: <>MAP is the mode of the posterior. MLE is MAP with a flat prior — the log-prior term becomes a constant and drops out. Posterior mean is a different Bayes summary (minimizes squared-error loss); MAP minimizes 0-1 loss and coincides with mean for symmetric unimodal posteriors.</>,
+    },
+    {
+      q: "L2 regularization on model weights corresponds to which prior?",
+      choices: [
+        { text: "Uniform prior" },
+        { text: "Gaussian prior centered at zero", correct: true },
+        { text: "Laplace prior centered at zero" },
+        { text: "No prior — L2 is a purely engineering trick" },
+      ],
+      explanation: <>The negative log-density of 𝒩(0, τ² I) is proportional to ||w||²/2. Adding λ ||w||²/2 to a training loss is precisely the log-prior contribution from a Gaussian prior. Weight decay in AdamW is this connection made explicit in the optimizer step.</>,
+    },
+    {
+      q: "Why does L1 (Laplace prior) produce sparse solutions while L2 (Gaussian prior) does not?",
+      choices: [
+        { text: "L1 is faster to optimize" },
+        { text: "The Laplace prior has a non-differentiable spike at zero, creating a soft-thresholding operator; L2's smooth quadratic shrinks toward zero but never reaches it exactly", correct: true },
+        { text: "L1 is a Bayesian method and L2 is not" },
+        { text: "L2 is only for regression" },
+      ],
+      explanation: <>The Laplace density is proportional to exp(−|w|). Its subgradient at w = 0 is the interval [−1, +1], creating a &ldquo;dead zone&rdquo; where the loss + regularization is optimized at exactly w = 0. Gaussian priors have a smooth quadratic penalty that never produces this thresholding effect.</>,
+    },
+    {
+      q: "Beta and Bernoulli are conjugate. If your prior is Beta(3, 5) and you observe 4 successes in 10 trials, the posterior is:",
+      choices: [
+        { text: "Beta(3 + 10, 5 + 4) = Beta(13, 9)" },
+        { text: "Beta(3 + 4, 5 + 6) = Beta(7, 11)", correct: true },
+        { text: "Beta(3, 5) — the prior doesn't update" },
+        { text: "Beta(4, 6) — just use the data" },
+      ],
+      explanation: <>Beta(α + k, β + n − k) with prior Beta(α, β), k successes, n trials. Here α = 3, β = 5, k = 4, n = 10. Posterior = Beta(7, 11). Posterior mean = 7/18 ≈ 0.389, between the MLE 0.4 and prior mean 3/8 = 0.375.</>,
+    },
+    {
+      q: "Weight decay in AdamW is best understood as:",
+      choices: [
+        { text: "An engineering hack to speed up convergence" },
+        { text: "A Gaussian prior on the model parameters, added to the training loss as a regularization term", correct: true },
+        { text: "A form of gradient clipping" },
+        { text: "A learning-rate warm-up" },
+      ],
+      explanation: <>AdamW&rsquo;s weight_decay parameter subtracts λw from the weights at each step, which is the gradient of the negative log-density of a zero-mean Gaussian prior. Every LLM trained with this setup implicitly uses a Gaussian prior on all parameters. Setting weight_decay = 0 removes the prior and typically causes overfitting.</>,
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/statistics/map-and-priors" title="MAP estimation & regularization" />

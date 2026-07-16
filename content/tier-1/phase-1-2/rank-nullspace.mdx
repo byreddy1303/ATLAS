@@ -1,0 +1,360 @@
+---
+title: Rank, column space & nullspace
+tier: 1
+phase: "1.2"
+---
+
+export const columnSpaceCode = `import numpy as np
+
+# A 3x3 matrix — but the third column is 2*col1 + col2. So rank is 2, not 3.
+A = np.array([[1.0, 2.0, 4.0],
+              [3.0, 1.0, 7.0],
+              [2.0, 0.0, 4.0]])
+
+# Verify the redundancy by hand
+col1, col2, col3 = A[:, 0], A[:, 1], A[:, 2]
+print("col3 =", col3)
+print("2*col1 + col2 =", 2*col1 + col2)
+
+# NumPy computes the rank
+rank = np.linalg.matrix_rank(A)
+print("rank(A) =", rank)      # 2 — the true "effective" dimension
+
+# The column space is the span of the columns.
+# All three columns live in a 2-dimensional plane inside R^3.
+`;
+
+export const nullspaceCode = `import numpy as np
+from scipy.linalg import null_space
+
+A = np.array([[1.0, 2.0, 4.0],
+              [3.0, 1.0, 7.0],
+              [2.0, 0.0, 4.0]])
+
+N = null_space(A)                        # columns span the nullspace
+print("nullspace basis (each column):")
+print(N)
+
+# Check: A @ v should be ~zero for any v in the nullspace
+v = N[:, 0]
+print("A @ v =", A @ v)                  # near-zero, up to float noise
+
+# Meaning: v is an "input pattern" the transformation crushes to the origin.
+# It's the direction of ambiguity — many inputs share the same output.
+`;
+
+export const rankNullityCode = `import numpy as np
+from scipy.linalg import null_space
+
+# A: 3x5 — takes 5-D inputs to 3-D outputs. Rank ≤ min(3, 5) = 3.
+np.random.seed(0)
+A = np.random.randn(3, 5)
+
+n = A.shape[1]                            # 5, the input dimension
+r = np.linalg.matrix_rank(A)              # rank
+N = null_space(A)
+nullity = N.shape[1]                      # dimension of nullspace
+
+print(f"input dim n = {n}")
+print(f"rank        r = {r}")
+print(f"nullity      = {nullity}")
+print(f"r + nullity  = {r + nullity}  (must equal n = {n})")
+`;
+
+export const loraCode = `import numpy as np
+
+# A dense weight matrix — pretend this is one linear layer in a transformer.
+d_in, d_out = 1024, 1024
+np.random.seed(0)
+W = np.random.randn(d_out, d_in) * 0.02
+
+# Suppose the fine-tuning task only needs a low-rank UPDATE to W.
+# LoRA: parameterize the update as delta_W = B @ A, where
+#   A is r x d_in   (down-project)
+#   B is d_out x r  (up-project)
+# and r is small (say 8).
+r = 8
+A = np.random.randn(r, d_in) * 0.01
+B = np.random.randn(d_out, r) * 0.01
+
+delta_W = B @ A                           # 1024 x 1024, rank ≤ r
+print("delta_W shape:", delta_W.shape)
+print("rank(delta_W):", np.linalg.matrix_rank(delta_W))   # 8
+
+# Parameter savings
+full_params = d_out * d_in
+lora_params = r * d_in + d_out * r
+print(f"full-rank update: {full_params:,} params")
+print(f"LoRA (r={r})    : {lora_params:,} params")
+print(f"savings          : {100 * (1 - lora_params / full_params):.2f}%")
+
+# Final adapted weight during inference
+W_adapted = W + delta_W
+print("W_adapted shape:", W_adapted.shape)
+`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/matrices-transformations/matrix-as-transformation", label: "Matrix as linear transformation", blurb: "Columns are where the standard basis lands; rank is the dimension of that landing zone." },
+  { href: "/learn/mathematics/vectors-space/linear-independence-basis", label: "Linear independence & basis", blurb: "The columns' span (image) and their independence (rank) are the whole story here." },
+]} />
+
+<NewConcepts
+  concepts={[
+    { name: "LoRA (Low-Rank Adaptation)", blurb: "fine-tunes a huge model by adding a rank-r update ΔW = A B^T to each weight matrix. The RealWorldML case study of this chapter; also the flagship application of rank." },
+    { name: "attention & Flash Attention", blurb: "the transformer building block. Its attention matrix often has low effective rank, which Flash Attention and Linformer exploit. Tier 4 topic." },
+    { name: "manifold", blurb: "a smooth low-dimensional surface embedded in a high-dimensional space. In ML, refers to the &lsquo;data manifold&rsquo; hypothesis: real data lives on such a surface within the ambient input space." },
+    { name: "GPT / LLM parameter counts", blurb: "modern LLMs have 7B – 175B – 1T+ parameters. Understanding effective rank explains why we can fine-tune such enormous models cheaply." },
+  ]}
+/>
+
+<Motivation title="Why LoRA works — and why a 175B-parameter model can be fine-tuned with 1% of them">
+
+Fine-tuning a large language model used to mean updating every one of its billions of parameters. LoRA (Low-Rank Adaptation) changed that: it freezes the pretrained weights and adds a small update `ΔW = B · A` where A and B are skinny matrices of some rank r. For a 1024×1024 layer, a rank-8 LoRA update has ~16K parameters instead of ~1M — a 60× compression — and it works.
+
+The reason it works is a statement about **rank**. The claim is that the *update needed for a specific downstream task* lives in a low-dimensional subspace of the space of all possible updates — the fine-tuning signal is intrinsically low-rank. If you understand rank as "the effective dimension of what a matrix can do," this stops being magic and starts being obvious.
+
+Rank is also what determines whether a linear system has a unique solution, how much a dataset can be compressed, how many independent features you really have, whether an attention head is "collapsed" or expressive, and whether an autoencoder bottleneck can preserve information. For a GenAI engineer, "rank" is one of the two or three most useful words in linear algebra — and this chapter gives you a working intuition, the rank-nullity theorem, and the code to compute both sides of it.
+
+</Motivation>
+
+<Intuition title="A matrix has an 'effective dimension' — the rank">
+
+A matrix maps input vectors to output vectors. Its **rank** is the dimension of the space of possible outputs — the size of the "shadow" it casts. Three columns in ℝ³ that all lie in one plane have rank 2, not 3: the transformation can only reach a 2D plane inside 3D space. The third column is redundant — a linear combination of the other two.
+
+Equivalently, rank counts the number of *truly independent columns* (or rows — these are always equal, which is one of the small miracles of linear algebra). Big matrix, few independent columns = **low rank**. Big matrix, all columns independent = **full rank**.
+
+The **nullspace** is the twin idea: the set of input vectors that the matrix crushes to the origin. If the transformation has any redundancy (rank less than the input dimension), some inputs get mapped to zero — those inputs make up the nullspace. High rank = small nullspace; low rank = big nullspace.
+
+Together: **rank + nullity = input dimension**. Every input direction either survives to output (contributes to rank) or gets crushed (contributes to nullity). Every input has to go somewhere, and this equation just counts.
+
+</Intuition>
+
+<Recall term="Span">
+
+The span of a set of vectors is the collection of all their linear combinations — every point you can reach by scaling and adding them. Two non-parallel vectors in ℝ² span the whole plane; two parallel vectors span only a line. The span is always a subspace containing the origin.
+
+</Recall>
+
+## Column space — where a matrix can reach
+
+Take an m×n matrix A. Multiply it by any input vector x (of length n): the result A·x is always a linear combination of A's columns, because:
+
+$$
+A\mathbf{x} \;=\; x_1 \mathbf{a}_1 + x_2 \mathbf{a}_2 + \cdots + x_n \mathbf{a}_n
+$$
+
+— where **aᵢ** is the i-th column. So the set of all possible outputs — the **image** of A, called the **column space** and written Col(A) — is the *span of the columns*. It's a subspace of ℝᵐ (the output space).
+
+The **rank** of A is the dimension of Col(A) — how many independent directions the columns cover. Redundant columns (ones that are linear combos of others) don't add dimensions.
+
+<RunnableCode title="Column space of a rank-2 matrix in ℝ³" code={columnSpaceCode} packages={["numpy", "scipy"]} />
+
+The pitfall: `np.linalg.matrix_rank` uses a numerical tolerance — it decides which singular values are "effectively zero." For nearly-redundant columns (e.g., col3 = 2·col1 + col2 + 10⁻¹⁰·noise), it will report rank 2 or rank 3 depending on the tolerance you pass. In real ML code the answer is almost never a clean integer; you're really asking "what's the *effective* rank?" — see truncated SVD for the honest version.
+
+## Nullspace — what a matrix destroys
+
+The **nullspace** (or kernel) of A is the set of all vectors x with A·x = 0. Written Null(A), it's a subspace of ℝⁿ (the input space).
+
+Every element of the nullspace is a direction of ambiguity: two inputs that differ by a nullspace vector produce the *same output*. If x is any solution to A·x = b and v is in the nullspace, then x + v is also a solution because A·(x + v) = A·x + A·v = b + 0 = b. **Non-trivial nullspace = non-unique solutions.**
+
+If Null(A) contains only the zero vector, we say A is *injective on ℝⁿ*: distinct inputs always give distinct outputs, so the mapping can (in principle) be inverted on its image.
+
+<RunnableCode title="Compute a nullspace basis and verify A·v = 0" code={nullspaceCode} packages={["numpy", "scipy"]} />
+
+## The rank-nullity theorem — one equation, whole picture
+
+For any m×n matrix A:
+
+$$
+\operatorname{rank}(A) \;+\; \operatorname{nullity}(A) \;=\; n
+$$
+
+— that is, (dim of column space) + (dim of nullspace) = (input dimension).
+
+Every input direction gets categorized: it either survives to the output side (contributing to rank) or lives in the nullspace (contributing to nullity). No direction can do both, and none is left out. That's the whole theorem.
+
+Consequences you use daily:
+
+- **A tall matrix (m &gt; n) can have rank at most n.** So its column space is *at most n-dimensional* inside ℝᵐ — it can't fill ℝᵐ. This is why Ax = b generally has no solution when A is tall and b is picked arbitrarily.
+- **A wide matrix (m &lt; n) has rank at most m,** so nullity ≥ n − m &gt; 0. Non-trivial nullspace — infinite solutions to Ax = 0 — is *guaranteed*. This is why underdetermined systems (fewer equations than unknowns) never have a unique answer without more constraints (like sparsity, or a regularizer).
+- **A square matrix is invertible iff rank = n iff nullity = 0.** All three conditions are the same condition. Non-zero determinant, full rank, trivial nullspace — one thing seen from three angles.
+
+<RunnableCode title="Rank + nullity = input dimension, on a random 3×5 matrix" code={rankNullityCode} packages={["numpy", "scipy"]} />
+
+## Row space, and the shocking fact that row rank = column rank
+
+There's a fourth subspace: the **row space** Row(A) = span of the rows = Col(Aᵀ). And a fifth: the **left nullspace** Null(Aᵀ). These are Strang's *four fundamental subspaces*, but the one to remember is:
+
+$$
+\operatorname{dim}(\text{row space}) \;=\; \operatorname{dim}(\text{column space}) \;=\; \operatorname{rank}(A)
+$$
+
+The number of independent rows equals the number of independent columns — always. This is not obvious (why should row-redundancy and column-redundancy be linked?) but it falls out of any of the standard proofs (row-reduction, SVD, or the four-subspaces decomposition). Practically: to check rank you can pick whichever direction (rows or columns) is easier.
+
+## Effective rank vs numerical rank — the ML story
+
+In practice, no data matrix is exactly low-rank. A 1000×1000 matrix of user–movie ratings won't have any exactly redundant column, but it might have 20 singular values above 1 and 980 that are tiny — its **effective** rank is 20. The distinction:
+
+- **Algebraic rank** = number of nonzero singular values. Almost always min(m, n) for real data.
+- **Effective rank** (or numerical rank) = number of *significantly nonzero* singular values, above some tolerance. This is the number you actually care about.
+
+The bridge is SVD. The k largest singular values capture the k most important directions of the transformation; the rest are noise or negligible variation. Truncating at rank k gives the *best rank-k approximation* by the Eckart–Young theorem (see the SVD chapter) — which is exactly how PCA compresses data, how truncated SVD does denoising, and why LoRA works on fine-tuning updates.
+
+<RealWorldML title="LoRA — the trick that made GPT-scale fine-tuning practical">
+
+The core LoRA hypothesis: when you fine-tune a large pretrained model on a downstream task, the *update* you need to apply to any given weight matrix W is intrinsically low-rank. So instead of learning a full-rank update ΔW (which would double your parameter count), parameterize the update as a product of two skinny matrices:
+
+`ΔW = B · A`, where `A ∈ ℝ^(r × d_in)` and `B ∈ ℝ^(d_out × r)` with `r ≪ min(d_in, d_out)`.
+
+The rank of B·A is at most r — automatically low-rank by construction. Only A and B are trained; the original W is frozen. At inference time you can either compute `y = W·x + B·(A·x)` (small overhead) or merge: `W_adapted = W + B·A` (no overhead).
+
+<RunnableCode title="LoRA — rank-8 update to a 1024×1024 weight, 60× parameter savings" code={loraCode} packages={["numpy"]} />
+
+Read the output:
+
+- `delta_W.shape` = (1024, 1024) — same shape as the full weight matrix, so it drops into the network unchanged.
+- `matrix_rank(delta_W)` = 8 — the update lives in a rank-8 subspace of the 1024² space of possible updates, because we constructed it that way.
+- **Parameter savings**: a full-rank update needs 1,048,576 parameters; the rank-8 LoRA needs 16,384 — a **~1.5% memory footprint**. For a 7B-parameter LLM with ~30 attention layers, this turns a fine-tuning job that would OOM a consumer GPU into one that fits on a laptop.
+
+The story is a rank story from top to bottom: the *hypothesis* is that the task-specific update is low-rank; the *parameterization* enforces low-rank by construction (via matrix factorization); the *savings* are the difference between d² and 2rd parameters. Everything you're seeing is the rank-nullity theorem in disguise — a matrix of rank r has at most r·(d_in + d_out) − r² degrees of freedom, no matter how big its shape.
+
+Beyond LoRA, low-rank ideas power: attention-head compression (multi-query attention), model distillation via singular-value truncation, dataset dimension estimation (the "manifold hypothesis" in one word), efficient recommender systems (matrix completion), and Flash Attention's tile-based memory pattern. Once you see rank as *the* control knob for compression-vs-expressiveness, every efficient-ML paper starts looking familiar.
+
+</RealWorldML>
+
+<StudyDepth
+  intro={<>Rank is the single most important scalar summary of a matrix in ML. Master rank, nullspace, and the rank-nullity theorem; the rest of low-rank ML (LoRA, PCA, truncated SVD) falls out of them.</>}
+  drill={[
+    <>Column space = span of columns; rank = its dimension = number of independent columns</>,
+    <>Nullspace = inputs that map to zero; non-trivial nullspace = non-unique solutions</>,
+    <>Rank-nullity: rank(A) + nullity(A) = n (input dimension) — every direction is accounted for</>,
+    <>Row rank = column rank (always) — checking rank via rows or columns is equivalent</>,
+    <>Effective (numerical) rank &gt; algebraic rank is what you actually use — think in terms of SVD singular values above a tolerance</>,
+    <>LoRA and low-rank factorization are direct applications: parameterize an m×n matrix as U·V (U is m×r, V is r×n) to enforce rank ≤ r with 2rd(&lt;&lt;md) parameters</>,
+  ]}
+  skim={[
+    <>All four fundamental subspaces at once (Strang's picture) — nice for theory, rarely load-bearing in code</>,
+    <>Row reduction (RREF) as a rank-computation method — SVD is what any real code uses</>,
+    <>Formal proofs of row rank = column rank — the fact is what you use, not the derivation</>,
+  ]}
+/>
+
+<CodeItYourself title="Three drills — get rank, nullspace, and the theorem in your hands">
+
+1. **Build a matrix with a specified rank.** Write a function `make_rank_k(m, n, k)` that returns an m×n matrix of rank exactly k. Hint: pick a random m×k matrix U and a random k×n matrix V, and return U @ V. Verify with `np.linalg.matrix_rank` that the result has rank k for k = 1, 5, 10, min(m, n).
+
+2. **Visualize the nullspace.** Take A = [[1, 2], [2, 4]] (a 2×2 rank-1 matrix). Its nullspace is a line through the origin in ℝ². Sample 100 random points in [-3, 3]², color them by whether their image under A is close to zero (nullspace) or not. Add matplotlib arrows showing the two columns of A (they're parallel — that's why rank is 1). You should see a line of "crushed" inputs.
+
+3. **Fine-tune with LoRA on a toy problem.** Generate synthetic data where the ideal weight matrix W* is 100×100 but has rank 5 (W* = U @ V, U is 100×5, V is 5×100). Initialize a random W_0. Try (a) full-rank gradient descent: minimize ‖(W - W_0)·x - W*·x‖² over W ∈ ℝ^(100×100) — 10,000 params. Then (b) LoRA-style: fix W_0, parameterize the update as B·A with rank r = 5 — 1,000 params. Show both converge to the same error, with LoRA using 10× fewer parameters.
+
+</CodeItYourself>
+
+<Summary>
+
+- **Column space (image)** of A = span of A's columns = all possible outputs of x ↦ A·x. **Rank** = dim(column space) = number of independent columns.
+- **Nullspace (kernel)** of A = inputs x with A·x = 0 = directions of ambiguity in the transformation. **Nullity** = dim(nullspace).
+- **Rank-nullity theorem**: rank(A) + nullity(A) = n (input dimension). Every input direction either survives (contributes to rank) or gets crushed (contributes to nullity).
+- **Row rank = column rank** = rank(A). The number of independent rows always equals the number of independent columns; checking rank works either way.
+- **Square A is invertible ⇔ rank(A) = n ⇔ nullity(A) = 0 ⇔ det(A) ≠ 0.** These are the same condition, four ways.
+- **Effective (numerical) rank** — count of singular values above a tolerance — is the ML-useful notion of rank; algebraic rank is almost always min(m, n) for real data.
+- **Low-rank factorization** M = U·V (U is m×r, V is r×n) enforces rank ≤ r with 2rd parameters instead of md. This one trick powers LoRA, PCA compression, matrix completion, distillation, and half of efficient-ML.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>What is the rank of A = [[1, 2, 3], [2, 4, 6]] and why?</>,
+      hint: <>Look at the rows.</>,
+      answer: <>Row 2 = 2 × row 1, so the rows are not independent. Only one independent row. So rank(A) = <b>1</b>. (Equivalently: all three columns are multiples of (1, 2), so they span only a 1-D line in ℝ², and there's one independent column too — row rank = column rank as expected.)</>
+    },
+    {
+      difficulty: "easy",
+      q: <>Let A be a 4×7 matrix with rank 3. What is nullity(A)?</>,
+      hint: <>Rank-nullity theorem, with n = 7 (the input dimension).</>,
+      answer: <>rank(A) + nullity(A) = n = 7. So nullity(A) = 7 − 3 = <b>4</b>. The nullspace is a 4-dimensional subspace of ℝ⁷: there are four independent input directions that A crushes to zero, and every non-zero combination of them also gets crushed.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>You have A = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]. Find its rank by hand and confirm det(A) = 0.</>,
+      hint: <>Check if row 3 is a combination of rows 1 and 2. Or check column dependency.</>,
+      answer: <>Row 3 = 2·(row 2) − row 1 → the rows are linearly dependent. Row-reducing: R2 ← R2 − 4·R1 = (0, −3, −6); R3 ← R3 − 7·R1 = (0, −6, −12) = 2·(new R2). So R3 becomes zero after another step. Only 2 independent rows. <b>rank = 2</b>. <br /><br /> Since it's a 3×3 matrix with rank &lt; 3, it's singular, so det(A) = 0 (invertible ⇔ rank = 3). By rank-nullity, nullity = 3 − 2 = 1: there's a 1-D nullspace. Indeed A · (1, −2, 1)ᵀ = (1 − 4 + 3, 4 − 10 + 6, 7 − 16 + 9) = (0, 0, 0), so (1, −2, 1) is a nullspace vector.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Give a rank-1 3×3 matrix (using no zeros anywhere) and write it as an outer product of two vectors.</>,
+      hint: <>Rank-1 matrix = u vᵀ for column u and row vᵀ.</>,
+      answer: <>Any u·vᵀ with non-zero components: pick u = (1, 2, 3)ᵀ and v = (4, 5, 6)ᵀ. Then <br /> u·vᵀ = <br /> [[4, 5, 6], <br /> &nbsp; [8, 10, 12], <br /> &nbsp; [12, 15, 18]] <br /><br /> This has rank 1 because every row is a scalar multiple of v = (4, 5, 6), and every column is a scalar multiple of u = (1, 2, 3). Column space = span(u), row space = span(v), and nullspace has dimension 2. This is the atomic building block of low-rank matrices: any rank-r matrix is a sum of r such outer products (that's exactly what SVD gives you).</>
+    },
+    {
+      difficulty: "hard",
+      q: <>A LoRA layer replaces a d×d update ΔW with B · A where B is d×r and A is r×d. For d = 4096 and r = 8, how many parameters does LoRA save, as a fraction? What's the largest r for which LoRA still beats a full-rank update, in parameters?</>,
+      hint: <>Compare 2rd vs d². Set them equal to find the break-even r.</>,
+      answer: <>Full-rank update: d² = 4096² = 16,777,216 params. LoRA: 2 · r · d = 2 · 8 · 4096 = 65,536 params. <br /> Savings = 1 − 65,536 / 16,777,216 = <b>0.9961</b>, so LoRA uses about <b>0.39% of the parameters</b>. <br /><br /> Break-even: 2rd = d² ⟹ r = d/2 = 2048. So LoRA is cheaper (in parameters) as long as r &lt; d/2. In practice you use r ∈ &#123;4, 8, 16, 32, 64&#125; — hundreds of times below break-even — and the empirical finding of the LoRA paper is that r = 4 or 8 already recovers most of the fine-tuning quality on many tasks. That's the rank-nullity theorem paying rent: the effective rank of the fine-tuning update really is tiny compared to d.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Prove: an m×n matrix A has trivial nullspace (nullity 0) ⇒ Ax = b has *at most one* solution for any b in the image of A.</>,
+      hint: <>Suppose two solutions x_1 and x_2 both satisfy A·x = b; consider their difference.</>,
+      answer: <>Suppose A·x_1 = b and A·x_2 = b. Subtracting: A·(x_1 − x_2) = b − b = 0. So x_1 − x_2 is in Null(A). <br /><br /> But by hypothesis Null(A) contains only the zero vector, so x_1 − x_2 = 0, i.e., x_1 = x_2. The two "solutions" were actually the same solution. ∎ <br /><br /> Contrapositive: if the nullspace is non-trivial, solutions are non-unique — for any solution x there are infinitely many others obtained by adding nullspace vectors. This is the algebraic backbone of regularization: an underdetermined problem (rank &lt; input dim) has a whole affine family of solutions, and the regularizer (ridge, sparsity, minimum-norm) is what picks one. Understanding this is why "solve Ax = b" in ML always means "pick the best of many solutions" rather than "solve for the one solution."</>
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "The rank of a matrix A is:",
+      choices: [
+        { text: "The number of rows in A" },
+        { text: "The dimension of A's column space (= the number of independent columns)", correct: true },
+        { text: "The number of nonzero entries in A" },
+        { text: "The determinant of A" },
+      ],
+      explanation: <>Rank = dim(column space) = the number of independent columns = the number of independent rows (row rank = column rank, always). It measures the "effective dimension" of what the matrix can do, not just its shape.</>
+    },
+    {
+      q: "If A is 5×8 with rank 3, then nullity(A) equals:",
+      choices: [
+        { text: "2" },
+        { text: "3" },
+        { text: "5" },
+        { text: "5 (= 8 − 3)", correct: true },
+      ],
+      explanation: <>Rank-nullity: rank(A) + nullity(A) = n (input dimension). Here n = 8, rank = 3, so nullity = 8 − 3 = 5. There are 5 independent input directions that A crushes to the zero vector.</>
+    },
+    {
+      q: "A square n×n matrix A is invertible if and only if:",
+      choices: [
+        { text: "It has more rows than columns" },
+        { text: "Its rank equals n (equivalently, its nullspace is only the zero vector)", correct: true },
+        { text: "Its trace is nonzero" },
+        { text: "It's symmetric" },
+      ],
+      explanation: <>All these are equivalent for a square matrix: rank = n ⇔ nullity = 0 ⇔ det(A) ≠ 0 ⇔ all columns independent ⇔ invertible. If any of these fails, they all fail — the matrix is singular.</>
+    },
+    {
+      q: "LoRA parameterizes a fine-tuning update ΔW as B · A with A of shape (r × d_in) and B of shape (d_out × r). This guarantees rank(ΔW) ≤:",
+      choices: [
+        { text: "d_in" },
+        { text: "d_out" },
+        { text: "r", correct: true },
+        { text: "1" },
+      ],
+      explanation: <>The rank of a product is at most the minimum of the individual ranks, and B and A can each have rank at most r (their smaller dimension). So rank(B·A) ≤ r. LoRA enforces low rank *structurally* — you get low rank by construction, not by any post-hoc constraint or regularizer.</>
+    },
+    {
+      q: "For a wide matrix (more columns than rows, m &lt; n), which is always true?",
+      choices: [
+        { text: "It has full rank" },
+        { text: "Its nullspace contains only the zero vector" },
+        { text: "Its nullspace has dimension at least n − m (non-trivial)", correct: true },
+        { text: "It is invertible" },
+      ],
+      explanation: <>Rank(A) ≤ min(m, n) = m for a wide matrix. Rank-nullity: nullity = n − rank ≥ n − m, which is positive. Non-trivial nullspace is *guaranteed* — an underdetermined system Ax = b never has a unique solution, which is exactly why regularizers exist in ML: to break the tie among infinite equally-good solutions.</>
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/matrices-transformations/rank-nullspace" title="Rank, column space & nullspace" />

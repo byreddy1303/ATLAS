@@ -200,6 +200,15 @@ print("final loss history:", [round(h, 3) for h in history])`;
   { href: "/learn/foundations/python-craft/control-flow-data-model", label: "Control flow & the data model", blurb: "Truthiness, iteration protocol, dunders — the foundation this chapter builds on." },
 ]} />
 
+<NewConcepts
+  concepts={[
+    { name: "PyTorch training loops", blurb: "the canonical `for batch in loader: loss = model(...); loss.backward(); optimizer.step()` pattern. Referenced here as the flagship use-case of first-class-functions plumbing." },
+    { name: "Adam optimizer", blurb: "the standard adaptive-step-size optimizer in modern ML. `.step()` is a method-on-a-closure — an application of this chapter&rsquo;s scope machinery. Deep-dive in Phase 1.6." },
+    { name: "cross-entropy loss", blurb: "the standard classification loss. In PyTorch: `nn.CrossEntropyLoss()` returns a callable — literally a function returned by a function (a closure over the reduction settings)." },
+    { name: "transformer / LLM", blurb: "modern LLM architectures. Their forward passes are chains of function calls; every layer is a first-class callable." },
+  ]}
+/>
+
 <Motivation title="The one chapter that unlocks decorators, callbacks, and training loops">
 
 If Python has a *master idea*, it is this: **functions are first-class values**. Assign them to variables, put them in dicts, pass them to other functions, return them from other functions. Decorators are functions that take a function and return a modified one. Callbacks — the `on_epoch_end` you register with a trainer, the `key=len` you hand to `sorted`, the loss function you plug into a training loop — are functions passed around like data. Closures are how a returned function keeps private state, which is what makes `functools.lru_cache` and half the standard library work.

@@ -117,6 +117,16 @@ for V in vocab_sizes:
   { href: "/learn/mathematics/vectors-space/dot-product-cosine-similarity", label: "Dot product & cosine similarity", blurb: "Softmax outputs a probability distribution; cross-entropy compares two distributions using a sum-product — the same weighted-sum machinery you already know." },
 ]} />
 
+<NewConcepts
+  concepts={[
+    { name: "Softmax", blurb: "turns a vector of real logits into a probability distribution by exponentiating and normalizing. It's the last layer of every classifier and every LLM head — full derivation in Tier 3." },
+    { name: "Perplexity", blurb: "exp(cross-entropy per token). The standard LLM eval metric — think of it as 'effective vocabulary size the model is uncertain over.' Lower is sharper." },
+    { name: "Jensen's inequality", blurb: "for convex f, E[f(X)] ≥ f(E[X]). The single tool used to prove KL(p||q) ≥ 0 later in this chapter." },
+    { name: "Mutual information", blurb: "I(X;Y) = KL(joint || product of marginals). Measures how much knowing X reduces uncertainty about Y — appears in contrastive learning (InfoNCE) and information bottleneck." },
+    { name: "RLHF, distillation, VAE, contrastive learning", blurb: "four ML setups whose loss is a KL divergence or a variant. Named here as forward-pointing motivation; each has its own chapter downstream." },
+  ]}
+/>
+
 <Motivation title="The LLM loss is cross-entropy — this chapter says WHY">
 
 Every large language model on earth minimizes **cross-entropy** during training. It's not a coincidence, and it's not just "the standard classification loss." Cross-entropy is the *unique* loss that turns a probability model into an optimizer with the right calibration properties, and its close cousin the **KL divergence** underlies half of modern deep learning: RLHF for LLMs, distillation for compression, variational autoencoders for generation, contrastive learning for embeddings.

@@ -1,5 +1,6 @@
 import {
   Prerequisites,
+  NewConcepts,
   Motivation,
   Intuition,
   Recall,
@@ -30,6 +31,7 @@ import {
 
 export const mdxComponents = {
   Prerequisites,
+  NewConcepts,
   Motivation,
   Intuition,
   Recall,

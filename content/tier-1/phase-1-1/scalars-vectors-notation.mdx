@@ -104,6 +104,14 @@ print("'dog' IS the vector", embed("dog"), "— one row of E")`;
   { href: "/learn/foundations/scientific-stack/numpy-broadcasting-slicing", label: "Broadcasting & slicing", blurb: "How shapes combine — needed to dodge the (n,) vs (n,1) trap." },
 ]} />
 
+<NewConcepts
+  concepts={[
+    { name: "LLM (large language model)", blurb: "a neural network (GPT, Llama, Claude) trained on next-token prediction. Full treatment in Tier 4." },
+    { name: "BERT & GPT", blurb: "two foundational transformer architectures (2018–2019) — BERT for representation, GPT for generation. Both operate on token-embedding vectors." },
+    { name: "transformer attention", blurb: "the `softmax(QKᵀ) V` operation that made modern LLMs possible. Referenced here because Q, K, V are all vectors." },
+  ]}
+/>
+
 <Motivation title="Every model sees the world as vectors">
 
 When an LLM reads the word "dog", the first thing it does is replace it with a list of numbers — 768 of them in BERT, 12,288 in GPT-3. That list is a **vector**, and everything the model does afterward — attention, layers, the final prediction — is arithmetic on vectors. Images become vectors of pixel values, users become vectors of behavior, and a RAG system retrieves documents by comparing their vectors. Vectors are not one topic in ML; they are the *substance* models compute on.

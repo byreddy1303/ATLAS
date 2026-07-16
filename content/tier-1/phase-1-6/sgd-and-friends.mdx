@@ -1,0 +1,456 @@
+---
+title: SGD, momentum, and mini-batches
+tier: 1
+phase: "1.6"
+---
+
+export const batchVsMiniVsStochasticCode = `# Three flavors of gradient descent on the same linear-regression problem.
+# The exact same loss surface -- three different rules for computing the gradient.
+import numpy as np, matplotlib.pyplot as plt
+
+np.random.seed(0)
+N = 500
+X = np.random.randn(N, 1)
+y = 3 * X.ravel() + 1 + 0.5 * np.random.randn(N)   # true w = 3, b = 1
+w0 = np.array([-2.0, -2.0])    # start at (-2, -2)
+
+def loss(w):
+    return 0.5 * np.mean((X @ w[:1] + w[1] - y) ** 2)
+
+def grad(w, idxs):
+    "Gradient on the subset of rows given by idxs."
+    Xi, yi = X[idxs], y[idxs]
+    pred = Xi @ w[:1] + w[1]
+    err  = pred - yi
+    dw = (Xi * err[:, None]).mean(axis=0)
+    db = err.mean()
+    return np.array([dw[0], db])
+
+def gd(kind, steps=60, lr=0.1, batch=16, seed=1):
+    rng = np.random.default_rng(seed)
+    w = w0.copy(); traj = [w.copy()]
+    for _ in range(steps):
+        if kind == "batch":     idxs = np.arange(N)                    # all N rows
+        elif kind == "mini":    idxs = rng.choice(N, size=batch, replace=False)
+        elif kind == "stoch":   idxs = np.array([rng.integers(0, N)])  # exactly 1 row
+        w = w - lr * grad(w, idxs); traj.append(w.copy())
+    return np.array(traj)
+
+trajs = {"batch (all N)": gd("batch"), "mini-batch (16)": gd("mini"), "stochastic (1)": gd("stoch")}
+
+# Plot contour + trajectories
+ws = np.linspace(-2.5, 4, 60); bs = np.linspace(-2.5, 2.5, 60)
+WW, BB = np.meshgrid(ws, bs)
+Z = np.zeros_like(WW)
+for i in range(WW.shape[0]):
+    for j in range(WW.shape[1]):
+        Z[i, j] = loss(np.array([WW[i, j], BB[i, j]]))
+
+fig, axes = plt.subplots(1, 3, figsize=(13, 3.6))
+for ax, (name, tr) in zip(axes, trajs.items()):
+    ax.contour(WW, BB, Z, levels=15, colors="teal", alpha=0.35, linewidths=0.7)
+    ax.plot(tr[:, 0], tr[:, 1], "-o", markersize=3, color="crimson", lw=1.3)
+    ax.plot(3, 1, "*", color="gold", markersize=14, label="true (3, 1)")
+    ax.set_title(f"{name}"); ax.set_xlabel("w"); ax.set_ylabel("b"); ax.grid(alpha=0.3)
+plt.tight_layout()
+
+for name, tr in trajs.items():
+    print(f"{name:>17}: final (w, b) = ({tr[-1, 0]:+.3f}, {tr[-1, 1]:+.3f})   loss = {loss(tr[-1]):.4f}")`;
+
+export const momentumVsSgdCode = `# Momentum vs plain SGD on a stretched quadratic -- the CANONICAL case where
+# plain SGD wobbles down the narrow valley while momentum sails through.
+import numpy as np, matplotlib.pyplot as plt
+
+# Loss: 0.5 * (a * x^2 + y^2)   with a >> 1  -- long narrow valley in y
+a = 20.0
+def f(v):    return 0.5 * (a * v[0] ** 2 + v[1] ** 2)
+def grad(v): return np.array([a * v[0], v[1]])
+
+def sgd(x0, lr=0.05, steps=60):
+    v = x0.copy(); traj = [v.copy()]
+    for _ in range(steps):
+        v = v - lr * grad(v); traj.append(v.copy())
+    return np.array(traj)
+
+def momentum(x0, lr=0.05, beta=0.9, steps=60):
+    "v_t = beta * v_{t-1} + grad;   x_t = x_{t-1} - lr * v_t"
+    v = np.zeros_like(x0)
+    x = x0.copy(); traj = [x.copy()]
+    for _ in range(steps):
+        v = beta * v + grad(x)
+        x = x - lr * v
+        traj.append(x.copy())
+    return np.array(traj)
+
+def nesterov(x0, lr=0.05, beta=0.9, steps=60):
+    "Nesterov look-ahead: evaluate gradient at (x - lr*beta*v) instead of at x."
+    v = np.zeros_like(x0)
+    x = x0.copy(); traj = [x.copy()]
+    for _ in range(steps):
+        lookahead = x - lr * beta * v
+        v = beta * v + grad(lookahead)
+        x = x - lr * v
+        traj.append(x.copy())
+    return np.array(traj)
+
+x0 = np.array([1.0, 1.0])
+trajs = {"plain SGD": sgd(x0), "momentum (b=0.9)": momentum(x0), "Nesterov": nesterov(x0)}
+
+# Plot contours + each trajectory
+xs, ys = np.meshgrid(np.linspace(-1.2, 1.2, 100), np.linspace(-1.2, 1.2, 100))
+Z = 0.5 * (a * xs ** 2 + ys ** 2)
+
+fig, axes = plt.subplots(1, 3, figsize=(13, 3.4))
+for ax, (name, tr) in zip(axes, trajs.items()):
+    ax.contour(xs, ys, Z, levels=15, colors="teal", alpha=0.4, linewidths=0.7)
+    ax.plot(tr[:, 0], tr[:, 1], "-o", markersize=3, color="crimson", lw=1.3)
+    ax.plot(0, 0, "*", color="gold", markersize=14)
+    ax.set_title(f"{name} (final loss {f(tr[-1]):.4f})")
+    ax.set_aspect("equal"); ax.grid(alpha=0.3); ax.set_xlim(-1.2, 1.2); ax.set_ylim(-1.2, 1.2)
+plt.tight_layout()
+
+for name, tr in trajs.items():
+    print(f"{name:>17}: final loss = {f(tr[-1]):.6f}")`;
+
+export const noiseAsFeatureCode = `# Two-well loss -- a shallow bad basin and a deeper good basin.
+# Show that mini-batch NOISE occasionally hops from the shallow basin to the deep one.
+import numpy as np
+
+def f(x):
+    "Two wells: shallow at x=-1 (depth 0.5), deep at x=+1.2 (depth 2.0)."
+    left  = 0.5 * (x + 1.0) ** 2
+    right = 2.0 * (x - 1.2) ** 2
+    return np.minimum(left, right)
+
+def dfdx(x):
+    left_slope  = (x + 1.0)
+    right_slope = 4.0 * (x - 1.2)
+    return np.where(0.5 * (x + 1.0) ** 2 <= 2.0 * (x - 1.2) ** 2, left_slope, right_slope)
+
+def noisy_gd(x0, sigma=0.0, lr=0.05, steps=400, seed=0):
+    rng = np.random.default_rng(seed)
+    x = x0
+    for _ in range(steps):
+        noise = rng.normal(0, sigma)                  # SGD-shaped gradient noise
+        x = x - lr * (dfdx(x) + noise)
+    return x
+
+# Start in the SHALLOW well; is enough noise required to escape to the deep well?
+outcomes = {"no noise": [], "moderate noise (sigma=0.5)": [], "high noise (sigma=1.5)": []}
+for seed in range(50):
+    outcomes["no noise"].append(noisy_gd(-0.9, sigma=0.0, seed=seed))
+    outcomes["moderate noise (sigma=0.5)"].append(noisy_gd(-0.9, sigma=0.5, seed=seed))
+    outcomes["high noise (sigma=1.5)"].append(noisy_gd(-0.9, sigma=1.5, seed=seed))
+
+for name, finals in outcomes.items():
+    escaped = sum(1 for x in finals if x > 0)
+    print(f"{name:>28}:  {escaped:>2}/50 escaped to the deep well ({100*escaped/50:.0f}%)")
+print()
+print("SGD noise is a FEATURE, not a bug: it lets the optimizer escape shallow basins")
+print("and reach the deeper, wider (=better-generalizing) parts of the loss landscape.")`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/calculus/gradient-descent-intuition", label: "Gradient descent — the intuition", blurb: "SGD is 'GD with a random subset of examples' — the full-batch GD picture is where we start." },
+  { href: "/learn/mathematics/optimization/convex-vs-nonconvex", label: "Convex vs non-convex objectives", blurb: "Batch size and momentum choices matter DIFFERENTLY on convex vs non-convex problems — this chapter builds the vocabulary." },
+]} />
+
+<NewConcepts
+  concepts={[
+    { name: "Nesterov's accelerated gradient", blurb: "a look-ahead variant of momentum with a provable O(1/k²) rate on convex problems. Cheaper than second-order methods, still one of the best convex-optimization tools." },
+    { name: "Variance-reduced SGD (SVRG, SAGA)", blurb: "classical trick: use a periodic full-batch anchor to reduce the variance of stochastic gradients. Standard for convex ML; largely absent from DL because deep-net gradients don't cluster the way convex ones do." },
+    { name: "Flat minima", blurb: "informal: a minimum whose loss changes slowly in any direction (broad basin). Flat minima generalize better empirically than sharp minima — one theory for why small-batch SGD helps generalization." },
+    { name: "Linear scaling rule (Goyal et al. 2017)", blurb: "when you multiply the batch size by k, multiply the learning rate by k to keep the effective per-example update magnitude constant. The empirical rule for large-batch training." },
+    { name: "Gradient accumulation", blurb: "the trick for simulating a big batch on a small GPU: run several forward+backward passes, accumulate the gradients, then take a single optimizer step. Every serious training script uses this." },
+  ]}
+/>
+
+<Motivation title="Real neural nets are trained with mini-batch SGD + momentum">
+
+Every deep-learning paper you'll read describes a training loop that (essentially) reads:
+
+```
+for step in range(N):
+    batch = sample_from_dataset(size=B)
+    loss = forward(model, batch)
+    grads = backward(loss)
+    optimizer.step(grads)      # momentum/Adam update, not plain GD
+```
+
+This is **mini-batch stochastic gradient descent with momentum**. The two words "stochastic" and "mini-batch" hide four choices that shape every training run: what fraction of your data goes into each gradient estimate, how those estimates combine over steps, and what noise floor the process runs at.
+
+For a GenAI engineer, this chapter answers:
+
+1. **Why not use the whole dataset for every step?** Full-batch GD converges nicely in theory — but each step is prohibitively expensive on large datasets, and its lack of noise turns out to be a bug rather than a feature in high-dim non-convex problems.
+2. **What does momentum actually do?** It accelerates progress along consistent directions and damps oscillations in noisy or badly-scaled ones — the single most important upgrade over plain SGD.
+3. **How do batch size and learning rate interact?** The linear scaling rule tells you how to keep training dynamics constant when you change hardware. Getting this wrong is the fastest way to burn compute on a divergent run.
+4. **Why does small-batch SGD sometimes generalize better than big-batch?** Because the noise in stochastic gradients biases the optimizer toward flatter (more robust) minima.
+
+Adam and its family (next chapter) are built on top of what you learn here.
+
+</Motivation>
+
+<Intuition title="Batch = accuracy of the gradient estimate; momentum = memory of the direction we were going">
+
+Imagine walking down a valley in fog. You can only feel the slope where you're standing. That's your **gradient** — a local direction of steepest descent.
+
+**Batch size** is how much ground you probe before choosing which way to step.
+
+- **Full-batch GD (B = N):** you carefully survey every square meter of the valley, average the slopes, then step. Slow but the direction is precise.
+- **Mini-batch SGD (B ≈ 32–2048):** you probe a random sample, average their slopes, then step. Approximate direction, but a hundred times cheaper.
+- **Pure SGD (B = 1):** you step based on the slope at literally one point. Very cheap, very noisy — often overshoots.
+
+**Momentum** is the memory of which way you've been heading. Instead of only using the current slope, you also carry a **velocity** — an exponentially-weighted moving average of past gradients. When the current slope agrees with recent history, the velocity grows and you accelerate. When it disagrees (you're wobbling side-to-side in a narrow ravine), consecutive gradients cancel out in the velocity, and only the along-ravine component builds up. That's why momentum is dramatic on badly-conditioned loss surfaces: it turns wobbly zig-zags into a smooth glide.
+
+</Intuition>
+
+<Recall term="Gradient">
+
+The gradient of a scalar function `f(x)` at a point `x` is the vector `∇f(x)` whose components are the partial derivatives ∂f/∂xᵢ. It points in the direction of steepest ascent — so `-∇f(x)` is the direction of steepest descent. Every gradient-based optimizer is a rule for computing an update from (a copy of, a smoothed version of, an adaptive rescaling of) the negative gradient.
+
+</Recall>
+
+## Batch, mini-batch, stochastic — the size spectrum
+
+**Full-batch gradient descent (B = N).** Compute the loss and gradient on **all** training examples, then take one step:
+
+$$
+\theta \leftarrow \theta - \eta \cdot \nabla \frac{1}{N}\sum_{i=1}^N \ell(\theta; x_i, y_i)
+$$
+
+Each step is expensive but the gradient is the "true" one (up to numerical precision). Convergence is monotonic on convex problems.
+
+**Pure stochastic gradient descent (B = 1).** Draw a single random example each step:
+
+$$
+\theta \leftarrow \theta - \eta \cdot \nabla \ell(\theta; x_i, y_i) \quad i \sim \text{Unif}(1..N)
+$$
+
+Cheap per step, but the direction is noisy. Convergence is not monotonic — the loss goes up and down as different examples pull in different directions.
+
+**Mini-batch SGD (B in between, e.g., 16–2048).** Draw a random mini-batch of size B:
+
+$$
+\theta \leftarrow \theta - \eta \cdot \nabla \frac{1}{B}\sum_{i \in \mathcal{B}} \ell(\theta; x_i, y_i)
+$$
+
+This is what everyone uses in practice. The mini-batch gradient is an **unbiased estimate** of the full-batch gradient with variance `~ σ² / B`. Larger B ⇒ smaller variance ⇒ closer to full-batch behavior; smaller B ⇒ noisier but cheaper.
+
+<RunnableCode title="Same loss, three batch sizes — watch how the trajectory differs" code={batchVsMiniVsStochasticCode} packages={["numpy", "matplotlib"]} captureFig={true} />
+
+**Pitfall — B = 1 is rarely used in practice.** With B = 1 you get maximum noise, but you also get maximum wall-clock cost per example: modern GPUs are designed to process a batch in parallel, and B = 1 wastes all that hardware. The sweet spot for GPU utilization is usually B ≥ 32 — batches small enough to fit in memory and get useful noise, big enough to keep the accelerator busy.
+
+## Momentum — memory of the direction we were going
+
+The simplest momentum update:
+
+$$
+v_t = \beta \cdot v_{t-1} + \nabla f(\theta_{t-1})
+$$
+$$
+\theta_t = \theta_{t-1} - \eta \cdot v_t
+$$
+
+with `β ∈ [0, 1)` — typically 0.9. Here `v_t` is a **velocity vector** that accumulates gradients over recent steps. When consecutive gradients agree, `v` grows and the effective step size along that direction gets large. When they disagree (bouncing side to side in a narrow valley), the disagreeing components cancel out in the sum and only the persistent direction survives.
+
+Two ways to think about `β`:
+
+- **Exponentially-weighted moving average (EWMA).** The velocity is a weighted average of recent gradients with weight `β^k` on the gradient from k steps ago. Effective "memory" length is roughly `1 / (1 − β) = 10` steps at β = 0.9.
+- **Physical momentum.** In physics `p = m v`; the update is like Newtonian dynamics with friction `(1 − β)`. Higher `β` = lower friction = the ball keeps rolling further.
+
+<RunnableCode title="Plain SGD vs momentum vs Nesterov on a stretched quadratic" code={momentumVsSgdCode} packages={["numpy", "matplotlib"]} captureFig={true} />
+
+**Pitfall — the "SGD with momentum" of PyTorch is not the update above.** PyTorch's implementation is `v_t = β·v_{t-1} + ∇f(θ)`, and `θ ← θ − η·v_t` — but many textbooks write `v_t = β·v_{t-1} + (1−β)·∇f(θ)` (an EWMA with weight `1-β`). The two agree up to a factor of `1/(1−β)` on the effective learning rate. Always check whether your framework's momentum "corrects" the update magnitude or not — the effective LR you set is off by that factor if you swap between the two.
+
+## Nesterov — look-ahead momentum
+
+Nesterov's twist: evaluate the gradient at the **look-ahead** point `θ − η·β·v` rather than at `θ`:
+
+$$
+v_t = \beta \cdot v_{t-1} + \nabla f(\theta_{t-1} - \eta \beta v_{t-1})
+$$
+$$
+\theta_t = \theta_{t-1} - \eta \cdot v_t
+$$
+
+The intuition: momentum will carry us to `θ − η·β·v` even before we compute a new gradient, so let's use the gradient **at that upcoming location** to correct our velocity. Empirically, Nesterov is often ~10-20% faster than plain momentum on convex problems and gives the celebrated `O(1/k²)` convergence rate — twice as fast in exponent as plain GD's `O(1/k)`.
+
+On non-convex deep learning problems the theoretical advantage doesn't cleanly apply, but Nesterov is a standard option in PyTorch/JAX (`nesterov=True` on the SGD optimizer). Adam's success has meant that Nesterov is used less than 10 years ago, but it remains a solid choice for convex ML and CNN training.
+
+## The generalization value of noise
+
+A perhaps-surprising empirical fact: on nonconvex neural net losses, **smaller batch sizes often generalize better** than larger ones — the same final training loss can produce different test loss depending on batch size.
+
+The current best explanation: gradient noise from small batches biases the optimizer toward **flat minima** — regions of the loss surface where the loss changes slowly in any direction. Flat minima have low **sharpness**, which correlates with better generalization: a slightly-perturbed model doesn't lose much accuracy. Sharp minima are precise fits to training data that break under any weight perturbation.
+
+<RunnableCode title="SGD noise as a feature — escaping a shallow basin" code={noiseAsFeatureCode} packages={["numpy"]} />
+
+**Where large batches help.** For massively-parallel systems, larger batches make hardware more efficient — you spend less time on communication overhead. Large-batch training (B ≈ 32k, sometimes 1M+) is standard for LLM pretraining because compute is bought in GPU-hours, not in per-batch time. The **linear scaling rule** (Goyal et al. 2017) says: when you multiply batch size by k, multiply LR by k, and training dynamics stay similar. Coupled with linear warmup (LR schedules chapter), this is how modern very-large-batch training works.
+
+## Choosing batch size — practical rules
+
+Three factors set the mini-batch size in practice:
+
+1. **Memory budget.** Batch × sequence-length × parameter-count must fit in GPU memory. You'll often see `B = 4` on a single GPU with `sequence_len = 8k`, then **gradient accumulation** simulate `B = 128` by summing gradients over 32 mini-forward-passes before the optimizer step.
+2. **Throughput.** GPUs are amortized over batch dimension; too small a batch wastes cycles. The sweet spot is the largest B that fits in memory while leaving room for activations.
+3. **Generalization.** For small models, small B (32–256) often gives better test loss. For LLM pretraining, generalization from batch-size differences is much less important than the compute efficiency of very large B (32k–1M+).
+
+**Linear scaling rule.** If a batch-size-256 run uses LR 3e-4, then batch-size-2048 should use LR 3e-4 × 8 = 2.4e-3. Combine with linear warmup to avoid the extra-large early-step blowup.
+
+<RealWorldML title="Batch size and gradient accumulation in an LLM training config">
+
+Look at any modern LLM pretraining config (Llama, GPT, Mistral) and you'll see three related fields:
+
+- **`per_device_train_batch_size`** — the batch that fits in one GPU's memory (e.g., 4 or 8).
+- **`gradient_accumulation_steps`** — how many mini-batches to combine before an optimizer step (e.g., 32 or 128).
+- **`num_devices`** — how many GPUs run in data-parallel (e.g., 8 or 1024).
+
+The **effective batch size** is the product: `per_device × accumulation × num_devices`. A typical Llama-style config: `4 × 128 × 128 = 65,536` tokens per effective batch. That's the number the LR was tuned for and the linear scaling rule applies to.
+
+**Why so large?**
+
+- **Compute efficiency:** at LLM scale, the gradient is very high-dimensional; noise from very small batches is enough to dominate the signal. Big batches give clean signals that let LR schedules do their work.
+- **Communication amortization:** in data-parallel training across 1000+ GPUs, gradient all-reduce is expensive per step. Larger batches mean fewer steps per epoch and less all-reduce overhead.
+
+**Gradient accumulation is the "small hardware, big batch" trick.** If you only have 8 GPUs but the model was tuned for a 65k-token batch, use `accumulation = 128` to get 8 × 128 = 1024 mini-batches summed per step. Compute-equivalent to running on 1024 GPUs (just slower).
+
+**Where small batches still win:** vision fine-tuning, non-LLM downstream tasks with small datasets, RL with actor-critic where trajectory variance dominates. In those regimes, B = 32-256 is standard because the noise vs efficiency trade-off tilts the other way.
+
+</RealWorldML>
+
+<StudyDepth
+  drill={[
+    "Mini-batch SGD update rule: draw B random examples, average their gradients, take one step.",
+    "Momentum as EWMA over recent gradients (β = 0.9 → memory ≈ 10 steps).",
+    "Nesterov = momentum with a look-ahead gradient evaluation.",
+    "Linear scaling rule: batch size × k means LR × k, keep dynamics same.",
+    "Gradient accumulation: sum gradients over k mini-batches, then step — simulates big batch on small hardware.",
+    "Small batches inject noise that biases toward flat (well-generalizing) minima.",
+  ]}
+  skim={[
+    "Formal variance-reduction theory (SVRG, SAGA) — mostly convex-ML.",
+    "Nesterov's O(1/k²) convergence rate proof.",
+    "Detailed physics-of-momentum analogy (friction coefficient math).",
+    "Sharpness-as-generalization theorems and their limits.",
+  ]}
+/>
+
+<CodeItYourself title="Three drills — batch tradeoffs, momentum tuning, noise vs generalization">
+
+1. **Batch-size sweep.** For linear regression on a synthetic dataset (N = 1000), run SGD with `B = 1, 4, 16, 64, 256, 1000` for the SAME number of gradient computations (i.e., different numbers of steps). Plot the final loss curve — you should see that mid-range B converges fastest per compute unit.
+
+2. **Momentum sweep.** For the stretched-quadratic problem above, sweep `β = 0.0, 0.5, 0.9, 0.99` while keeping lr = 0.05. What happens with β too high? Watch the optimizer overshoot and oscillate.
+
+3. **Small-batch generalization.** Train a small classifier (e.g., logistic regression on synthetic 2-class data) with `B = 8, 32, 128, 512`. Compare final **test** loss (on a held-out set). You should see that small B sometimes achieves a lower test loss even when train loss is similar — the flat-minima effect at work.
+
+</CodeItYourself>
+
+<Summary>
+
+- **Batch spectrum:** full-batch GD (all N examples, precise but expensive) → mini-batch SGD (B in 16-2048, the practical default) → pure SGD (B=1, cheap but noisy).
+- **Mini-batch gradient is an unbiased estimate** of the full-batch gradient with variance ~ 1/B.
+- **Momentum** = velocity vector accumulating recent gradients: `v = β·v + ∇f`, `θ = θ − η·v`. Accelerates along consistent directions, damps oscillations.
+- **Nesterov** = momentum with a look-ahead gradient: evaluate ∇f at the predicted-future position, not the current one. Provable O(1/k²) on convex problems.
+- **Noise is a feature.** Small-batch SGD explores flatter minima that generalize better; noise helps escape shallow local pits and saddles.
+- **Linear scaling rule:** batch × k means LR × k. Combined with warmup, this scales training to massive parallel systems.
+- **Gradient accumulation** simulates a large batch on small hardware: sum k mini-batch gradients before an optimizer step.
+- **In LLM pretraining, effective batch is 32k-1M+ tokens** — chosen for hardware efficiency and clean gradients, not the flat-minima effect.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>For a dataset of N = 10000 examples with mini-batch size B = 32, roughly how many mini-batches fit in one epoch?</>,
+      hint: <>One epoch = one pass through the entire dataset.</>,
+      answer: <>N / B = 10000 / 32 = <b>~313 mini-batches per epoch</b>. Each optimizer step consumes one mini-batch, so 313 optimizer steps make up one epoch. A 10-epoch training run therefore involves ~3130 optimizer steps. LR schedules are typically parameterized in "training steps" (or "training tokens" in LLM land) rather than epochs.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>What is momentum's β = 0.9 doing intuitively?</>,
+      hint: <>Interpret the velocity update v = β·v + gradient as a moving average.</>,
+      answer: <>β = 0.9 means the velocity is an exponentially-weighted moving average of the recent gradients with characteristic memory length ≈ 1 / (1 − β) = <b>10 steps</b>. The optimizer "remembers" gradients from the last ~10 steps: those that agree amplify each other in the velocity, those that disagree cancel. That's why momentum smooths out oscillations and accelerates along consistent directions.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>You train a model with B = 256, LR = 3e-4 successfully. Your new hardware supports B = 2048. By the linear scaling rule, what LR should you try?</>,
+      hint: <>Multiply LR by the same factor as batch size.</>,
+      answer: <>Batch grew by 2048/256 = 8x, so scale LR by 8x too: <b>LR = 8 × 3e-4 = 2.4e-3</b>. Also add or lengthen the linear warmup phase — big batches with big LR need extra ramp-up to avoid early-step blowups. Test that training remains stable and reaches the same final loss; if not, further tuning is needed.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>What does gradient accumulation do, and when do you need it?</>,
+      hint: <>Consider the case where an effective batch is too large to fit on a single GPU.</>,
+      answer: <><b>Gradient accumulation</b>: run the forward-backward pass on several small mini-batches, sum the gradients, and only then take a single optimizer step. Result: the update is computed as if the batch were "sum of mini-batch sizes" while memory usage stays at "one mini-batch." <br /><br /> <b>When needed:</b> the batch size your recipe was tuned for is too large to fit in GPU memory. Example: recipe uses effective batch 8192 tokens, but each GPU can only fit 512 tokens. Set `accumulation_steps = 16` and each device processes 16 forward-backward passes before one optimizer step. Multi-GPU data-parallel training extends this: divide the effective batch across devices, then further accumulate on each. <br /><br /> Cost: it's slower (16x more forward-backward passes per step), but let you match the training dynamics of a much bigger GPU cluster.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Show that if the loss is convex and quadratic, plain SGD converges to the true minimum in expectation — but the noisy iterates never sit still.</>,
+      hint: <>Write the SGD update explicitly for f(x) = 0.5 · x² and analyze E[x_t].</>,
+      answer: <>Loss: f(x) = 0.5 · x², so ∇f(x) = x. Stochastic gradient: g_t = x_t + noise, where noise ~ N(0, σ²) has zero mean. <br /><br /> SGD update: x_{"t+1"} = x_t − η(x_t + noise) = (1 − η) x_t − η · noise. <br /><br /> <b>Take expectation:</b> E[x_{"t+1"}] = (1 − η) E[x_t]. Iterating: E[x_t] = (1 − η)^t · x_0 → 0 as t → ∞ (if 0 &lt; η &lt; 2). <br /><br /> <b>Take variance:</b> Var(x_{"t+1"}) = (1 − η)² Var(x_t) + η² σ². The stationary variance is η² σ² / (1 − (1−η)²) = η² σ² / (2η − η²) ≈ η · σ² / 2 for small η. <br /><br /> <b>Conclusion:</b> E[x_t] → 0 (the minimum), but Var(x_t) → η · σ² / 2 &gt; 0. SGD "hovers around" the minimum with variance proportional to η. This is why LR schedules decay η over training: at the end you want η → 0 so variance → 0 and the iterate actually sits at the minimum. That's the connection between the SGD-noise floor and cosine decay to a small floor.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Give three reasons why plain SGD is rarely used to train a modern transformer LLM.</>,
+      hint: <>Think about parameter scale, per-parameter conditioning, and warmup requirements.</>,
+      answer: <>Three reasons (any three earns full credit): <br /><br /> <b>1. Per-parameter scaling matters.</b> Transformer weights (Q, K, V projections, embeddings, layer norms) have vastly different natural gradient magnitudes. A single global LR is too big for some and too small for others. Adam's per-parameter `1/√v` term rescales each coordinate — plain SGD can't. Without adaptive scaling, some layers train fast and others barely move. <br /><br /> <b>2. Cold-start behavior is bad.</b> The first thousand steps of training an LLM have huge, noisy gradients. Plain SGD applied directly would need extremely careful tuning to survive; adaptive optimizers with warmup are much more robust to hyperparameter mis-tuning. <br /><br /> <b>3. Sparsely-active parameters.</b> Embedding layers are activated only for the tokens that appear in a mini-batch. If a token is rare, its embedding gets gradient signal only occasionally. Adagrad-family adaptivity (as in Adam) accumulates squared-gradient history so rare parameters take relatively bigger steps when they do fire. Plain SGD gives them tiny updates because the recent gradient average is small. <br /><br /> <b>4. Empirical:</b> AdamW converges to lower loss than SGD-with-momentum on transformer training in every published comparison (Loshchilov & Hutter 2019 etc.). Whatever theoretical objections one might raise, the empirical evidence is settled: for LLMs, adaptive optimizers are the default. <br /><br /> The exceptions where SGD wins: convex ML, some CNN benchmarks (e.g., ImageNet ResNet training famously benefits from SGD+momentum over Adam in the well-tuned regime), and small MLPs. But for LLMs the answer is clear.</>
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "In mini-batch SGD with batch size B, the gradient estimate has variance that scales as:",
+      choices: [
+        { text: "1 / N (the full dataset size)" },
+        { text: "1 / B (the batch size)", correct: true },
+        { text: "B" },
+        { text: "N × B" },
+      ],
+      explanation: <>Mini-batch gradient is the sample mean of B per-example gradients. The variance of a sample mean of B i.i.d. draws scales as σ² / B. Bigger B → lower variance → gradient estimate closer to the true full-batch gradient. This is the same 1/√B → 1/√N story from the CLT.</>
+    },
+    {
+      q: "Momentum with β = 0.9 has an effective 'memory' of approximately:",
+      choices: [
+        { text: "1 step" },
+        { text: "10 steps", correct: true },
+        { text: "100 steps" },
+        { text: "It has no memory." },
+      ],
+      explanation: <>The velocity is an exponentially-weighted moving average with decay β = 0.9. The effective memory length is 1 / (1 − β) = 10 steps. Gradients from ~10 steps ago still meaningfully influence the current velocity; older ones have been decayed by β^10 = 0.35 or less. Setting β = 0.99 gives memory ≈ 100 steps — much longer but slower to react to genuine direction changes.</>
+    },
+    {
+      q: "Nesterov's improvement over plain momentum is to:",
+      choices: [
+        { text: "Use a bigger learning rate." },
+        { text: "Evaluate the gradient at a look-ahead point (θ − η β v) instead of at θ.", correct: true },
+        { text: "Skip the momentum term entirely." },
+        { text: "Randomly reset the velocity each step." },
+      ],
+      explanation: <>Nesterov reasoning: momentum will carry us to θ − η β v regardless, so let's compute the gradient AT that point and use that to correct our velocity. Empirically 10-20% faster than plain momentum on convex problems, provably O(1/k²) vs O(1/k) for plain GD.</>
+    },
+    {
+      q: "The linear scaling rule for large-batch training says:",
+      choices: [
+        { text: "When batch size doubles, halve the learning rate." },
+        { text: "When batch size multiplies by k, multiply the learning rate by k.", correct: true },
+        { text: "Always use batch size 1024 for LLMs." },
+        { text: "Learning rate should be independent of batch size." },
+      ],
+      explanation: <>Linear scaling rule (Goyal et al. 2017): to keep the effective per-example update magnitude constant when you scale batch size by k, multiply LR by k. Combined with warmup, this lets training with batch size 32k behave similarly to well-tuned batch size 256 — enabling the massive-parallel training of GPT-3, Llama, and similar.</>
+    },
+    {
+      q: "Small-batch SGD is thought to generalize better than large-batch SGD because:",
+      choices: [
+        { text: "It processes examples in a random order." },
+        { text: "Gradient noise biases the optimizer toward flat minima that are more robust to weight perturbations.", correct: true },
+        { text: "It uses less compute." },
+        { text: "It has no noise." },
+      ],
+      explanation: <>Empirical observation: at the same training loss, small-batch SGD often finds solutions with lower test loss than large-batch SGD. The current best explanation: gradient noise biases toward FLAT minima — points where the loss changes slowly in any direction. Flat minima are more robust to weight perturbation (which is essentially what happens at test time on new data). Sharp minima have precise train-loss fit but break under any weight perturbation. This is why LLM pretraining uses very large batches (for compute efficiency), but small-model fine-tuning often uses small batches.</>
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/optimization/sgd-and-friends" title="SGD, momentum, and mini-batches" />

@@ -1,0 +1,486 @@
+---
+title: Convex vs non-convex objectives
+tier: 1
+phase: "1.6"
+---
+
+export const convexCheckCode = `# Check convexity three ways for common ML loss functions.
+# A function f is convex iff its second derivative (or Hessian for multi-var)
+# is >= 0 everywhere. It is strictly convex if > 0.
+import numpy as np
+import matplotlib.pyplot as plt
+
+# 1. f(x) = x^2  (squared loss)  -- convex, f''(x) = 2 > 0
+# 2. f(x) = |x|                  -- convex (not differentiable at 0, but convex)
+# 3. f(x) = log(1 + exp(-x))     -- logistic loss, convex (f'' > 0 everywhere)
+# 4. f(x) = -log(x)              -- convex on x > 0 (Kullback-Leibler ingredient)
+# 5. f(x) = x^4 - 3*x^2 + 1      -- NON-convex (double-well, two minima)
+
+xs = np.linspace(-3, 3, 400)
+xs_pos = np.linspace(0.01, 3, 400)
+
+fig, axes = plt.subplots(1, 5, figsize=(14, 3))
+axes[0].plot(xs, xs**2, color="teal", lw=2);           axes[0].set_title("x^2 (convex)")
+axes[1].plot(xs, np.abs(xs), color="teal", lw=2);      axes[1].set_title("|x| (convex, non-smooth)")
+axes[2].plot(xs, np.log1p(np.exp(-xs)), color="teal", lw=2); axes[2].set_title("log(1+e^-x) (convex)")
+axes[3].plot(xs_pos, -np.log(xs_pos), color="teal", lw=2);    axes[3].set_title("-log(x) (convex on x>0)")
+axes[4].plot(xs, xs**4 - 3*xs**2 + 1, color="crimson", lw=2); axes[4].set_title("x^4 - 3x^2 + 1 (NOT convex)")
+for ax in axes: ax.grid(alpha=0.3); ax.axhline(0, color="k", lw=0.4)
+plt.tight_layout()
+
+# Analytic second-derivative test for f_5(x) = x^4 - 3x^2 + 1
+# f''(x) = 12x^2 - 6.  f''(0) = -6 < 0  =>  concave at x=0  =>  NOT convex.
+print("f_5''(0) =", 12*0**2 - 6, "< 0, so f_5 is NOT convex.")
+print("f_5''(1) =", 12*1**2 - 6, "> 0, so it IS convex on |x| > sqrt(1/2).")
+print("The function is only convex 'in patches' -- classic non-convex behavior.")`;
+
+export const localVsGlobalCode = `# Non-convex objective: run gradient descent from many starting points.
+# Which minimum you land in depends on where you started.
+import numpy as np, matplotlib.pyplot as plt
+
+def f(x):     return x**4 - 3*x**2 + 1
+def dfdx(x):  return 4*x**3 - 6*x
+
+# Global min at x = +/- sqrt(3/2) with f = -5/4.  Local max (barrier) at x=0.
+def gd(x0, lr=0.05, steps=200):
+    x = x0
+    hist = [x]
+    for _ in range(steps):
+        x = x - lr * dfdx(x)
+        hist.append(x)
+    return np.array(hist)
+
+starts = np.linspace(-2.5, 2.5, 11)
+xs_plot = np.linspace(-2.2, 2.2, 400)
+
+fig, ax = plt.subplots(figsize=(8, 4))
+ax.plot(xs_plot, f(xs_plot), color="teal", lw=2, label="f(x) = x^4 - 3x^2 + 1")
+for x0 in starts:
+    traj = gd(x0)
+    final = traj[-1]
+    color = "crimson" if final < 0 else "royalblue"
+    ax.plot([x0], [f(x0)], "o", color=color, markersize=7)
+    ax.plot([final], [f(final)], "*", color=color, markersize=12)
+    ax.annotate("", xy=(final, f(final)), xytext=(x0, f(x0)),
+                arrowprops=dict(arrowstyle="->", color=color, alpha=0.3))
+ax.set_xlabel("x"); ax.set_ylabel("f(x)"); ax.legend()
+ax.set_title("GD on non-convex f: starts (circles) end up in one of two minima (stars)")
+ax.grid(alpha=0.3); plt.tight_layout()
+
+# Summarize which starts land where
+for x0 in starts:
+    final = gd(x0)[-1]
+    which = "LEFT min" if final < 0 else "RIGHT min"
+    print(f"start x0 = {x0:+.2f}  ->  final x = {final:+.4f}  ({which})")`;
+
+export const convexVsNonConvexGdCode = `# Side by side: GD on a convex bowl vs Himmelblau (a 4-minima non-convex classic).
+# Convex: any start converges to THE minimum. Non-convex: outcome depends on start.
+import numpy as np, matplotlib.pyplot as plt
+
+def bowl(x, y):   return 0.5 * (x**2 + y**2)
+def bowl_grad(p): return np.array([p[0], p[1]])
+
+# Himmelblau -- 4 known local minima
+def himmel(x, y):     return (x**2 + y - 11)**2 + (x + y**2 - 7)**2
+def himmel_grad(p):
+    x, y = p
+    dfx = 4 * x * (x**2 + y - 11) + 2 * (x + y**2 - 7)
+    dfy = 2 * (x**2 + y - 11) + 4 * y * (x + y**2 - 7)
+    return np.array([dfx, dfy])
+
+def gd_2d(f, grad, x0, lr=0.01, steps=200):
+    x = np.asarray(x0, float)
+    hist = [x.copy()]
+    for _ in range(steps):
+        x = x - lr * grad(x)
+        hist.append(x.copy())
+    return np.array(hist)
+
+np.random.seed(1)
+starts = [np.random.uniform(-4, 4, size=2) for _ in range(8)]
+
+fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
+
+# Convex bowl
+xs, ys = np.meshgrid(np.linspace(-5, 5, 100), np.linspace(-5, 5, 100))
+axes[0].contour(xs, ys, bowl(xs, ys), levels=15, colors="teal", alpha=0.4)
+for s in starts:
+    tr = gd_2d(bowl, bowl_grad, s, lr=0.1)
+    axes[0].plot(tr[:, 0], tr[:, 1], "-", color="crimson", alpha=0.7, lw=1.2)
+    axes[0].plot(tr[0, 0], tr[0, 1], "o", color="crimson", markersize=6)
+axes[0].plot(0, 0, "*", color="gold", markersize=18)
+axes[0].set_title("CONVEX bowl -- every start finds THE minimum"); axes[0].set_aspect("equal")
+axes[0].grid(alpha=0.3)
+
+# Non-convex Himmelblau
+xs, ys = np.meshgrid(np.linspace(-5, 5, 200), np.linspace(-5, 5, 200))
+axes[1].contour(xs, ys, himmel(xs, ys), levels=np.logspace(0, 3, 20), colors="teal", alpha=0.4)
+for s in starts:
+    tr = gd_2d(himmel, himmel_grad, s, lr=0.005, steps=400)
+    axes[1].plot(tr[:, 0], tr[:, 1], "-", color="crimson", alpha=0.7, lw=1.2)
+    axes[1].plot(tr[0, 0], tr[0, 1], "o", color="crimson", markersize=6)
+# The four known minima
+for m in [(3.0, 2.0), (-2.805, 3.131), (-3.779, -3.283), (3.584, -1.848)]:
+    axes[1].plot(*m, "*", color="gold", markersize=14)
+axes[1].set_title("NON-convex Himmelblau -- outcome depends on start"); axes[1].set_aspect("equal")
+axes[1].grid(alpha=0.3)
+
+plt.tight_layout()
+print("Convex: every one of 8 random starts lands within 1e-4 of (0, 0).")
+print("Non-convex Himmelblau: 8 starts scatter across the 4 minima.")`;
+
+export const nnLandscapeCode = `# A crude but honest picture: many random NN initializations reach loss values
+# that are close to each other, even though they're at DIFFERENT weights.
+# This is the empirical secret of why GD works on non-convex NN losses.
+import numpy as np
+
+def train_toy_nn(seed, steps=2000, lr=0.05):
+    "1-hidden-layer MLP fitting a smooth target on x in [-1, 1]."
+    rng = np.random.default_rng(seed)
+    x_train = np.linspace(-1, 1, 60).reshape(-1, 1)
+    y_train = np.sin(3.5 * x_train).ravel() + 0.5 * x_train.ravel()**2
+
+    W1 = rng.normal(0, 0.5, size=(1, 32))
+    b1 = np.zeros(32)
+    W2 = rng.normal(0, 0.5, size=(32, 1))
+    b2 = np.zeros(1)
+
+    for _ in range(steps):
+        # forward
+        z1 = x_train @ W1 + b1
+        a1 = np.tanh(z1)
+        y_hat = (a1 @ W2 + b2).ravel()
+        loss = 0.5 * np.mean((y_hat - y_train) ** 2)
+        # backward
+        dY = (y_hat - y_train).reshape(-1, 1) / len(x_train)
+        dW2 = a1.T @ dY
+        db2 = dY.sum(axis=0)
+        dA1 = dY @ W2.T
+        dZ1 = dA1 * (1 - a1 ** 2)
+        dW1 = x_train.T @ dZ1
+        db1 = dZ1.sum(axis=0)
+        W1 -= lr * dW1; b1 -= lr * db1
+        W2 -= lr * dW2; b2 -= lr * db2
+    return loss
+
+# Run from many different random inits and see the spread of FINAL loss
+losses = [train_toy_nn(s) for s in range(12)]
+print("Final losses across 12 different random inits of the SAME network:")
+for i, l in enumerate(losses):
+    print(f"  seed {i:>2}: loss = {l:.6f}")
+print()
+print(f"Best  loss: {min(losses):.6f}")
+print(f"Worst loss: {max(losses):.6f}")
+print()
+print("Even though the WEIGHTS differ between seeds (different global minima),")
+print("the FINAL LOSS is nearly identical -- the many minima of this non-convex")
+print("problem are almost equivalent in quality. This is the empirical")
+print("phenomenon that makes NN training work despite non-convexity.")`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/calculus/gradient-descent-intuition", label: "Gradient descent — the intuition", blurb: "GD guarantees rely on the loss shape; this chapter formalizes what 'well-shaped' means." },
+  { href: "/learn/mathematics/calculus/derivatives-single-var", label: "Derivatives — single variable", blurb: "The second-derivative test is the 1-D convexity check; multi-D lifts it to the Hessian." },
+  { href: "/learn/mathematics/linear-algebra/positive-definite", label: "Positive definite matrices", blurb: "Multivariable convexity = Hessian is PSD everywhere. This chapter uses that link." },
+]} />
+
+<NewConcepts
+  concepts={[
+    { name: "Saddle point", blurb: "a stationary point (gradient zero) that is neither a max nor a min — some directions curve up, others down. Turns out to dominate high-D non-convex landscapes." },
+    { name: "Mode connectivity", blurb: "the empirical finding (Garipov et al. 2018) that different SGD solutions of a deep network are connected by low-loss paths in parameter space — the many 'minima' aren't isolated." },
+    { name: "Lottery ticket hypothesis", blurb: "Frankle & Carbin 2019: sparse sub-networks 'winning tickets' exist at initialization that reach the same accuracy as the full network. Points to the flatness/richness of the loss basin." },
+    { name: "Convex duality", blurb: "every convex problem has a partner 'dual' problem whose optimal value bounds the original. The core theoretical tool for SVMs, LP, and interior-point methods." },
+    { name: "Jensen's inequality", blurb: "for convex f, E[f(X)] ≥ f(E[X]). One of two definitions of convexity we'll use here." },
+  ]}
+/>
+
+<Motivation title="Convex is 'solved'; non-convex is 'we shipped it anyway'">
+
+Every classical-ML textbook opens with convex problems (linear regression, logistic regression, SVMs) and promises: **gradient descent will find THE minimum, no matter where you start.** Every modern deep-learning result operates in the opposite universe — non-convex, chaotic, no such guarantees — and shipped anyway.
+
+For a GenAI engineer, understanding convexity is a bright-line test that separates two very different worlds:
+
+- On the **convex** side, math promises success. Any local minimum is the global one. Convergence rates are provable. The choice of starting point doesn't matter. If your loss is convex, you can just fit it.
+- On the **non-convex** side (every neural net you'll ever train), math promises nothing. Different starting points reach different minima. GD can get stuck. Any convergence result is empirical, not proven.
+
+Both worlds coexist in real ML systems. Your logistic regression baseline is convex. The regularizer you add to a neural-net loss (L2 weight decay) is convex. Your neural net's loss is not. Knowing which parts of your system are convex tells you where you can trust the math, and where you have to fall back on empirical observation. It also tells you when adding a convex regularizer stabilizes an otherwise-hopeless non-convex problem.
+
+This chapter covers three questions:
+
+1. What does "convex" actually mean, in three equivalent forms?
+2. Why does convexity give you global optimality?
+3. When your loss is non-convex (i.e., any deep learning), what changes — and what does modern practice do about it?
+
+</Motivation>
+
+<Intuition title="Convex is a bowl; non-convex is a mountain range">
+
+**A convex function looks like a bowl.** No matter where you stand inside the bowl, gravity pulls you toward the same bottom. Roll a marble in, and it reaches the unique lowest point — regardless of where you dropped it in from. All the popular classical losses (squared error, logistic, hinge) draw bowls of one shape or another.
+
+**A non-convex function looks like a mountain range.** Valleys, ridges, peaks, saddles. Where you land depends on where you started. Roll a marble in from the left side and it settles in the western valley; roll one from the right and it settles in the eastern one — and those two valleys can be at different heights. Deep-learning losses are like this, except in millions of dimensions, so the analogy breaks down long before you finish drawing it.
+
+Formally, a function is convex iff any straight line drawn between two points on its graph lies **above** the graph. If any such line dips below, the function has a "dip" between the two points that a straight line can't reach — that's non-convex. This "chord test" is definition #1 below.
+
+</Intuition>
+
+<Recall term="Local minimum vs global minimum">
+
+A **local minimum** is a point where the function is smaller than at every nearby point. A **global minimum** is the very smallest value the function takes anywhere. Every global minimum is also a local one. The reverse is false in general: a function can have many local minima, only one of which is the global one.
+
+For **convex** functions, this distinction collapses — every local minimum is global. That single fact is why convexity is so prized: any minimum you find is THE minimum.
+
+</Recall>
+
+## Three equivalent definitions of "convex"
+
+A function `f: R^n → R` is **convex** iff any of the following (equivalent) conditions hold:
+
+**1. Chord test (geometric).** For any two points x, y in the domain and any t in [0, 1]:
+
+$$
+f(t x + (1-t) y) \le t\, f(x) + (1-t)\, f(y)
+$$
+
+Plain English: the value at the interpolated point is at most the linearly-interpolated value. The graph never rises above the chord between two of its points.
+
+**2. Second-order (calculus).** If `f` is twice differentiable, then `f` is convex iff its Hessian is **positive semi-definite (PSD)** everywhere:
+
+$$
+\nabla^2 f(x) \succeq 0 \quad \text{for all } x
+$$
+
+In 1-D this reduces to `f''(x) ≥ 0` — the function is curving up (or flat). In n-D you need the Hessian's eigenvalues all `≥ 0` at every point. If they're strictly `> 0` (positive definite), `f` is **strictly convex** — there's a unique minimum, no plateau.
+
+**3. First-order (linear-lower-bound).** If `f` is differentiable:
+
+$$
+f(y) \ge f(x) + \nabla f(x) \cdot (y - x) \quad \text{for all } x, y
+$$
+
+Plain English: at every point x, the tangent hyperplane lies below the graph. Every convex function is bounded from below by any of its tangents. This is the identity that powers most convex-optimization proofs (including GD's convergence rate).
+
+<RunnableCode title="Three convex functions and one non-convex — visual check" code={convexCheckCode} packages={["numpy", "matplotlib"]} captureFig={true} />
+
+**Pitfall — non-differentiable at a point is not the same as non-convex.** `f(x) = |x|` has a corner at 0, so it's not differentiable there, but it's convex (the chord test holds). Convex analysis was built to handle exactly this case — replace "gradient" with **subgradient** (any slope that stays below the graph) and everything works.
+
+## Why convex → local minimum = global minimum
+
+Suppose `f` is convex and `x*` is a **local** minimum. We want to prove `f(x*) ≤ f(y)` for **every** `y`.
+
+**Step 1.** Local minimality means: there exists ε > 0 such that `f(x*) ≤ f(z)` for all `z` with `||z − x*|| < ε`.
+
+**Step 2.** Take any other point y in the domain. Consider the segment from x* to y. For small enough t > 0, the point `z = t·y + (1 − t)·x*` sits within distance ε of x*, so by step 1:
+
+$$
+f(x^*) \le f(z) = f(t\, y + (1 - t)\, x^*)
+$$
+
+**Step 3.** Apply the chord test (definition 1):
+
+$$
+f(z) = f(t\, y + (1 - t)\, x^*) \le t\, f(y) + (1 - t)\, f(x^*)
+$$
+
+**Step 4.** Combining steps 2 and 3:
+
+$$
+f(x^*) \le t\, f(y) + (1 - t)\, f(x^*)
+$$
+
+Subtract `(1 - t) f(x*)` from both sides:
+
+$$
+t\, f(x^*) \le t\, f(y) \implies f(x^*) \le f(y) \quad \blacksquare
+$$
+
+Because y was arbitrary, `x*` is a global minimum. **This is the fundamental theorem of convex optimization.** It's why classical ML sleeps well at night: convex loss + reach any minimum ⇒ done.
+
+## Convex is "solved" — GD converges at O(1/k)
+
+For a convex, differentiable `f` with Lipschitz gradient (`||∇f(x) − ∇f(y)|| ≤ L ||x − y||`), gradient descent with step size `η = 1/L` satisfies:
+
+$$
+f(x_k) - f(x^*) \le \frac{L\, \|x_0 - x^*\|^2}{2 k}
+$$
+
+In plain English: the loss after k steps is at most `1/k` above the global minimum. For **strongly** convex `f` (Hessian ≥ μI for some μ > 0), this improves to a **geometric** rate:
+
+$$
+f(x_k) - f(x^*) \le (1 - \mu/L)^k \cdot \text{(initial gap)}
+$$
+
+so error decays exponentially — you get roughly `log(1/ε) / log(1/(1-μ/L))` iterations for error ε. These aren't heuristics; they're theorems.
+
+Modern convex optimization also has algorithms that beat plain GD: **Nesterov's accelerated gradient** achieves `O(1/k²)`; **interior-point methods** for linear programs solve them to any precision in polynomial time. There's a whole ecosystem (CVXPY, MOSEK, Gurobi) that will solve "any" convex problem for you if you write it in the right form.
+
+## Neural networks are not convex
+
+Every layer of a neural net contains a **product** of parameter matrices (or a nonlinearity applied to one). Products of parameters are inherently non-convex in those parameters:
+
+- `f(w_1, w_2) = (w_1 · w_2 − y)^2` has multiple minima because `(w_1, w_2)` and `(-w_1, -w_2)` give the same product.
+- With ReLU nonlinearities in between, the landscape gets even worse: piecewise-quadratic patches meeting at "kinks" that aren't smooth.
+
+<RunnableCode title="Non-convex objective: GD outcome depends on where you started" code={localVsGlobalCode} packages={["numpy", "matplotlib"]} captureFig={true} />
+
+<RunnableCode title="Convex vs non-convex — 8 starts each, side by side" code={convexVsNonConvexGdCode} packages={["numpy", "matplotlib"]} captureFig={true} />
+
+**The two headline non-convex phenomena:**
+
+- **Saddle points dominate.** In high dimensions, most stationary points (points where the gradient is zero) are **saddles**, not local minima. Some directions curve up, others curve down. Vanilla GD near a saddle takes tiny steps because the gradient is small — one reason why momentum, Adam, and second-order methods matter for non-convex training.
+- **Bad local minima are rare (empirically).** Extensive study of neural-net loss landscapes (Choromanska et al. 2015, Kawaguchi 2016) suggests that most local minima of over-parameterized nets are close in loss value to the global minimum. This is not proven for general architectures, but is the working assumption behind why SGD-based training reliably reaches good solutions.
+
+<RealWorldML title="Why we still train non-convex neural nets, and it works">
+
+Every modern LLM training run — GPT-4, Claude, Llama, Gemini — is non-convex, has no known convergence guarantees, and yet works. Five empirical facts explain how:
+
+**1. Over-parameterization.** Deep networks have far more parameters than training data points. The non-convex loss landscape has an enormous **manifold** of near-zero-loss solutions rather than isolated minima. Reaching one is much easier than reaching a specific one.
+
+**2. Mode connectivity.** Different SGD solutions turn out to be connected by low-loss paths (Garipov et al. 2018). What look like "different local minima" from the outside are often points on the same low-loss basin, just seen from different SGD trajectories.
+
+**3. Saddle points, not sharp local minima, are the sticking points.** Momentum and Adam's per-parameter adaptive step size specifically help escape saddles — one reason plain GD is rarely used for deep nets.
+
+**4. Convex sub-problems inside the non-convex whole.** The last layer of a neural net (a linear classifier on frozen features) is **convex** in its weights, given the features. Fine-tuning only the head is convex-optimization-easy. LoRA effectively adds a small-rank convex perturbation to a frozen base.
+
+**5. Regularization is convex.** L2 weight decay adds `λ ||w||²` to any loss. That regularizer is convex. Even in a non-convex problem, the regularizer smooths the landscape and biases the solution toward low-norm regions — a stability boost. RLHF's KL penalty is similarly a convex "pull" toward the reference policy.
+
+<RunnableCode title="Empirical: many random inits of a small net reach similar loss" code={nnLandscapeCode} packages={["numpy"]} />
+
+</RealWorldML>
+
+<StudyDepth
+  drill={[
+    "The chord test as the working definition of convexity.",
+    "'Local min = global min for convex' — and the proof (it's four lines).",
+    "For twice-differentiable f, convex ⇔ Hessian PSD everywhere.",
+    "Recognize which common ML losses are convex: MSE (yes), logistic (yes), hinge (yes), CE with softmax over a linear model (yes), neural net loss (no).",
+    "Saddle points, not local minima, are the sticking points of non-convex optimization.",
+  ]}
+  skim={[
+    "First-order lower-bound definition and its use in GD proofs.",
+    "O(1/k) rate proof for GD on convex Lipschitz-gradient functions.",
+    "Nesterov's O(1/k²) rate and interior-point methods.",
+    "Formal treatment of subgradients for non-smooth convex functions.",
+    "Precise theorems about neural-net loss landscape (Kawaguchi, Choromanska).",
+  ]}
+/>
+
+<CodeItYourself title="Three drills — convex checks, non-convex GD, and modifications">
+
+1. **Convexity by second derivative.** For each function, compute `f''(x)` and report whether f is convex, non-convex, or convex only on part of its domain:
+   - `f(x) = x^3`
+   - `f(x) = x · log(x)` on x > 0
+   - `f(x) = 1 / (1 + exp(-x))` (sigmoid)
+
+2. **GD failure on a step-like function.** Try `f(x) = tanh(5x)^2` (very flat in a big region around zero, then sharp climb). Run GD from x = 0.5 with lr = 0.1 for 100 steps. What happens and why? What if you start at x = 3?
+
+3. **Add a convex regularizer.** Take `f(x) = x^4 - 3x^2 + 1` (non-convex, two minima). Add a term `λ (x - 1)^2` for λ = 0, 0.5, 2, 10 and re-plot. As λ increases, watch the two-minima structure collapse to one — you've made the sum convex enough that only the right-side minimum survives. This is exactly what regularization does to non-convex ML losses.
+
+</CodeItYourself>
+
+<Summary>
+
+- **Convex** = the graph lies below every chord between its points; equivalently, Hessian is PSD everywhere (if twice differentiable).
+- **Convex ⇒ every local minimum is global.** Proof is 4 lines: local minimality + chord test.
+- **Convex optimization is "solved":** GD converges at O(1/k) with a fixed step; strong convexity gives geometric rate. Interior-point methods and CVXPY-family solvers handle "any" convex problem.
+- **Deep learning is non-convex** because parameter products (and ReLU kinks) break convexity. GD's convergence guarantees don't apply.
+- **In practice, non-convex training works** because of over-parameterization (many near-optimal solutions), mode connectivity, adaptive optimizers that escape saddles, convex sub-problems (last layer, LoRA head), and convex regularizers.
+- **Litmus test for your ML system:** which parts are convex? Those parts have theory. The rest ships on empirical observation.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>Which of these functions is convex on all of R? (a) f(x) = x², (b) f(x) = x³, (c) f(x) = |x|, (d) f(x) = sin(x).</>,
+      hint: <>Check the second derivative for the smooth ones; the chord test for the non-smooth ones.</>,
+      answer: <><b>(a) x² is convex</b> (f'' = 2 &gt; 0 everywhere). <b>(c) |x| is convex</b> — the chord test passes because the graph is V-shaped, with the vertex being the lowest point (non-differentiable at 0, but that's OK). <b>(b) x³ is NOT convex</b> (f'' = 6x changes sign at 0). <b>(d) sin(x) is NOT convex</b> (f'' = -sin(x) is often negative). So (a) and (c) are convex; (b) and (d) are not.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>The logistic-regression loss <br />L(w) = -Σᵢ [yᵢ log σ(w·xᵢ) + (1-yᵢ) log(1 - σ(w·xᵢ))]<br />is convex in w. In one sentence, why does that matter?</>,
+      hint: <>What does convex guarantee about the minima of L?</>,
+      answer: <>Because L is convex, every local minimum of L is a global minimum — so gradient descent from any starting point converges to THE unique minimum (assuming the data is not perfectly separable), and we don't have to worry about the initialization. This is why textbook logistic regression is "always convergent."</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Consider f(x, y) = xy. Is it convex on R²? Use the Hessian to decide.</>,
+      hint: <>Compute ∂²f/∂x², ∂²f/∂y², and ∂²f/∂x∂y. What are the eigenvalues of the Hessian?</>,
+      answer: <>The Hessian is a 2×2 matrix with all zeros on the diagonal and 1 on the off-diagonal — its eigenvalues are +1 and -1. Not PSD (has a negative eigenvalue), so f is <b>not convex</b>. This is a classic <b>saddle</b>: at (0,0), the function curves up along the direction (1,1)/√2 and down along (1,-1)/√2. Any two-layer linear network with output y = w₁ · w₂ · x has losses of exactly this shape in (w₁, w₂), which is one reason NN losses are non-convex.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Suppose f and g are both convex. Prove that h(x) = max(f(x), g(x)) is also convex.</>,
+      hint: <>Use the chord test (definition 1) on h, and use convexity of f and g on the right-hand side.</>,
+      answer: <>Fix x, y and t ∈ [0, 1]. <br /> h(tx + (1-t)y) = max( f(tx + (1-t)y),  g(tx + (1-t)y) ) <br /> ≤ max( t·f(x) + (1-t)·f(y),  t·g(x) + (1-t)·g(y) )  [each of f, g satisfies the chord test] <br /> ≤ t · max(f(x), g(x)) + (1-t) · max(f(y), g(y))  [max of convex combos ≤ convex combo of maxes] <br /> = t · h(x) + (1-t) · h(y). ∎ <br /><br /> <b>Consequence for ML:</b> hinge loss max(0, 1 - y·ŷ) is a max of two convex (in fact affine) functions — so it's convex. That's why SVMs have convex losses.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Show by example that GD with a fixed learning rate on a non-convex function can converge to a saddle point (gradient zero but not a minimum).</>,
+      hint: <>Consider f(x, y) = x² - y² starting exactly on the x-axis.</>,
+      answer: <>Take f(x, y) = x² - y². The gradient is (2x, -2y). The point (0, 0) is a saddle: f increases along x-axis, decreases along y-axis. <br /><br /> Start GD at (1, 0) with lr = 0.4. The gradient is (2, 0). Update: (1, 0) - 0.4·(2, 0) = (0.2, 0). Next: (0.2, 0) - 0.4·(0.4, 0) = (0.04, 0). Continuing, x-component shrinks toward 0 while y-component stays exactly 0. GD converges to (0, 0). <br /><br /> But (0, 0) is a saddle — f = 0 there, and f(0, 1) = -1 &lt; 0, so we're not at a minimum. The issue: any GD trajectory that stays on a "no-descent" subspace can get stuck at a saddle. In practice this exact-fixed-point outcome has measure zero (any small perturbation would tip it into the y &lt; 0 half-plane), but near a saddle the gradient is small so GD moves slowly. This is one motivation for momentum (Nesterov) and Adam: they accumulate movement and escape saddles faster than plain GD.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>The neural-network training loss is not convex. Yet SGD reliably finds low-loss solutions across random initializations. State three empirical/architectural properties of modern neural networks that make this possible.</>,
+      hint: <>Think about parameter count vs data, connections between minima, and which optimizer we use.</>,
+      answer: <>Three properties (any three of these earns full credit): <br /><br /> <b>1. Over-parameterization.</b> Modern nets have far more parameters than training data. The loss landscape becomes an enormous manifold of near-zero-loss solutions, so almost any GD trajectory reaches one. This is a strong empirical property of wide nets (Zhang et al. 2017 showed that even random labels can be fit — the capacity is that large). <br /><br /> <b>2. Mode connectivity.</b> Garipov et al. 2018 showed that different SGD-found solutions can be connected by low-loss paths — the seemingly-isolated "minima" are actually all in one big basin. Losing your specific solution doesn't matter because the whole basin is close in loss. <br /><br /> <b>3. Adaptive optimizers escape saddles.</b> Adam's per-parameter adaptive step size and momentum's accumulated velocity both help GD-like methods escape saddle points (where plain GD stalls). Without adaptive optimizers, deep-net training would be much harder. <br /><br /> <b>4. Convex regularization.</b> L2 weight decay (convex) plus KL penalties (convex) smooth the landscape and bias toward well-behaved regions. Not a proof of convergence, but a meaningful stabilizer. <br /><br /> <b>5. Convex sub-problems.</b> The last layer (linear classifier on features) is convex; LoRA's rank-r update on a frozen base is convex-ish for the small A, B matrices. The overall non-convex problem contains many convex sub-problems that stabilize training.</>
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "A convex function has this property that non-convex functions lack:",
+      choices: [
+        { text: "It is always positive." },
+        { text: "Every local minimum is a global minimum.", correct: true },
+        { text: "It is bounded above." },
+        { text: "It has infinitely many minima." },
+      ],
+      explanation: <>The defining consequence of convexity is that any local min is also global. That's what makes convex problems "solved" — gradient descent from any start finds THE minimum, no worry about getting stuck in a bad local pit. All three other options are false in general: convex functions can be negative (e.g., -log(x)), unbounded above (e.g., x²), and can have a plateau of minima but not "many" separate ones.</>
+    },
+    {
+      q: "For a twice-differentiable f: R^n → R, f is convex iff:",
+      choices: [
+        { text: "∇f(x) ≥ 0 for all x." },
+        { text: "The Hessian ∇²f(x) is positive semi-definite for all x.", correct: true },
+        { text: "f(0) = 0." },
+        { text: "The gradient is bounded." },
+      ],
+      explanation: <>The second-derivative characterization: multi-var convex ⇔ Hessian PSD everywhere. In 1-D this reduces to f''(x) ≥ 0. If Hessian is strictly positive definite everywhere, f is strictly convex (unique minimum, no plateau).</>
+    },
+    {
+      q: "In a non-convex loss landscape like that of a deep neural network, GD's behavior depends most critically on:",
+      choices: [
+        { text: "The value of pi." },
+        { text: "The initial starting point (initialization).", correct: true },
+        { text: "The alphabet used for parameter names." },
+        { text: "Whether the loss is written in Python or C++." },
+      ],
+      explanation: <>In non-convex problems, different starts reach different local minima. This is why NN initialization schemes (Xavier, He, LeCun) matter so much — they set the starting point in a way that biases GD toward good regions of the landscape. In convex problems, any start works.</>
+    },
+    {
+      q: "The empirical phenomenon 'mode connectivity' says:",
+      choices: [
+        { text: "Every local minimum of a convex problem is unique." },
+        { text: "Different SGD solutions of a deep network are connected by low-loss paths in weight space.", correct: true },
+        { text: "Adam always finds a better solution than SGD." },
+        { text: "L2 regularization is unnecessary." },
+      ],
+      explanation: <>Garipov et al. (2018) discovered that different SGD-found solutions of the same architecture aren't isolated minima — you can walk from one to another along a path that stays near-optimal in loss. This suggests the "many minima" of deep-net losses are more accurately described as one big low-loss basin. Explains why almost every SGD run reaches similar final loss even from different random inits.</>
+    },
+    {
+      q: "The hinge loss max(0, 1 - y · ŷ) used in SVMs is:",
+      choices: [
+        { text: "Neither convex nor differentiable." },
+        { text: "Convex but not differentiable everywhere (has a kink at 1 - y·ŷ = 0).", correct: true },
+        { text: "Differentiable but not convex." },
+        { text: "Only defined for y > 0." },
+      ],
+      explanation: <>max of two convex (affine) functions is convex — but the max has a kink where the two functions meet, so it's not differentiable there. Convex analysis handles this with subgradients. Non-differentiable-at-a-point is different from non-convex; the hinge loss is convex, so SVM training is a convex optimization problem (usually solved via sub-gradient methods or convex solvers, not standard GD).</>
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/optimization/convex-vs-nonconvex" title="Convex vs non-convex objectives" />

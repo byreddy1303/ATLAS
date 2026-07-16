@@ -1,0 +1,407 @@
+---
+title: Determinant & inverse
+tier: 1
+phase: "1.2"
+---
+
+export const detGeometryCode = `import numpy as np
+
+# 2x2 matrix — det tells you the signed area of the unit square after the transform.
+A = np.array([[3.0, 1.0],
+              [0.0, 2.0]])
+
+# Unit square corners
+square = np.array([[0, 0], [1, 0], [1, 1], [0, 1]])   # 4x2
+
+# Transform each corner
+mapped = square @ A.T                                  # 4x2
+
+# Compute area of the mapped parallelogram (should equal |det A|)
+# Use cross-product of two side vectors emanating from the origin
+u, v = mapped[1] - mapped[0], mapped[3] - mapped[0]
+area = abs(u[0] * v[1] - u[1] * v[0])
+
+print("A =", A.tolist())
+print("det(A) =", np.linalg.det(A))
+print("|det(A)| =", abs(np.linalg.det(A)))
+print("measured area =", area)
+`;
+
+export const detSignCode = `import numpy as np
+
+# Rotation (preserves orientation): det = +1
+theta = np.pi / 4
+R = np.array([[np.cos(theta), -np.sin(theta)],
+              [np.sin(theta),  np.cos(theta)]])
+print("rotation det =", round(np.linalg.det(R), 6))
+
+# Reflection (flips orientation): det = -1
+F = np.array([[1.0, 0.0],
+              [0.0, -1.0]])                          # flip y axis
+print("reflection det =", np.linalg.det(F))
+
+# Rank-deficient (crushes area to zero): det = 0
+C = np.array([[1.0, 2.0],
+              [2.0, 4.0]])                            # rows are dependent
+print("singular det =", np.linalg.det(C))
+`;
+
+export const inverseSolveCode = `import numpy as np
+
+# Solve Ax = b — the WRONG way and the RIGHT way.
+np.random.seed(42)
+A = np.random.randn(1000, 1000)
+b = np.random.randn(1000)
+
+# --- Wrong: form the explicit inverse then multiply ---
+import time
+t0 = time.time()
+Ainv = np.linalg.inv(A)
+x_wrong = Ainv @ b
+t_wrong = time.time() - t0
+res_wrong = np.linalg.norm(A @ x_wrong - b)
+
+# --- Right: solve directly with a factored solver ---
+t0 = time.time()
+x_right = np.linalg.solve(A, b)
+t_right = time.time() - t0
+res_right = np.linalg.norm(A @ x_right - b)
+
+print(f"inv-then-multiply : time = {t_wrong:.4f}s   residual = {res_wrong:.2e}")
+print(f"solve directly    : time = {t_right:.4f}s   residual = {res_right:.2e}")
+print()
+print("solve is faster AND more numerically stable — never form the explicit inverse.")
+`;
+
+export const conditionNumberCode = `import numpy as np
+
+# A near-singular matrix. Its determinant is small; its condition number is huge.
+A = np.array([[1.0, 1.0],
+              [1.0, 1.0001]])
+
+det = np.linalg.det(A)
+cond = np.linalg.cond(A)
+
+print(f"det(A)  = {det:.6f}")
+print(f"cond(A) = {cond:.2f}")
+print()
+
+# Solve Ax = b for a tiny perturbation of b — solution jumps by a lot
+b1 = np.array([1.0, 1.0])
+b2 = np.array([1.0, 1.001])
+
+x1 = np.linalg.solve(A, b1)
+x2 = np.linalg.solve(A, b2)
+
+print(f"x for b = {b1.tolist()}  ->  {x1}")
+print(f"x for b = {b2.tolist()}  ->  {x2}")
+print(f"tiny change in b caused HUGE change in x — this is what condition number measures")
+`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/matrices-transformations/matrix-as-transformation", label: "Matrix as linear transformation", blurb: "Determinant is the volume-scaling factor of the transformation the matrix performs." },
+  { href: "/learn/mathematics/matrices-transformations/rank-nullspace", label: "Rank & nullspace", blurb: "A matrix is invertible iff its rank equals its size iff its determinant is nonzero — three sides of the same coin." },
+]} />
+
+<NewConcepts
+  concepts={[
+    { name: "Cholesky decomposition", blurb: "A = LLᵀ for symmetric positive-definite matrices. The numerically-stable way to solve `Ax = b` and compute log-determinants for Gaussian likelihoods." },
+    { name: "Gaussian process (GP) regression", blurb: "nonparametric Bayesian regression built entirely from multivariate Gaussians; needs log-det of the kernel matrix at each training step." },
+    { name: "normalizing flows", blurb: "generative models built as chains of invertible neural networks. Every layer's log-likelihood involves the log-|det| of its Jacobian." },
+    { name: "diffusion models", blurb: "generative models trained via forward/reverse Markov chains with Gaussian noise. Log-determinants appear in the ELBO derivation." },
+  ]}
+/>
+
+<Motivation title="Two questions the determinant answers in one number">
+
+Given a linear transformation, two questions come up constantly. First: **how much does it scale volume?** The determinant of a 2×2 matrix is the (signed) area of the parallelogram the columns span — the amount by which the transformation stretches or squishes any region. Same story in 3D with volume, and in n-D with n-dimensional "volume." A determinant of 2 means "doubles all areas." A determinant of 0 means "flattens every input into a lower-dimensional subspace" — no area left.
+
+Second: **is the transformation reversible?** A transformation that flattens things (det = 0) is fundamentally not invertible: it merges distinct inputs into a single output, and you can't undo a merge. A transformation that preserves nonzero volume (det ≠ 0) is invertible, and its inverse is a matrix A⁻¹ such that A·A⁻¹ = I. In ML terms: the input can be recovered from the output.
+
+For a GenAI engineer, the determinant itself is almost never computed in production — but the ideas it captures (singular vs invertible, volume scaling, orientation) show up all the time: change-of-variables in normalizing flows, log-determinant in Jacobians, "well-conditioned" vs "singular" data in regression, invertibility of covariance matrices in Gaussian models. This chapter builds the geometric feel, then teaches you why `np.linalg.inv` is almost always the wrong tool — and what to use instead.
+
+</Motivation>
+
+<Intuition title="Determinant = signed volume scaling; inverse = do it backwards">
+
+Picture a 2×2 matrix acting on the unit square (corners at the origin, (1,0), (1,1), (0,1)). After the transformation, the four corners land somewhere in the plane, tracing out a parallelogram. Its area is `|det A|`. If the columns of A ended up on the same line, the "parallelogram" collapsed to a line segment and the area is zero. If they flipped orientation (rotate clockwise, then reflect), the signed area is negative.
+
+The inverse A⁻¹ is the matrix that undoes A. If A takes (1,0) to some column c₁ and (0,1) to c₂, then A⁻¹ takes c₁ back to (1,0) and c₂ back to (0,1). It exists precisely when the columns c₁, c₂ are linearly independent — that is, when the parallelogram has nonzero area — that is, when det A ≠ 0.
+
+**Three equivalent statements** for a square matrix:
+
+1. A is invertible.
+2. det(A) ≠ 0.
+3. The columns (equivalently rows) of A are linearly independent (rank = n, nullity = 0).
+
+Any one of these implies the other two. You'll bounce between them constantly.
+
+</Intuition>
+
+<Recall term="Linear independence">
+
+A set of vectors is linearly independent if no vector in the set can be written as a linear combination of the others — equivalently, if the only combination that equals the zero vector is the trivial one (all coefficients zero). For an n×n matrix, the columns being independent is equivalent to the matrix being invertible.
+
+</Recall>
+
+## The determinant as signed volume — geometry first
+
+For a 2×2 matrix
+
+$$
+A = \begin{bmatrix} a & b \\ c & d \end{bmatrix}, \qquad \det(A) = ad - bc.
+$$
+
+The formula is important, but the *meaning* is more important: **det(A) is the signed area of the parallelogram whose sides are the columns of A**. Sign = orientation (positive for right-handed, negative for reflected). Magnitude = area (scale factor for any region).
+
+In n dimensions the story is identical: det(A) is the signed n-volume of the parallelepiped spanned by A's columns. And for any set S in the input space with n-volume V, the transformed set A·S has n-volume `|det(A)| · V`. This is the change-of-variables constant that shows up in every multivariable integral and every normalizing flow.
+
+<RunnableCode title="Determinant = area scaling factor (2×2 example)" code={detGeometryCode} packages={["numpy"]} />
+
+## Sign, singularity, and orientation
+
+Three cases that classify what a 2×2 (or n×n) transformation does to volume:
+
+- **det(A) &gt; 0**: preserves orientation and scales volume by det(A). Pure rotations have det = 1. A shear has det = 1. A scaling by k in every axis has det = kⁿ (for n×n).
+- **det(A) &lt; 0**: reverses orientation (mirrors) and scales volume by `|det(A)|`. A single reflection in 2D has det = −1.
+- **det(A) = 0**: flattens the input into a lower-dimensional subspace. Rank &lt; n. No inverse. Also called *singular*.
+
+The equivalence det = 0 ⇔ singular ⇔ non-invertible ⇔ rank &lt; n is one of the sharpest invariants in linear algebra. Any one of these fails? All of them fail.
+
+<RunnableCode title="Rotation (+1), reflection (−1), rank-deficient (0)" code={detSignCode} packages={["numpy"]} />
+
+## Key properties of the determinant (worth memorizing)
+
+For any n×n matrices A, B and scalar c:
+
+1. **det(AB) = det(A) · det(B)** — determinant is multiplicative. Combining transformations multiplies their volume-scaling factors. Beautiful and useful.
+2. **det(Aᵀ) = det(A)** — a transformation and its transpose have the same volume scaling.
+3. **det(A⁻¹) = 1 / det(A)** (when A is invertible). Undoing a scaling multiplies volume by the reciprocal.
+4. **det(cA) = cⁿ · det(A)** for n×n A. Scaling every entry by c scales volume by cⁿ, because you're scaling each of n dimensions independently.
+5. **Triangular matrix** (upper or lower): determinant = product of diagonal entries. This is why LU factorization lets you compute determinants in O(n³) instead of O(n!): factor A = LU, then det(A) = product of U's diagonal (since det(L) = 1 when unit-diagonal).
+
+You'll use (1) and (5) constantly. Change-of-variables in a chain of transformations? Product of individual determinants. Compute a big determinant? Factor into triangular pieces.
+
+## The inverse — what it is, and when to compute it
+
+For an n×n matrix A with det(A) ≠ 0, the **inverse** A⁻¹ is the unique matrix satisfying:
+
+$$
+A \cdot A^{-1} \;=\; A^{-1} \cdot A \;=\; I_n
+$$
+
+Geometrically: A⁻¹ undoes A. If A rotates by 30° and scales by 2, then A⁻¹ scales by 1/2 and rotates by −30°.
+
+The 2×2 formula (memorize this one — comes up all the time in derivations):
+
+$$
+A^{-1} \;=\; \frac{1}{\det(A)} \begin{bmatrix} d & -b \\ -c & a \end{bmatrix} \quad \text{where } A = \begin{bmatrix} a & b \\ c & d \end{bmatrix}.
+$$
+
+For n×n with n ≥ 3, don't use the general formula (Cramer's rule via adjugate). Real code computes the inverse via LU or QR factorization in O(n³) time — but usually you never need the inverse *matrix*, you just need to solve A·x = b for some b. Which brings us to the pitfall.
+
+## The pitfall — never form the explicit inverse
+
+You need `x = A⁻¹·b`. It is very tempting to write:
+
+```python
+x = np.linalg.inv(A) @ b        # BAD
+```
+
+Almost always, you should write:
+
+```python
+x = np.linalg.solve(A, b)       # GOOD
+```
+
+Why `solve` is better in every real setting:
+
+- **Faster.** Forming A⁻¹ is one full LU factorization plus n extra back-substitutions (to invert). `solve(A, b)` is one LU factorization plus one back-substitution. Roughly 2–3× less work.
+- **More accurate.** Forming A⁻¹ then multiplying accumulates two rounds of floating-point error. `solve` does one round. Difference is small for well-conditioned A, disastrous for ill-conditioned A.
+- **Uses less memory.** A⁻¹ is a full n×n matrix; `solve` reuses the factored form and only produces the n-vector answer.
+
+The rule: **treat A⁻¹ as a mathematical abstraction, not a computational plan.** Whenever you see A⁻¹ in a formula, translate it to "solve the linear system" in code. This is the single biggest gap between textbook linear algebra and real numerical practice.
+
+<RunnableCode title="`inv @ b` vs `solve(A, b)` — timing and accuracy on a 1000×1000 system" code={inverseSolveCode} packages={["numpy"]} />
+
+## Condition number — the "how sensitive is the inverse" gauge
+
+Even when det(A) ≠ 0, the inverse can be numerically unusable if A is *close* to singular. The **condition number** κ(A) = ‖A‖ · ‖A⁻¹‖ measures how much A amplifies small errors in b when you solve A·x = b:
+
+- κ(A) close to 1 → **well-conditioned**. Small changes in b cause proportionally small changes in x.
+- κ(A) very large (say, &gt; 10¹⁰) → **ill-conditioned**. Tiny changes in b or in A itself cause huge changes in x. Floating-point rounding errors alone can wreck the answer.
+
+In numerical practice, a "singular" matrix isn't just one with det = 0; it's one with κ so large that noise-level inputs produce garbage-level outputs. `np.linalg.cond(A)` computes it; SVD gives it as σ_max / σ_min (the ratio of the largest to smallest singular value).
+
+<RunnableCode title="Near-singular matrix: small det, huge condition number, unstable solutions" code={conditionNumberCode} packages={["numpy"]} />
+
+## Why "explicit inverse" is even worse than it looks
+
+Aside from being slower, the explicit inverse leaks a subtle bug: **A⁻¹ almost always has full-rank, dense structure even when A has helpful sparsity or banded structure.** A sparse matrix A (mostly zeros) has an inverse A⁻¹ that is usually dense (mostly nonzeros). Storing the inverse of a 10⁶ × 10⁶ sparse matrix is impossible; solving A·x = b via sparse LU or an iterative method (conjugate gradient, GMRES) uses vastly less memory.
+
+Modern ML almost never stores an explicit inverse:
+
+- Gaussian process regression solves `(K + σ²I) α = y` using Cholesky, never forms the inverse.
+- Kalman filter updates use `S = H P Hᵀ + R` and then `K = P Hᵀ · S⁻¹` — but the `· S⁻¹` is done via `solve(S, ·)` not `inv(S)`.
+- Second-order optimizers (Newton, natural gradient) compute Hessian-vector products via `solve(H, g)`, never forming H⁻¹ (which is dense even for banded H).
+
+Once you internalize "matrix inverse = math notation, solve = code," you'll write faster, more accurate ML pipelines without thinking about it.
+
+<RealWorldML title="Log-determinant in normalizing flows — the change-of-variables trick that turns density estimation into function inversion">
+
+A normalizing flow is a family of invertible neural networks used for density estimation (and sometimes sampling). The core idea: pick a simple base distribution (say, a standard Gaussian in ℝᵈ), and learn an invertible function f that maps samples from that Gaussian to samples from your data distribution. The trained f defines a probability density on data space via the **change-of-variables formula**:
+
+$$
+p_{\mathrm{data}}(x) \;=\; p_{\mathrm{base}}\!\bigl(f^{-1}(x)\bigr) \;\cdot\; \bigl|\det J_{f^{-1}}(x)\bigr|
+$$
+
+That determinant term is the volume-scaling factor of the inverse map at each point x — exactly the geometric fact we started this chapter with. If f stretches a small region near f⁻¹(x) by a factor of 10 in volume, then the density in that region on the data side is 1/10 of the base density at f⁻¹(x) (probability mass is conserved; if the box got 10× bigger, the density is 10× smaller).
+
+Training a flow means maximizing log p_data(x) over the training data, which by the formula is:
+
+`log p_data(x)  =  log p_base(f⁻¹(x))  +  log |det J(x)|`
+
+The `log |det J(x)|` term is the *log-determinant of the Jacobian* — one number per data point, from an n×n matrix. Computed naively that's O(n³) per data point, which is prohibitive when n is a few thousand (say, an image flattened to a vector). This is *why* normalizing flow architectures (RealNVP, Glow, IAF) are all built around clever choices of f whose Jacobian is triangular — so `det = product of diagonal entries`, computable in O(n).
+
+Every design choice in a flow architecture — coupling layers, autoregressive parameterizations, affine transformations with easily-invertible parts — comes back to the twin needs of the change-of-variables formula: (1) f must be invertible, and (2) `log |det J|` must be cheap to compute. Two requirements, both direct consequences of the geometric meaning of the determinant.
+
+You'll see the same structure in variational autoencoders (the reparameterization trick uses a change-of-variables), in the diffusion-model derivation of the ELBO, and in any generative model that reasons about densities under a learned map. Volume scaling + invertibility = the whole story.
+
+</RealWorldML>
+
+<StudyDepth
+  intro={<>The two big ideas are the geometric picture (determinant = signed volume, inverse = undo) and the code-vs-math distinction (never form the explicit inverse). Everything else follows from these two.</>}
+  drill={[
+    <>Geometric meaning: det(A) = signed n-volume of the parallelepiped spanned by A's columns. Sign = orientation, magnitude = scale factor for all volumes</>,
+    <>Invertibility trinity: A invertible ⇔ det(A) ≠ 0 ⇔ rank(A) = n. Any one fails, all fail</>,
+    <>Multiplicativity: det(AB) = det(A) · det(B). Combining transformations multiplies volume-scaling factors</>,
+    <>2×2 inverse formula (comes up in derivations all the time): swap diagonals, negate off-diagonals, divide by det</>,
+    <>Code rule: never write `np.linalg.inv(A) @ b`. Write `np.linalg.solve(A, b)`. Faster, more accurate, less memory</>,
+    <>Condition number κ(A) tells you how much A amplifies input errors — a small det doesn't mean solve is unstable, but a huge κ does</>,
+  ]}
+  skim={[
+    <>Cofactor expansion (Laplace's formula) for computing determinants by hand — never used in code beyond n = 3</>,
+    <>Cramer's rule for solving Ax = b via ratios of determinants — cute, but wildly slow for anything past 3×3</>,
+    <>Full adjugate matrix formula for A⁻¹ — theoretical elegance, zero practical use in ML</>,
+  ]}
+/>
+
+<CodeItYourself title="Three drills to burn the determinant/inverse story in">
+
+1. **Determinant = area, in code.** Take a random 2×2 matrix A, transform the unit square (corners (0,0), (1,0), (1,1), (0,1)), and plot the original and transformed shapes on the same axes with matplotlib's Polygon patch. Print `np.linalg.det(A)` and the measured area (shoelace formula) — they should match. Try a rotation (det = 1), a shear (det = 1), a scaling by (2, 3) (det = 6), and a singular matrix (det = 0, area collapses).
+
+2. **`solve` vs `inv` — feel the difference.** Generate a random 500×500 matrix A and a random 500-vector b. Time both `x = np.linalg.inv(A) @ b` and `x = np.linalg.solve(A, b)`. Compare the residuals `np.linalg.norm(A @ x - b)` for both. Now try with A = np.eye(500) + 1e-8 * np.random.randn(500, 500) (near-identity, well-conditioned) and A = np.random.randn(500, 500) @ np.diag(np.logspace(-12, 0, 500)) (extremely ill-conditioned). Watch the residual gap widen.
+
+3. **Determinant of a triangular product.** Build two random 4×4 upper-triangular matrices L, U (fill with `np.triu`). Compute det(L), det(U), det(L @ U). Verify det(L @ U) = det(L) · det(U). Then verify det(L) = product of diagonal entries (that's why LU decomposition makes determinants cheap).
+
+</CodeItYourself>
+
+<Summary>
+
+- The **determinant** of an n×n matrix A is the signed n-volume of the parallelepiped spanned by its columns. Positive = orientation preserved; negative = orientation flipped; zero = flattened (singular).
+- For any n×n matrix, **A invertible ⇔ det(A) ≠ 0 ⇔ rank(A) = n ⇔ nullspace = zero-vector only.** Four ways to say the same thing.
+- **Multiplicativity: det(AB) = det(A) · det(B).** Also det(cA) = cⁿ · det(A), det(Aᵀ) = det(A), det(A⁻¹) = 1/det(A). Triangular ⇒ det = product of diagonal.
+- **The inverse** A⁻¹ is the unique matrix with A·A⁻¹ = I. 2×2 formula: swap diagonals, negate off-diagonals, divide by det. For n ≥ 3, don't use closed-form.
+- **In code, never form the explicit inverse.** Use `np.linalg.solve(A, b)` instead of `np.linalg.inv(A) @ b` — faster, more accurate, less memory. Rule: A⁻¹ is math notation, solve() is the code.
+- **Condition number κ(A)** = ratio of largest to smallest singular value = how much A amplifies input errors. Small det doesn't mean unstable; huge κ does.
+- ML uses log-determinants of Jacobians in normalizing flows (change of variables), pushes Cholesky/LU/QR instead of explicit inverses everywhere (Gaussian processes, Kalman filters, Newton methods), and treats the invertibility trinity as a first-class check on regression, covariance estimation, and any linear inverse problem.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>Compute the determinant of A = [[3, 1], [2, 4]] by the 2×2 formula.</>,
+      hint: <>det = ad − bc.</>,
+      answer: <>det(A) = (3)(4) − (1)(2) = 12 − 2 = <b>10</b>. Geometrically, A takes the unit square (area 1) to a parallelogram of area 10. Since the determinant is positive, orientation is preserved (the transformed square isn't mirrored).</>
+    },
+    {
+      difficulty: "easy",
+      q: <>Find the inverse of A = [[2, 1], [3, 4]] using the 2×2 formula.</>,
+      hint: <>swap diagonals, negate off-diagonals, divide by det.</>,
+      answer: <>det(A) = (2)(4) − (1)(3) = 8 − 3 = 5. Applying the formula: <br /><b>A⁻¹ = (1/5) · [[4, −1], [−3, 2]] = [[0.8, −0.2], [−0.6, 0.4]]</b>. <br />Verify: A · A⁻¹ = [[2·0.8 + 1·(−0.6), 2·(−0.2) + 1·0.4], [3·0.8 + 4·(−0.6), 3·(−0.2) + 4·0.4]] = [[1, 0], [0, 1]] ✓. That "swap and negate" pattern is worth committing to memory — it appears in every hand derivation involving 2×2 inverses (covariance, Fisher information, small block matrices).</>
+    },
+    {
+      difficulty: "medium",
+      q: <>For A = [[1, 2, 0], [0, 3, 4], [0, 0, 5]], compute det(A). Then compute det(A²) without multiplying out A².</>,
+      hint: <>Triangular matrix — product of diagonal. Multiplicativity for the second part.</>,
+      answer: <>A is upper-triangular, so det(A) = 1 · 3 · 5 = <b>15</b>. By multiplicativity, det(A²) = det(A · A) = det(A) · det(A) = 15 · 15 = <b>225</b>. In general det(Aᵏ) = det(A)ᵏ. Same idea underlies "power method converges to λ_max^k" for eigenvalues — multiplicativity through k applications of the same operator.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>You need to solve A · x = b where A is 100×100 and you'll reuse A for many different right-hand sides b. Given that `solve(A, b)` is preferred over `inv(A) @ b` for a single system, what changes when you're solving 1000 systems with the same A?</>,
+      hint: <>What part of solve(A, b) is the expensive step? Can you cache it?</>,
+      answer: <>The expensive part of `solve(A, b)` is the LU factorization of A (O(n³)); the back-substitution given the factors is O(n²), 100× cheaper for n = 100. When solving many systems with the same A, factor once and reuse: <br /><br /><code>from scipy.linalg import lu_factor, lu_solve <br />lu, piv = lu_factor(A)                     # O(n³), do once <br />for b in bs: x = lu_solve((lu, piv), b)     # O(n²), do 1000 times</code><br /><br />This is much faster than either `inv(A) @ b` in a loop (still O(n³) up-front then O(n²) per) OR `solve(A, b)` in a loop (O(n³) *per solve*). Same result as the inverse-matrix approach, without the numerical instability of forming A⁻¹ explicitly. Kalman filters, Gaussian process posteriors, and Newton-Raphson iterations all use this pattern.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>The matrix A = [[1, 1], [1, 1 + ε]] has det = ε. For ε = 1e-10, compute A⁻¹ by hand and explain why solving A·x = b will be numerically unstable, even though det is nonzero.</>,
+      hint: <>Compute the inverse and see how large its entries are.</>,
+      answer: <>det(A) = ε = 1e-10. By the 2×2 formula: <br /> A⁻¹ = (1/ε) · [[1+ε, −1], [−1, 1]] ≈ (1/1e-10) · [[1, −1], [−1, 1]] = [[1e10, −1e10], [−1e10, 1e10]] <br /><br /> The inverse has entries of magnitude 1e10. If b has a floating-point error of ε_machine ≈ 1e-16, then A⁻¹ · b has an error of ~1e10 · 1e-16 = 1e-6 — the answer x is only accurate to 6 decimal places even though we started with 16-digit precision. If b is perturbed by 1e-6 (say, from a real measurement), the error in x is ~1e10 · 1e-6 = 1e4, i.e., <em>the answer is meaningless</em>. <br /><br /> This is what the *condition number* measures: κ(A) ≈ 1e10 here (largest singular value / smallest ≈ 2 / 1e-10). A rule of thumb: log10(κ) digits of precision are lost when solving Ax = b. det = 1e-10 is a symptom of illness; κ = 1e10 is the diagnosis. Regularization (Ridge: (A + λI)) reduces κ by lifting the smallest singular value, which is why L2 regularization stabilizes linear regression on collinear features.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Show that if A has a nonzero nullspace vector v, then det(A) = 0. (This is one direction of the invertibility trinity.)</>,
+      hint: <>Think about what A does to a small volume containing v.</>,
+      answer: <>Geometric argument (crisp and general): if there's a nonzero v with A·v = 0, then A maps the entire line spanned by v to the single point 0. So A collapses at least one direction of the input space into nothing — the "n-volume of the image of the unit cube" is zero, and that volume is exactly `|det(A)|`. So det(A) = 0. <br /><br /> Algebraic argument (equally rigorous): the columns of A can be arranged so that one column c_k is written as a linear combination of the others (that's exactly what "A·v = 0 for nonzero v" says — the coefficients of v are the combination). Determinants are unchanged by adding a scalar multiple of one column to another (column operations), so we can zero out c_k by subtracting off the combination — now the matrix has a zero column, and det = 0. ∎ <br /><br /> The converse (det = 0 ⇒ nullspace is non-trivial) is also true and follows from the same volume argument in reverse: if det = 0 the image has less-than-n-dimensional volume, so at least one input direction must be collapsed. Together this gives one equivalence of the invertibility trinity: <em>nullspace nontrivial ⇔ det = 0</em>, which combined with rank-nullity gives the third face (rank &lt; n).</>
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "The determinant of a 2×2 matrix A represents:",
+      choices: [
+        { text: "The sum of A's entries" },
+        { text: "The signed area of the parallelogram spanned by A's columns", correct: true },
+        { text: "The number of nonzero entries in A" },
+        { text: "The average of the eigenvalues" },
+      ],
+      explanation: <>Determinant = signed n-volume of the parallelepiped spanned by the columns. For n = 2 that's a signed area; for n = 3 it's a signed volume; for general n it's the change-of-variables factor for n-dimensional integrals.</>
+    },
+    {
+      q: "For a square matrix A, which is TRUE?",
+      choices: [
+        { text: "A is invertible if and only if det(A) = 0" },
+        { text: "A is invertible if and only if det(A) ≠ 0", correct: true },
+        { text: "A is always invertible if it's square" },
+        { text: "det(A) = 0 means A has full rank" },
+      ],
+      explanation: <>Invertibility trinity: A invertible ⇔ det(A) ≠ 0 ⇔ rank(A) = n ⇔ nullspace has only the zero vector. Zero determinant = flattened = non-invertible.</>
+    },
+    {
+      q: "In numerical code, to compute x = A⁻¹b for a single right-hand side b, you should:",
+      choices: [
+        { text: "Use np.linalg.inv(A) @ b (compute the inverse then multiply)" },
+        { text: "Use np.linalg.solve(A, b) (factor and solve directly)", correct: true },
+        { text: "Compute A⁻¹ by cofactor expansion" },
+        { text: "Guess x and iterate" },
+      ],
+      explanation: <>`solve` factors A once and back-substitutes — one LU factorization plus one back-solve. `inv` factors A then does n back-solves to invert it, and any final `inv @ b` accumulates two rounds of error. `solve` is ~2× faster, more accurate, and uses less memory. This is the single most common numerical mistake in ML code.</>
+    },
+    {
+      q: "det(AB) equals:",
+      choices: [
+        { text: "det(A) + det(B)" },
+        { text: "det(A) · det(B)", correct: true },
+        { text: "det(A) − det(B)" },
+        { text: "det(A) / det(B)" },
+      ],
+      explanation: <>Multiplicativity of the determinant. Two composed transformations have a combined volume-scaling factor equal to the product of individual scalings — makes geometric sense: stretch by 2, then stretch by 3, combined stretch is 6. Follows from the geometric definition or from the LU-factorization proof.</>
+    },
+    {
+      q: "The condition number κ(A) measures:",
+      choices: [
+        { text: "The determinant of A" },
+        { text: "How much a small change in b can amplify into a large change in the solution of Ax = b", correct: true },
+        { text: "The number of rows of A" },
+        { text: "The sum of eigenvalues" },
+      ],
+      explanation: <>κ(A) = ‖A‖ · ‖A⁻¹‖ = σ_max / σ_min (ratio of extreme singular values). It bounds how much the solution to Ax = b changes when b (or A) is perturbed. Rule of thumb: log10(κ) digits of accuracy are lost when solving. A well-conditioned matrix has κ near 1; an ill-conditioned matrix has κ so large that noise-level inputs become garbage-level outputs — the actual concern in numerical practice, not "det = 0."</>
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/matrices-transformations/determinant-inverse" title="Determinant & inverse" />

@@ -1,0 +1,492 @@
+---
+title: Adam, AdamW & the adaptive family
+tier: 1
+phase: "1.6"
+---
+
+export const sgdVsAdaptiveCode = `# Compare plain SGD vs Adagrad vs RMSProp vs Adam on a stretched quadratic
+# f(x, y) = 0.5 * (10 x^2 + y^2)  — very elongated bowl; SGD hates this.
+import numpy as np, matplotlib.pyplot as plt
+
+def f(x): return 0.5 * (10 * x[0] ** 2 + x[1] ** 2)
+def grad(x): return np.array([10 * x[0], x[1]])
+
+def sgd(x0, lr=0.05, steps=50):
+    x = x0.copy(); traj = [x.copy()]
+    for _ in range(steps):
+        x = x - lr * grad(x); traj.append(x.copy())
+    return np.array(traj)
+
+def adagrad(x0, lr=0.5, steps=50, eps=1e-8):
+    x = x0.copy(); G = np.zeros_like(x); traj = [x.copy()]
+    for _ in range(steps):
+        g = grad(x); G += g ** 2
+        x = x - lr * g / (np.sqrt(G) + eps); traj.append(x.copy())
+    return np.array(traj)
+
+def rmsprop(x0, lr=0.05, rho=0.9, steps=50, eps=1e-8):
+    x = x0.copy(); v = np.zeros_like(x); traj = [x.copy()]
+    for _ in range(steps):
+        g = grad(x); v = rho * v + (1 - rho) * g ** 2
+        x = x - lr * g / (np.sqrt(v) + eps); traj.append(x.copy())
+    return np.array(traj)
+
+def adam(x0, lr=0.05, b1=0.9, b2=0.999, steps=50, eps=1e-8):
+    x = x0.copy(); m = np.zeros_like(x); v = np.zeros_like(x)
+    traj = [x.copy()]
+    for t in range(1, steps + 1):
+        g = grad(x)
+        m = b1 * m + (1 - b1) * g
+        v = b2 * v + (1 - b2) * g ** 2
+        m_hat = m / (1 - b1 ** t)                # bias correction
+        v_hat = v / (1 - b2 ** t)
+        x = x - lr * m_hat / (np.sqrt(v_hat) + eps)
+        traj.append(x.copy())
+    return np.array(traj)
+
+x0 = np.array([1.0, 1.0])
+trajs = {
+    "SGD":     sgd(x0),
+    "Adagrad": adagrad(x0),
+    "RMSProp": rmsprop(x0),
+    "Adam":    adam(x0),
+}
+for name, traj in trajs.items():
+    print(f"{name:>8}: final loss = {f(traj[-1]):.6f}   final x = {np.round(traj[-1], 4)}")
+
+# plot the trajectories on the level sets
+xs, ys = np.meshgrid(np.linspace(-1.2, 1.2, 100), np.linspace(-1.2, 1.2, 100))
+Z = 0.5 * (10 * xs ** 2 + ys ** 2)
+
+fig, axes = plt.subplots(1, 4, figsize=(13, 3.4))
+for ax, (name, traj) in zip(axes, trajs.items()):
+    ax.contour(xs, ys, Z, levels=15, colors="teal", alpha=0.4, linewidths=0.8)
+    ax.plot(traj[:, 0], traj[:, 1], "-o", markersize=3, color="crimson", lw=1.5)
+    ax.plot(0, 0, "*", color="gold", markersize=12)
+    ax.set_title(f"{name} (loss={f(traj[-1]):.3f})"); ax.set_aspect("equal")
+    ax.set_xlim(-1.2, 1.2); ax.set_ylim(-1.2, 1.2); ax.grid(alpha=0.3)
+
+plt.tight_layout()`;
+
+export const adamRecipeCode = `# The full Adam algorithm as it appears in every deep-learning framework.
+import numpy as np
+
+class Adam:
+    """
+    Adam optimizer — the workhorse of transformer training.
+    Reference: Kingma & Ba, 2014, "Adam: A Method for Stochastic Optimization"
+    """
+    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8):
+        self.params = [np.asarray(p, float) for p in params]
+        self.lr = lr
+        self.b1, self.b2 = betas
+        self.eps = eps
+        self.m = [np.zeros_like(p) for p in self.params]  # first moment (momentum-like)
+        self.v = [np.zeros_like(p) for p in self.params]  # second moment (variance-like)
+        self.t = 0                                          # step count
+
+    def step(self, grads):
+        self.t += 1
+        for i, (p, g) in enumerate(zip(self.params, grads)):
+            # 1. Exponential moving average of gradient (m) and squared gradient (v)
+            self.m[i] = self.b1 * self.m[i] + (1 - self.b1) * g
+            self.v[i] = self.b2 * self.v[i] + (1 - self.b2) * g ** 2
+
+            # 2. Bias correction — early m and v are biased toward zero
+            m_hat = self.m[i] / (1 - self.b1 ** self.t)
+            v_hat = self.v[i] / (1 - self.b2 ** self.t)
+
+            # 3. Update — per-coordinate adaptive learning rate
+            self.params[i] = p - self.lr * m_hat / (np.sqrt(v_hat) + self.eps)
+
+# Minimize f(x) = (x - 3)^2 + (y + 2)^2   (min at (3, -2))
+target = np.array([3.0, -2.0])
+def loss_and_grad(x): return np.sum((x - target) ** 2), 2 * (x - target)
+
+opt = Adam([np.array([0.0, 0.0])], lr=0.3)
+for step in range(20):
+    x = opt.params[0]
+    loss, g = loss_and_grad(x)
+    opt.step([g])
+    if step % 4 == 0 or step == 19:
+        print(f"step {step:>2}: x = {np.round(opt.params[0], 3)}, loss = {loss:.4f}")`;
+
+export const adamwCode = `# AdamW vs Adam: the difference is in how weight decay is applied.
+# Adam mixes L2 regularization into the gradient (which then gets rescaled adaptively).
+# AdamW decouples weight decay from the adaptive step — the "correct" way to combine them.
+import numpy as np
+
+def adam_with_l2(params, grads, m, v, t, lr=1e-3, betas=(0.9, 0.999), wd=0.01, eps=1e-8):
+    """Adam WITH L2 regularization added to gradient (the WRONG way)."""
+    b1, b2 = betas
+    for i, (p, g) in enumerate(zip(params, grads)):
+        g = g + wd * p                                     # L2 grad mixed into gradient
+        m[i] = b1 * m[i] + (1 - b1) * g
+        v[i] = b2 * v[i] + (1 - b2) * g ** 2
+        m_hat = m[i] / (1 - b1 ** t); v_hat = v[i] / (1 - b2 ** t)
+        params[i] = p - lr * m_hat / (np.sqrt(v_hat) + eps)
+
+def adamw(params, grads, m, v, t, lr=1e-3, betas=(0.9, 0.999), wd=0.01, eps=1e-8):
+    """AdamW — weight decay applied DIRECTLY to weights, separate from Adam step."""
+    b1, b2 = betas
+    for i, (p, g) in enumerate(zip(params, grads)):
+        # Adam step, unchanged
+        m[i] = b1 * m[i] + (1 - b1) * g
+        v[i] = b2 * v[i] + (1 - b2) * g ** 2
+        m_hat = m[i] / (1 - b1 ** t); v_hat = v[i] / (1 - b2 ** t)
+        adam_step = lr * m_hat / (np.sqrt(v_hat) + eps)
+        # Decoupled weight decay: shrink weights BEFORE (or after) the Adam step
+        params[i] = p - adam_step - lr * wd * p
+
+# Toy setup: two parameters, one has small gradients and one has huge gradients.
+# L2 in Adam-with-L2: the wd*p term for the large-gradient param gets suppressed
+#   by the sqrt(v) rescaling because v is large -> effective weight decay is smaller
+#   for that parameter.  Unequal treatment.
+# AdamW: the wd*p is applied verbatim to each param, so decay is uniform. Fair.
+target = np.array([2.0, 2.0])
+def grad_fn(x): return np.array([100 * (x[0] - target[0]),  # steep dimension
+                                 0.01 * (x[1] - target[1])])  # gentle dimension
+
+print("param [0] has 10000x bigger gradients than param [1]")
+print("Expected weight decay effect at same wd on both params:")
+print()
+
+for name, opt in [("Adam+L2", adam_with_l2), ("AdamW", adamw)]:
+    params = [np.array([5.0, 5.0])]
+    m = [np.zeros_like(params[0])]; v = [np.zeros_like(params[0])]
+    for t in range(1, 100):
+        g = [grad_fn(params[0])]
+        opt(params, g, m, v, t, lr=0.05, wd=0.1)
+    print(f"{name:>8}: final = {np.round(params[0], 4)}  (both should shrink toward target 2.0)")`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/calculus/gradient-descent-intuition", label: "Gradient descent — the intuition", blurb: "Adaptive optimizers are variations on the basic x <- x - lr * grad update; understanding vanilla GD first is essential." },
+  { href: "/learn/mathematics/calculus/jacobian-hessian", label: "Jacobian & Hessian", blurb: "Adam approximates the diagonal of the Hessian via running second-moment estimates — the theoretical motivation lives in this chapter." },
+]} />
+
+<NewConcepts
+  concepts={[
+    { name: "Nesterov momentum", blurb: "a look-ahead variant of momentum: peek one step forward along the velocity, then compute the gradient there. Cleaner convergence on convex problems; referenced but not derived here." },
+    { name: "LoRA (Low-Rank Adaptation)", blurb: "parameter-efficient fine-tuning that freezes the big weight matrix and trains a rank-r update B·A instead. Named here as a place where Adam is applied to the small A,B matrices — full deep-dive in Tier 4." },
+    { name: "Lookahead", blurb: "outer optimizer that wraps any inner optimizer and averages weights every k steps. Improves stability of AdamW at scale." },
+    { name: "Sophia", blurb: "2024 second-order optimizer using a cheap diagonal-Hessian estimate. Mentioned as a modern alternative to AdamW; not covered further." },
+    { name: "Weight decay & AdamW", blurb: "the 'W' in AdamW decouples the L2 penalty from the adaptive step. The prior-and-MAP viewpoint on why weight decay works comes from the statistics chapters." },
+  ]}
+/>
+
+<Motivation title="Adam trains every LLM you've heard of">
+
+Look at any paper that trains a transformer — GPT-3, GPT-4, LLaMA, Claude, Gemini, DeepSeek, Mistral, Qwen. Somewhere in the training-details section, you'll find: "Optimizer: AdamW, β1 = 0.9, β2 = 0.95, weight decay = 0.1, cosine schedule, linear warmup for 2k steps." That single line encodes about 75% of what makes large-scale training work.
+
+For a GenAI engineer, understanding Adam is not optional. Every training run, every fine-tune, every LoRA update passes through this algorithm — and the hyperparameters are chosen based on properties of the algorithm you either understand or take on faith. This chapter builds Adam from first principles:
+
+- Start with vanilla SGD and see its problems on stretched loss surfaces.
+- Add per-parameter adaptive learning rates (RMSProp).
+- Add momentum (accelerating in consistent-gradient directions).
+- Combine them with bias correction — that's Adam.
+- Fix the weight-decay coupling bug — that's AdamW, the default for transformers.
+
+Along the way we'll see WHY Adam works, when it fails (rare but real — some CNN training still prefers SGD with momentum), and what the β1/β2 hyperparameters actually control. By the end, "Adam" stops being a magical incantation and becomes an intelligible engineering choice.
+
+</Motivation>
+
+<Intuition title="Per-parameter learning rate = each weight gets its own step size">
+
+Vanilla SGD uses one learning rate for every parameter. On a stretched loss surface — where some directions are steep and others are flat — this is a disaster. A step size that's stable for the steep direction crawls in the flat direction; a step size that moves in the flat direction blows up in the steep direction. No single learning rate works.
+
+**Adaptive optimizers give each parameter its own effective step size.** The recipe:
+
+1. Track a running estimate of how big each parameter's gradient has been (typically squared).
+2. Divide the update for each parameter by that scale.
+
+Where the gradient has been consistently large (steep direction), the running estimate is big, so the effective step gets damped. Where the gradient has been small (flat direction), the running estimate is small, so the effective step is amplified. **The optimizer preconditions itself** — automatically discovering the right relative step size per parameter.
+
+That's the whole idea. Adam adds two refinements: (1) also track a running estimate of the *signed* gradient (momentum), so consistent directions accelerate; (2) apply a bias correction so early estimates aren't underestimated. AdamW additionally fixes a subtle interaction between L2 regularization and this adaptive rescaling.
+
+</Intuition>
+
+<Recall term="Exponential moving average">
+
+An EMA of a sequence x_1, x_2, ... with decay β keeps a running estimate v_t = β * v_(t-1) + (1 − β) * x_t. Higher β = longer memory (smoother, more lag); lower β = shorter memory (noisier, more responsive). Every adaptive optimizer uses EMAs for its running gradient statistics — the parameter β controls the effective averaging window (~1/(1-β) steps).
+
+</Recall>
+
+## SGD and its problems
+
+Vanilla stochastic gradient descent:
+
+$$
+\theta_{t+1} \;=\; \theta_t \;-\; \eta \, g_t
+$$
+
+where g_t is the gradient at step t and η is the learning rate. Simple, one hyperparameter. Two problems appear as soon as loss surfaces stop being perfectly round:
+
+1. **Stretched surfaces need direction-dependent step sizes.** A quadratic bowl with Hessian eigenvalues (10, 1) is 10× steeper in one direction than the other. Any single η that works for the steep direction is 10× too small for the flat direction (and vice versa). This is the *condition-number* problem from the Jacobian/Hessian chapter.
+2. **Stochastic gradients are noisy.** Mini-batch gradients fluctuate around the true gradient; the update direction jitters. SGD "wastes" some steps on noise cancellation. **Momentum** — an EMA of past gradients — smooths this jitter and accelerates in consistent-gradient directions.
+
+Momentum-augmented SGD is:
+
+$$
+v_{t+1} = \beta v_t + g_t, \quad \theta_{t+1} = \theta_t - \eta v_{t+1}
+$$
+
+— the "velocity" v accumulates gradient contributions with decay β (typically 0.9), producing smoother, faster convergence on consistent-direction landscapes. This is what still trains ResNets and some CNN architectures competitively today. But it doesn't solve the *stretched-surface* problem.
+
+## Adagrad — per-parameter adaptive step (first attempt)
+
+**Adagrad** (Duchi, Hazan, Singer 2011) solves the stretched-surface problem by tracking the sum of squared gradients per parameter and dividing the update by the square root:
+
+$$
+G_t = G_{t-1} + g_t \odot g_t, \quad \theta_{t+1} = \theta_t - \eta \cdot g_t \oslash \sqrt{G_t + \varepsilon}
+$$
+
+(⊙ = elementwise multiplication, ⊘ = elementwise division). Parameters that see large gradients accumulate large G values, so their effective learning rate shrinks. This works beautifully for sparse features (like word embeddings for rare words in NLP) — the rare features get large steps precisely because they didn't have big gradients before.
+
+**Adagrad's flaw**: G accumulates FOREVER. Even if the gradient magnitude becomes small later in training, G stays large, so the effective learning rate collapses to zero. Training stalls. Great for sparse features but bad for long training runs.
+
+## RMSProp — fix Adagrad with an EMA
+
+**RMSProp** (Hinton, 2012, in a Coursera lecture) replaces Adagrad's cumulative sum with an EMA:
+
+$$
+v_t = \rho v_{t-1} + (1 - \rho) g_t \odot g_t, \quad \theta_{t+1} = \theta_t - \eta \cdot g_t \oslash \sqrt{v_t + \varepsilon}
+$$
+
+with ρ typically around 0.9. The EMA forgets old gradients exponentially, so v stays reasonable and the effective learning rate doesn't collapse. This is the actual adaptive component of Adam — a per-parameter running variance estimate that scales the update.
+
+## Adam — momentum + RMSProp + bias correction
+
+**Adam** (Kingma & Ba, 2014) combines momentum and RMSProp:
+
+$$
+m_t = \beta_1 m_{t-1} + (1 - \beta_1) g_t \quad \text{(first-moment EMA — like momentum)}
+$$
+
+$$
+v_t = \beta_2 v_{t-1} + (1 - \beta_2) g_t \odot g_t \quad \text{(second-moment EMA — like RMSProp)}
+$$
+
+Then apply **bias correction** to account for the fact that m and v are initialized to zero and are underestimates for the first few steps:
+
+$$
+\hat{m}_t = \frac{m_t}{1 - \beta_1^t}, \quad \hat{v}_t = \frac{v_t}{1 - \beta_2^t}
+$$
+
+Finally, the update:
+
+$$
+\theta_{t+1} \;=\; \theta_t \;-\; \eta \cdot \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \varepsilon}
+$$
+
+Standard hyperparameters: **β1 = 0.9** (momentum decay), **β2 = 0.999** (variance decay), **η = 1e-3** (learning rate; typically 1e-4 to 3e-4 for transformers), **ε = 1e-8** (numerical stability).
+
+<RunnableCode title="SGD vs Adagrad vs RMSProp vs Adam on a stretched quadratic" code={sgdVsAdaptiveCode} packages={["numpy", "matplotlib"]} captureFig={true} />
+
+Watch the plot: SGD zigzags down the narrow direction (steep gradient) while barely moving in the flat direction. Adagrad, RMSProp, and Adam correct this — the effective step size shrinks in the steep direction and stays larger in the flat direction, producing a much more direct path to the minimum. **This adaptive rescaling is why deep-learning optimizers switched to Adam en masse after 2015.**
+
+<RunnableCode title="Adam full recipe as a class" code={adamRecipeCode} packages={["numpy"]} />
+
+## AdamW — the correct way to combine weight decay
+
+**Weight decay** (L2 regularization) is a common trick: add λ · ‖θ‖² / 2 to the loss, which adds λ·θ to the gradient. This "pulls" all weights toward zero, preventing them from growing too large.
+
+**The bug in "Adam + L2 regularization":** if you naively add λθ to the gradient before Adam processes it, the second-moment EMA v absorbs both the "real" gradient and the L2 term. Parameters with large gradients (large v) end up with *smaller effective weight decay* because the wd*θ contribution gets divided by sqrt(v). Parameters with small gradients get proportionally *larger* weight decay. This is inconsistent — you asked for uniform decay and got parameter-dependent decay.
+
+**AdamW** (Loshchilov & Hutter, 2017, "Decoupled Weight Decay Regularization") fixes this by applying weight decay **directly** to the parameters, decoupled from the Adam step:
+
+$$
+\theta_{t+1} \;=\; \theta_t \;-\; \eta \cdot \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \varepsilon} \;-\; \eta \cdot \lambda \cdot \theta_t
+$$
+
+The extra `−η · λ · θ` term is applied verbatim to every parameter, not scaled by the second moment. All parameters get uniform decay. Empirically, AdamW consistently outperforms Adam+L2 on transformer training, especially for large models.
+
+<RunnableCode title="Adam+L2 vs AdamW — inconsistent vs consistent weight decay" code={adamwCode} packages={["numpy"]} />
+
+**Every modern LLM training run uses AdamW**, not vanilla Adam. If you see "Adam" in a paper's methods, they usually mean AdamW; the naming has become sloppy but AdamW is the actual algorithm.
+
+## The traps that matter
+
+**β2 = 0.999 gives a long-memory second-moment estimate.** With β2 = 0.999, the effective window is ~1000 steps. Early in training, v is a poor estimate. This is *why* bias correction exists — it inflates v (and m) to what they'd be if the EMA had had time to warm up. Without bias correction, initial updates would be massively over-scaled and training would diverge.
+
+**Adam can generalize WORSE than SGD on some problems.** For image classification with CNNs, SGD with momentum + a well-tuned learning rate often finds better minima than Adam — the adaptive rescaling can push Adam into "sharp" minima that generalize poorly. This is why some vision papers still use SGD. For transformers, Adam/AdamW dominates because the loss landscape is more anisotropic (some parameters need per-coordinate scaling), and generalization gaps between SGD and AdamW are small.
+
+**AdamW hyperparameters for LLMs are almost universally β1 = 0.9, β2 = 0.95 (NOT 0.999!), weight_decay = 0.1.** The β2 = 0.95 is critical for LLM stability — the default β2 = 0.999 makes early training unstable for large models. β2 = 0.95 gives an effective window of ~20 steps for the variance estimate, which is more responsive to the initial gradient chaos.
+
+**Adam needs warmup.** For transformers, the first few hundred to few thousand steps have wildly varying gradients (untrained model, small batch of tokens, tokens that the model hasn't seen). Applying full-learning-rate Adam immediately causes the initial updates to be enormous and destabilizes training. **Linear warmup** (learning rate ramps from 0 to η over the first ~500-2000 steps) is the standard fix — the topic of the next chapter.
+
+**ε = 1e-8 is not always right.** Some very-large-scale settings use ε = 1e-6 or even 1e-4 for numerical stability with mixed-precision training. The default is fine most of the time.
+
+**Memory cost is 2× parameters.** Adam stores m and v of the same shape as the parameters. For a 1B-parameter model in fp32, Adam optimizer state is 2 × 4B = 8GB — often exceeding the model weights themselves. This is why **memory-efficient optimizers** (Adafactor, 8-bit Adam, Lion) matter for large-scale training. LoRA sidesteps this by only optimizing a small fraction of parameters.
+
+<RealWorldML title="An LLM training config decoded line-by-line">
+
+Take a typical LLaMA-style pretraining config:
+
+```
+optimizer: AdamW
+    lr: 3e-4
+    betas: [0.9, 0.95]         # NOT the default 0.999
+    weight_decay: 0.1          # aggressive; wants small weights
+    eps: 1e-8
+
+lr_scheduler: cosine
+    warmup_steps: 2000
+    total_steps: 500_000
+    min_lr_ratio: 0.1
+
+grad_clip: 1.0
+```
+
+Every line has a reason grounded in this chapter or the next:
+
+- **AdamW** (not Adam): decoupled weight decay for consistent regularization across parameters with different gradient magnitudes.
+- **lr = 3e-4**: standard sweet spot for transformer training. Higher (1e-3+) risks instability; lower (1e-4) is too slow for large batches.
+- **betas = (0.9, 0.95)**: β1 default is fine; β2 = 0.95 not 0.999. The lower β2 makes the second-moment estimate more responsive to the initial gradient chaos when parameters are far from their eventual values.
+- **weight_decay = 0.1**: aggressive by non-LLM standards. Encourages the model to use each parameter frugally; empirically improves generalization at scale.
+- **eps = 1e-8**: standard numerical stability constant. Only increase if you see NaNs at initialization.
+- **cosine schedule with warmup_steps = 2000**: covered in the next chapter. Warmup gives Adam time to build up its v estimate before applying full learning rates; cosine annealing over 500k total steps smoothly decays to 10% of peak for the final ~half of training.
+- **grad_clip = 1.0**: rescale the gradient if its norm exceeds 1.0. Prevents rare huge gradient spikes (e.g., from a bad token or a numerical edge case) from destroying carefully-trained weights. Every transformer training run uses this.
+
+Change any of these without understanding what they do and you invite subtle training bugs — loss curves that plateau, exploded gradients, or subtly worse final models. Understanding this chapter is enough to *read* every line and know what it controls.
+
+</RealWorldML>
+
+<StudyDepth
+  intro={<>Adaptive optimizers are the single biggest reason large-scale deep learning became practical. Understanding Adam and AdamW deeply pays off every time you train a model — you can debug training instabilities from first principles.</>}
+  drill={[
+    <>Vanilla SGD update: <code>θ ← θ − η·g</code>; problems with stretched loss surfaces</>,
+    <>EMA for gradients (momentum) and squared gradients (variance) — one hyperparameter each (β1, β2)</>,
+    <>Adam recipe: track m (1st moment), v (2nd moment), bias-correct both, update with m̂ / (√v̂ + ε)</>,
+    <>Bias correction is essential — without it, initial updates are massively under-scaled</>,
+    <>AdamW: decouple weight decay from the Adam step by subtracting η · λ · θ directly</>,
+    <>LLM defaults: AdamW, β1 = 0.9, β2 = 0.95, wd = 0.1, ε = 1e-8, lr ~ 3e-4 with warmup</>,
+    <>Memory cost of Adam is 2x parameters (m + v); LoRA and 8-bit Adam are the escape hatches</>,
+  ]}
+  skim={[
+    <>Nesterov momentum (a lookahead variant of momentum) — theoretical improvement, rarely material</>,
+    <>Lion, Sophia, Shampoo — newer optimizers; watch space but not required for most work</>,
+    <>Adafactor — matrix-factorized Adam variant used by Google for T5 and PaLM; saves memory</>,
+    <>Full derivation of Adam's convergence proof — messy real-analysis, take the empirical evidence</>,
+  ]}
+/>
+
+<CodeItYourself title="Three drills — implement, tune, compare">
+
+1. **Implement Adam in ~15 lines.** Take the Adam class above and reproduce it from scratch without looking. Test on minimizing f(x) = (x − 3)² starting from x = 0 with lr = 0.3. Loss should reach ~1e-6 in about 20 steps.
+
+2. **Bias correction ablation.** Modify Adam to skip bias correction (remove the `/ (1 - β^t)` division). Run on a simple quadratic; observe that the first ~10 steps take much smaller effective steps than they should, and total convergence is slower. This is exactly why bias correction is in the algorithm.
+
+3. **AdamW vs Adam+L2 on unequal-gradient parameters.** Create two parameters where one has 100× larger gradients than the other; apply Adam+L2 vs AdamW with the same weight_decay. Verify that Adam+L2 applies uneven decay (the large-gradient param decays less) while AdamW applies uniform decay. This is the whole "decoupled" argument in one experiment.
+
+</CodeItYourself>
+
+<Summary>
+
+- **Vanilla SGD** uses one learning rate for all parameters; it struggles on loss surfaces with different curvatures in different directions.
+- **Momentum** (EMA of gradients) smooths noisy stochastic gradients and accelerates in consistent-gradient directions.
+- **Adagrad** rescales per-parameter based on cumulative squared gradients; **RMSProp** does the same with an EMA (so it doesn't stall).
+- **Adam** = momentum + RMSProp + bias correction. Standard update: `θ ← θ − η · m̂ / (√v̂ + ε)`.
+- **AdamW** = Adam + decoupled weight decay (apply `−η · λ · θ` separately from the Adam step). This is the actual algorithm every modern LLM training uses.
+- **Standard LLM hyperparameters**: AdamW, β1 = 0.9, **β2 = 0.95** (not 0.999!), wd = 0.1, ε = 1e-8, lr ~ 3e-4 with linear warmup and cosine decay.
+- **Memory cost**: 2× model parameters. Adafactor / 8-bit Adam / LoRA are the escape hatches.
+- **When to use plain SGD**: some CNN training (ResNet-style vision) still benefits from SGD+momentum for better generalization. Transformers use AdamW exclusively.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>Why does Adagrad's effective learning rate eventually go to zero?</>,
+      hint: <>What does Adagrad accumulate over time?</>,
+      answer: <>Adagrad accumulates <b>the sum</b> of squared gradients, so G grows monotonically. As G grows, the effective learning rate η / √G shrinks. Eventually, no matter how much loss remains, the step size becomes too small to make progress — training stalls. RMSProp fixes this by using an EMA instead of a cumulative sum, so old gradients decay away and the effective learning rate stays reasonable.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>What are the typical values of β1 and β2 in Adam? What effective averaging window does each correspond to?</>,
+      hint: <>Effective window ≈ 1 / (1 − β).</>,
+      answer: <>Standard: β1 = 0.9, β2 = 0.999 (default in Adam paper); LLM training often uses β2 = 0.95 for stability. <br /> Window: β = 0.9 → 1 / (1 − 0.9) = <b>10 steps</b> effective window for gradient EMA (m). β = 0.999 → 1000 steps for variance EMA (v). β2 = 0.95 → 20 steps. <br /> Interpretation: momentum averages over ~10 recent gradients (fast to adapt); default variance estimate averages over ~1000 steps (slow, stable); LLM β2 = 0.95 averages over ~20 steps (more responsive to gradient changes early in training).</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Why is bias correction necessary in Adam? Argue by computing what the first-moment estimate m_1 equals after just one step, and comparing to the true expected gradient.</>,
+      hint: <>Adam initializes m = 0 and applies m_1 = β1 · 0 + (1 − β1) · g_1.</>,
+      answer: <>Initial m_0 = 0. After one step: m_1 = β1 · 0 + (1 − β1) · g_1 = (1 − β1) · g_1. For β1 = 0.9, this is 0.1 · g_1 — a factor-of-10 UNDER-estimate of the actual gradient. <br /><br /> If we used m_1 directly without correction, the first update would be about 10× smaller than it should be. In fact, without bias correction, every early step is under-scaled, and training slows down enormously. <br /><br /> Bias correction: m̂_1 = m_1 / (1 − β1^1) = m_1 / 0.1 = g_1 — the correction inflates m to what it would be if the EMA had had time to converge. As t grows, β1^t → 0 and (1 − β1^t) → 1, so the correction fades away and m̂ ≈ m. Correction matters most for the first ~10-20 steps.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Explain why AdamW is preferred over "Adam + L2 regularization" for transformer training, even though algebraically they seem similar.</>,
+      hint: <>What happens to the L2 term (wd · θ) when it's added to g BEFORE the sqrt(v) rescaling?</>,
+      answer: <><b>Adam + L2:</b> the L2 gradient (wd · θ) is added to the true gradient BEFORE Adam's second-moment rescaling. Parameters with large gradients accumulate large v; when we divide by √v, the L2 contribution (wd · θ) is also divided by √v. So the *effective* weight decay applied to a large-gradient parameter is LESS than to a small-gradient parameter — the two get inconsistent treatment. <br /><br /><b>AdamW:</b> apply the L2 term (−η · wd · θ) DIRECTLY to the parameter update, separate from the adaptive Adam step. Now every parameter gets uniform weight decay regardless of its gradient magnitude — exactly what "weight decay" is supposed to mean. <br /><br /><b>Empirical impact:</b> for transformer training, AdamW reproducibly outperforms Adam+L2 by a small but consistent margin on final loss and downstream metrics. The magnitude depends on how much weight decay you apply and how varied the gradient magnitudes are across parameters — for large models with diverse parameter types (embeddings, attention weights, FFN weights, normalization scales), the difference is meaningful. This is why every published LLM training recipe from 2020 onward uses AdamW.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Adam's update at step t is η · m̂_t / (√v̂_t + ε). Show that when the gradients g_1, g_2, ... have constant magnitude s (say every g_i = s in every dimension), the effective per-step update magnitude is approximately η, regardless of s.</>,
+      hint: <>Compute m and v after many steps assuming constant gradient g_i = s.</>,
+      answer: <>With constant g_i = s (a scalar for simplicity): <br /> m_t = (1 − β1) [g_t + β1 g_(t-1) + β1² g_(t-2) + ...] → s (as t → ∞, EMA of constants is the constant). <br /> v_t = (1 − β2) [g_t² + β2 g_(t-1)² + ...] → s². <br /> Bias correction: m̂ → s, v̂ → s² for large t. <br /><br /> Update: η · m̂ / (√v̂ + ε) = η · s / (s + ε) ≈ <b>η</b> for s ≫ ε. <br /><br /> The magnitude s cancels! The update size is η regardless of the gradient scale. This is Adam's celebrated "scale-invariance" property: it takes step ~η per iteration in the gradient's direction, no matter how big the raw gradient is. Contrast SGD, whose step size is η · s — 100× larger gradients cause 100× larger steps and easily blow up. Adam's built-in normalization is why it's easier to tune (a single lr works across many scales of loss) and why it's the default choice for problems where gradient magnitudes vary wildly across parameters.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Why do modern LLM training configs use β2 = 0.95 instead of the default β2 = 0.999?</>,
+      hint: <>Think about what v represents and how it behaves early in training with high β2.</>,
+      answer: <>β2 = 0.999 means the second-moment EMA has an effective window of ~1000 steps. Early in training (first few hundred steps), the model is at initialization, gradients are extreme and unrepresentative of the "true" gradient statistics, and the pre-populated v_0 = 0 makes even the bias-corrected v̂ noisy for many steps. <br /><br /> Consequences: <br /> - The √v̂ term in the denominator undervalues the actual gradient scale during warmup, over-inflating the effective learning rate. Combined with the untrained model's extreme gradients, this can cause NaN losses or catastrophic parameter blowups. <br /> - Even with linear warmup, β2 = 0.999 can leave v̂ still poorly estimated after warmup ends. Instability at ~step 2000 (post-warmup) is a common failure mode. <br /><br /> β2 = 0.95 has an effective window of ~20 steps — v̂ converges to a reasonable estimate within the first ~50-100 steps of training. Combined with warmup, this gives a much smoother "safety" phase. <br /><br /> Empirical: β2 = 0.95 (or 0.98 for smaller models) has become standard for LLM pretraining. The Adam paper's default (0.999) was chosen based on smaller-scale experiments where the initial-instability issue is less pronounced. This is a good example of "hyperparameter defaults don't scale up" — always cross-check for your target model size and loss landscape.</>
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "Adam maintains two exponential moving averages of:",
+      choices: [
+        { text: "The parameters and the learning rate" },
+        { text: "The gradient (first moment) and the squared gradient (second moment)", correct: true },
+        { text: "The loss and its derivative" },
+        { text: "The activations and the weights" },
+      ],
+      explanation: <>m = EMA of gradient (momentum-like), v = EMA of squared gradient (variance-like). β1 controls how fast m responds; β2 controls how fast v responds. Together they enable per-parameter adaptive learning rates with momentum.</>
+    },
+    {
+      q: "Why does Adam apply bias correction to m and v?",
+      choices: [
+        { text: "To prevent numerical overflow" },
+        { text: "Because m and v are initialized to zero, so early estimates are biased toward zero and need to be scaled up", correct: true },
+        { text: "To reduce the memory footprint" },
+        { text: "To ensure the gradient is unbiased" },
+      ],
+      explanation: <>m_0 = v_0 = 0. After t steps, m and v are still under-estimates of their true EMA-limit values because of the initialization at zero. Bias correction divides by (1 − β^t) to inflate them to what they'd be without the zero-init bias. Without this, early updates are ~10-100× smaller than they should be.</>
+    },
+    {
+      q: "AdamW differs from Adam + L2 regularization in that:",
+      choices: [
+        { text: "AdamW doesn't use weight decay at all" },
+        { text: "AdamW applies weight decay directly to parameters, not through the gradient", correct: true },
+        { text: "AdamW uses momentum, while Adam+L2 doesn't" },
+        { text: "AdamW has a different learning rate default" },
+      ],
+      explanation: <>In Adam+L2, wd·θ is added to the gradient, then divided by √v — inconsistent per-parameter decay. In AdamW, the −η·λ·θ term is applied directly to the parameter update after the Adam step — uniform decay across all parameters. Empirically better for transformer training; standard since 2017.</>
+    },
+    {
+      q: "The typical β2 value used in LLM training is:",
+      choices: [
+        { text: "0.9 (same as β1)" },
+        { text: "0.95 (not the Adam paper's default of 0.999)", correct: true },
+        { text: "0.999 (standard default)" },
+        { text: "1.0" },
+      ],
+      explanation: <>β2 = 0.95 gives an effective variance-EMA window of ~20 steps, more responsive to the extreme early-training gradients. β2 = 0.999 (default) uses a 1000-step window that's too slow to react to the initial gradient chaos and can cause instability. Every modern LLM training config uses β2 = 0.95 (or 0.98 for smaller models), NOT the paper's default.</>
+    },
+    {
+      q: "The memory cost of Adam optimizer state relative to model parameters is:",
+      choices: [
+        { text: "0.5x (compressed)" },
+        { text: "1x (same size)" },
+        { text: "2x (m and v are same shape as parameters)", correct: true },
+        { text: "4x (full Hessian estimate)" },
+      ],
+      explanation: <>Adam stores both m and v with the same shape as the parameter tensor. So optimizer state = 2 × params. In practice with fp32 for optimizer state and mixed-precision training, it's often 2 × 4B per parameter = 8 bytes optimizer state per param. This is why 8-bit Adam, Adafactor, and LoRA (which only optimizes a small fraction of parameters) matter for memory-constrained large-scale training.</>
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/optimization/adaptive-optimizers" title="Adam, AdamW & the adaptive family" />

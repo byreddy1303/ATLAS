@@ -1,0 +1,443 @@
+---
+title: Law of large numbers & CLT
+tier: 1
+phase: "1.4"
+---
+
+export const llnCode = `# Law of large numbers: as N grows, the sample mean of iid draws
+# converges to the true mean.  Visualize the running average of coin flips.
+import numpy as np
+import matplotlib.pyplot as plt
+rng = np.random.default_rng(0)
+
+# Fair coin: true mean = 0.5.
+true_mean = 0.5
+N = 5000
+flips = rng.integers(0, 2, size=N)
+running_mean = np.cumsum(flips) / np.arange(1, N + 1)
+
+fig, ax = plt.subplots(figsize=(6.8, 3.6), facecolor="none")
+ax.set_facecolor("#0f0f14")
+ax.plot(np.arange(1, N + 1), running_mean, color="#c4f04b", lw=1)
+ax.axhline(true_mean, color="#f5cf3d", ls="--", lw=1, label="true mean = 0.5")
+ax.set_xscale("log")
+ax.set_xlabel("N (log scale)", color="#dcdcd6")
+ax.set_ylabel("running sample mean", color="#dcdcd6")
+ax.set_title("Running mean of fair-coin flips: LLN in action", color="#dcdcd6")
+ax.legend(facecolor="#181820", edgecolor="#2a2a35", labelcolor="#dcdcd6")
+ax.tick_params(colors="#dcdcd6")
+for spine in ax.spines.values():
+    spine.set_color("#2a2a35")
+plt.tight_layout()
+plt.show()
+
+# Quantitative view -- how close is the sample mean at N = 100, 1000, 10000?
+for n in [100, 1000, 10_000, 100_000]:
+    samples = rng.integers(0, 2, size=n)
+    print(f"N = {n:>6}: sample mean = {samples.mean():.5f}   (deviation from 0.5: {abs(samples.mean() - 0.5):.5f})")
+print("\\nDeviations shrink as N grows -- that IS the law of large numbers.")`;
+
+export const cltCode = `# Central limit theorem: sums (or averages) of N iid random variables approach
+# a Gaussian shape, regardless of the underlying distribution -- for large enough N.
+# Demonstrate by averaging draws from very non-Gaussian distributions.
+import numpy as np
+import matplotlib.pyplot as plt
+rng = np.random.default_rng(0)
+
+# Compute sample means for three quite different underlying distributions.
+distributions = {
+    "Uniform(0, 1)":      lambda size: rng.uniform(0, 1, size=size),
+    "Exponential(rate=1)": lambda size: rng.exponential(1.0, size=size),
+    "Bernoulli(p=0.1)":    lambda size: (rng.random(size=size) < 0.1).astype(float),
+}
+
+n_averages = 5000    # how many sample means to compute
+n_per_avg  = 200     # how many draws per sample mean
+
+fig, axes = plt.subplots(1, 3, figsize=(11, 3.4), facecolor="none")
+for ax, (name, sampler) in zip(axes, distributions.items()):
+    ax.set_facecolor("#0f0f14")
+    # 5000 sample means, each an average of 200 draws.
+    samples = sampler((n_averages, n_per_avg))
+    means = samples.mean(axis=1)
+    # Standardize -- mean and std of the SAMPLING distribution.
+    z = (means - means.mean()) / means.std()
+    ax.hist(z, bins=40, density=True, alpha=0.55, color="#c4f04b")
+    # Overlay standard normal PDF for comparison.
+    xs = np.linspace(-4, 4, 200)
+    ax.plot(xs, np.exp(-xs**2 / 2) / np.sqrt(2*np.pi), color="#f5cf3d", lw=1.6)
+    ax.set_title(name, color="#dcdcd6")
+    ax.tick_params(colors="#dcdcd6")
+    for spine in ax.spines.values():
+        spine.set_color("#2a2a35")
+
+plt.suptitle("Sample means of 200 iid draws, standardized -- all approach N(0, 1)", color="#dcdcd6")
+plt.tight_layout()
+plt.show()
+print("\\nEven the skewed exponential and the highly discrete Bernoulli produce sample-mean")
+print("distributions that look Gaussian after standardization.  That IS the CLT.")`;
+
+export const standardErrorCode = `# The 1/sqrt(N) scaling of standard error is the "expensive" side of CLT:
+# to halve estimation error, you need 4x more samples.
+import numpy as np
+import matplotlib.pyplot as plt
+rng = np.random.default_rng(0)
+
+# True population: Uniform(0, 1), true mean = 0.5, true var = 1/12.
+true_var = 1 / 12
+true_std = np.sqrt(true_var)
+
+Ns = [10, 50, 200, 1000, 5000, 20000]
+n_reps = 5000  # how many resamples at each N to get the standard error empirically
+
+print(f"{'N':>8}  {'empirical SE':>14}  {'predicted sigma/sqrt(N)':>25}")
+empirical_ses = []
+predicted_ses = []
+for N in Ns:
+    means = rng.uniform(0, 1, size=(n_reps, N)).mean(axis=1)
+    se = means.std()  # standard deviation across the resamples IS the standard error of the mean estimate
+    empirical_ses.append(se)
+    predicted_ses.append(true_std / np.sqrt(N))
+    print(f"{N:>8}  {se:>14.6f}  {true_std / np.sqrt(N):>25.6f}")
+
+# Log-log plot: slope should be -1/2, confirming 1/sqrt(N).
+fig, ax = plt.subplots(figsize=(5.6, 3.6), facecolor="none")
+ax.set_facecolor("#0f0f14")
+ax.loglog(Ns, empirical_ses, "o-", color="#c4f04b", label="empirical SE")
+ax.loglog(Ns, predicted_ses, "--", color="#f5cf3d", label="sigma / sqrt(N)")
+ax.set_xlabel("N", color="#dcdcd6")
+ax.set_ylabel("standard error", color="#dcdcd6")
+ax.legend(facecolor="#181820", edgecolor="#2a2a35", labelcolor="#dcdcd6")
+ax.set_title("Standard error scales as 1 / sqrt(N)", color="#dcdcd6")
+ax.tick_params(colors="#dcdcd6")
+for spine in ax.spines.values():
+    spine.set_color("#2a2a35")
+plt.tight_layout()
+plt.show()`;
+
+export const cltAppliedCode = `# Direct engineering use of CLT: constructing a confidence interval
+# for the true mean of a population from a single sample.
+import numpy as np
+from scipy.stats import norm
+rng = np.random.default_rng(0)
+
+# Pretend we don't know the true distribution.  Draw a single sample of size N.
+# Population: Exponential(rate=2), so true mean = 0.5, true var = 0.25.
+N = 400
+sample = rng.exponential(scale=0.5, size=N)   # scale = 1/rate
+sample_mean = sample.mean()
+sample_std  = sample.std(ddof=1)   # use N-1 denominator for unbiased estimate
+
+# By CLT: sample_mean is approximately N(true_mean, true_var / N).
+# We don't know true_var; use sample_std as an estimate.  Standard error:
+SE = sample_std / np.sqrt(N)
+# 95% CI: sample_mean +- 1.96 * SE.
+z95 = norm.ppf(0.975)
+ci_low = sample_mean - z95 * SE
+ci_high = sample_mean + z95 * SE
+
+print(f"Sample of size {N}: mean = {sample_mean:.4f}, std = {sample_std:.4f}")
+print(f"Standard error of the mean: {SE:.4f}")
+print(f"95% CI for the true mean: ({ci_low:.4f}, {ci_high:.4f})")
+print(f"True population mean = 0.5 -- inside the interval? {ci_low <= 0.5 <= ci_high}")
+
+# Verify: repeat the experiment many times, check coverage.
+n_experiments = 2000
+inside = 0
+for _ in range(n_experiments):
+    s = rng.exponential(scale=0.5, size=N)
+    m, sd = s.mean(), s.std(ddof=1)
+    lo = m - z95 * sd / np.sqrt(N)
+    hi = m + z95 * sd / np.sqrt(N)
+    if lo <= 0.5 <= hi:
+        inside += 1
+print(f"\\nEmpirical coverage over {n_experiments} experiments: {inside / n_experiments * 100:.2f}%   (target: 95%)")`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/probability/expectation-variance", label: "Expectation, variance & moments", blurb: "The LLN is about sample means converging to E[X]; the CLT is about the sample mean&rsquo;s variance shrinking as Var(X)/N. You need both concepts." },
+  { href: "/learn/mathematics/probability/distributions-catalog", label: "A catalog of distributions", blurb: "CLT produces a Gaussian limit; recognizing why the Gaussian is the universal attractor is the payoff of the previous chapter." },
+]} />
+
+<NewConcepts
+  concepts={[
+    { name: "Chebyshev's inequality", blurb: "P(|Y − E[Y]| &gt; ε) ≤ Var(Y)/ε². The one-line tool used in the LLN proof sketch." },
+    { name: "α-stable laws", blurb: "the limit distributions when CLT&rsquo;s finite-variance requirement fails (heavy tails). Look up the tail index α — Cauchy is a member." },
+    { name: "Berry–Esseen theorem", blurb: "quantifies HOW fast CLT convergence happens as a function of skewness and n. Rate is O(1/√n)." },
+    { name: "Lindeberg–Feller CLT", blurb: "generalization that lets you drop 'identically distributed' as long as no single term dominates. Needed for heterogeneous data." },
+    { name: "Sharpness-Aware Minimization (SAM)", blurb: "an SGD variant that exploits gradient-noise geometry (which is CLT-shaped) to bias toward flat minima." },
+  ]}
+/>
+
+<Motivation title="LLN and CLT are why averaging works — every ML metric relies on them">
+
+Two theorems govern nearly everything in applied probability. The **law of large numbers (LLN)** says: as you draw more iid samples, the sample average converges to the true mean. The **central limit theorem (CLT)** says: the *fluctuation* of that sample average around the true mean is Gaussian-shaped with standard deviation σ/√N, no matter what the underlying distribution was.
+
+Together, they justify essentially every ML measurement you do:
+
+- **Test-set accuracy** is a sample mean. LLN says it converges to true accuracy as N grows; CLT gives you the error bars via SE = √(p(1 − p)/N).
+- **A/B testing** in production uses the CLT to compute the required sample size and to declare significance ("the observed 2% lift is 3.5 σ away from zero → significant").
+- **SGD gradient estimates** are sample means of per-example gradients. LLN says they converge to the true gradient; CLT says the noise is Gaussian-shaped with variance that shrinks as batch size grows.
+- **Monte Carlo integration** in reinforcement learning, Bayesian posterior estimation, and simulation-based inference: your estimate is a sample mean; SE and coverage guarantees come from LLN and CLT.
+- **Loss curves that "wiggle"** during training are fluctuations that CLT says are unavoidable; the size of the wiggle is Var(loss)/√batch_size.
+
+Two-hour reads worth of theorem, one hour of pattern recognition, and then a lifetime of using the 1/√N rule. This chapter closes Phase 1.4 and leads directly into the statistical-estimation chapter of Phase 1.5.
+
+</Motivation>
+
+<Intuition title="LLN: averages settle. CLT: they settle in a bell-curve-shaped cloud whose radius shrinks as 1/√N.">
+
+The **LLN** picture: throw a fair coin many times. Early on the running fraction of heads is jumpy — maybe 6/10 after ten flips. As you keep flipping, the running fraction stabilizes: 0.51 after 100 flips, 0.502 after 1000, 0.5003 after 10000. The sample average is *converging* to the true probability. Nothing exotic — the law is that this convergence is *inevitable* for iid samples with a finite mean.
+
+The **CLT** picture: sample means are themselves random variables. If you generate many independent sample means (each an average of N draws), the *distribution* of those sample means is a Gaussian centered at the true mean μ, with standard deviation σ/√N. The remarkable part: this is true *regardless of the shape of the underlying distribution*, as long as it has finite variance. Uniform, exponential, Poisson, Bernoulli — all of them produce Gaussian-shaped sample-mean distributions once you average enough draws.
+
+Two lessons combined: (1) averages are asymptotically correct (LLN), (2) their fluctuations have known shape and scale (CLT). This tells you not just *what* the answer is but *how confident* to be.
+
+</Intuition>
+
+<Recall term="Sample mean">
+
+The sample mean of X_1, …, X_N is X̄ = (X_1 + X_2 + … + X_N) / N. If the X_i are iid with mean μ and variance σ², then E[X̄] = μ and Var(X̄) = σ²/N. The variance shrinks as 1/N; the standard deviation (called the **standard error of the mean**, SE) shrinks as 1/√N.
+
+</Recall>
+
+## Law of large numbers — sample averages converge to true means
+
+The **weak law of large numbers** states: for iid random variables X_1, X_2, … with finite mean μ = E[X],
+
+$$
+\bar X_N \;=\; \frac{1}{N} \sum_{i=1}^{N} X_i \;\longrightarrow\; \mu \quad \text{as } N \to \infty,
+$$
+
+in *probability*: for every ε &gt; 0, P(|X̄_N − μ| &gt; ε) → 0.
+
+The **strong law of large numbers** upgrades convergence to *almost sure*: the sample path X̄_N converges to μ for almost every possible sequence of iid draws. Both versions require only that E[|X|] &lt; ∞. Finite variance is not needed.
+
+**Proof sketch (weak law via Chebyshev)**. Var(X̄_N) = σ²/N by independence. Chebyshev&rsquo;s inequality says P(|Y − E[Y]| &gt; ε) ≤ Var(Y)/ε². Apply with Y = X̄_N: P(|X̄_N − μ| &gt; ε) ≤ σ²/(N ε²) → 0. ∎
+
+**What LLN does not say**. It doesn&rsquo;t say the sample mean equals μ at any finite N. It doesn&rsquo;t give a rate. It doesn&rsquo;t say anything about the sample&rsquo;s fluctuation shape. Those are the CLT&rsquo;s job.
+
+<RunnableCode title="Running mean of coin flips: LLN in a picture" code={llnCode} packages={["numpy", "matplotlib"]} />
+
+## Central limit theorem — the shape of the fluctuation
+
+The **classical central limit theorem** states: for iid random variables X_1, X_2, … with finite mean μ and finite variance σ², the standardized sample mean converges in distribution to a standard normal:
+
+$$
+Z_N \;=\; \frac{\bar X_N - \mu}{\sigma / \sqrt{N}} \;\xrightarrow{d}\; \mathcal{N}(0, 1) \quad \text{as } N \to \infty.
+$$
+
+Equivalently, X̄_N is *approximately* 𝒩(μ, σ²/N) for large N, and Σ X_i is *approximately* 𝒩(N μ, N σ²).
+
+**Why it works** (intuition, not proof). The Gaussian is the *maximum-entropy* distribution with a fixed mean and variance. When you add many independent contributions, you&rsquo;re maximizing entropy subject to the mean and variance constraints imposed by the fixed E[X] and Var(X) — and the Gaussian is the answer. Every skewness or shape feature of the original distribution gets averaged away.
+
+**Universality**. The CLT holds for uniform, exponential, Poisson, Bernoulli, discrete, continuous, skewed, or symmetric — anything with finite variance. This is why the Gaussian is *the* universal noise model in ML: aggregate measurements are approximately Gaussian regardless of the microstructure.
+
+**How large does N have to be?** For a symmetric-ish distribution (uniform), N = 10 already looks quite Gaussian. For a very skewed one (Exponential, Bernoulli with p far from 0.5), you need N in the hundreds. Heavy-tailed distributions (no finite variance) fail CLT entirely — the sample mean has a *non-Gaussian* limit distribution (α-stable law) or fails to converge at all.
+
+<RunnableCode title="CLT: three very different distributions all produce Gaussian sample-mean distributions" code={cltCode} packages={["numpy", "matplotlib"]} />
+
+## The three ingredients CLT actually needs
+
+1. **Independence** (or at least weak dependence — variants of CLT extend to some dependent-data settings).
+2. **Identical distribution** (or at least Lindeberg-condition style bounded variances — the Lindeberg-Feller CLT relaxes iid to varying variances).
+3. **Finite variance** σ² &lt; ∞.
+
+Break any of these and the standard CLT can fail:
+
+- **Heavy tails**: Cauchy, Pareto with tail index α &lt; 2 → infinite variance → different limit theorem (α-stable law), not Gaussian.
+- **Strong dependence**: highly autocorrelated time series → effective sample size is much smaller than N → SE is not σ/√N.
+- **Non-identical distributions with unbounded variance**: needs Lindeberg-Feller conditions to guarantee Gaussian limit.
+
+For most ML applications, iid + finite variance is a reasonable assumption. Time series, hierarchical data, and streaming settings often need care.
+
+## The 1/√N law — the arithmetic of sample size
+
+CLT says the standard error of the sample mean is σ/√N. Rearranging:
+
+$$
+\text{To reduce SE by a factor of } k, \text{ multiply } N \text{ by } k^2.
+$$
+
+- To halve the error: 4× samples.
+- 10× more precision: 100× samples.
+- Two more decimal places of accuracy: 10,000× samples.
+
+This is the "expensive" side of statistical estimation. It&rsquo;s why big-N experiments matter for small effects, why A/B tests can require weeks of traffic to detect 1% lifts, and why SGD gradient estimates need increasing batch sizes for increasingly precise estimates.
+
+<RunnableCode title="Standard error scales as 1/√N (log-log plot with slope −1/2)" code={standardErrorCode} packages={["numpy", "matplotlib"]} />
+
+## Applied CLT — confidence intervals in one line
+
+Given a sample X_1, …, X_N with sample mean X̄ and sample standard deviation s, a 95% confidence interval for the true mean μ is (approximately, for large N):
+
+$$
+\bar X \;\pm\; 1.96 \cdot \frac{s}{\sqrt{N}}.
+$$
+
+The 1.96 is the 97.5th percentile of the standard normal (so 95% of mass lies within ±1.96 σ). Use `norm.ppf(0.975)` in scipy. For small N (say &lt; 30), replace 1.96 with the t-distribution&rsquo;s corresponding percentile (Student&rsquo;s t is a heavy-tailed adjustment for small samples; converges to normal as N → ∞).
+
+**Interpretation.** If you repeat this experiment many times and construct a CI each time using this formula, roughly 95% of those intervals will contain the true μ. Any single interval either contains μ or it doesn&rsquo;t — the 95% is a coverage guarantee over hypothetical repetitions, not a probability about the specific interval.
+
+<RunnableCode title="Building a 95% confidence interval from a single sample; verify coverage" code={cltAppliedCode} packages={["numpy", "scipy"]} />
+
+## The traps that matter
+
+**CLT needs finite variance.** Heavy-tailed distributions (Cauchy, Pareto with α &lt; 2) break the theorem. Sample means from such distributions do not converge to a Gaussian; they follow an α-stable law with fatter tails. Financial return data often falls in this regime; do not use naive CLT-based confidence intervals.
+
+**iid is a strong assumption.** Correlated samples make the effective sample size smaller than N. A time series with autocorrelation of 0.9 might have effective N ≈ 0.1 N — meaning your CI is 3× too optimistic. Use block-bootstrap or autocorrelation-corrected variances.
+
+**Small-N gives bad CI coverage.** For N &lt; 30, the sample standard deviation is a noisy estimate of σ; use Student&rsquo;s t distribution for the multiplier instead of 1.96. For N &lt; 10, be very careful — bootstrap or exact inference is more reliable.
+
+**CLT is asymptotic — the constant matters.** &ldquo;CLT eventually kicks in&rdquo; is not a useful guarantee if your N is 20 and your data is skewed. Look at Q-Q plots of your sample means at your working N to check.
+
+**Selection bias breaks LLN too.** LLN needs unbiased sampling. If you subselect samples in ways correlated with X (survivorship bias, non-response bias), the sample mean converges to a *different* number — the mean of the selected subpopulation, not the population.
+
+**Log-transformed data may satisfy CLT better.** Multiplicative processes (product of many factors) produce log-normal distributions; the *log* of the data is Gaussian, and CLT applies more cleanly. Common trick in finance, biology, and hyperparameter search.
+
+<RealWorldML title="SGD noise, A/B testing, and Monte Carlo — CLT in three places at once">
+
+**SGD gradient noise.** A stochastic gradient estimate g_batch = (1/B) Σ ∇L(x_i) is a sample mean over the batch. By LLN, it converges to the true gradient ∇L̄ as B → ∞. By CLT, it&rsquo;s approximately 𝒩(∇L̄, Σ/B) for some covariance Σ that depends on the loss landscape. This Gaussian noise is *not a bug*: it acts as an implicit regularizer (SGD noise helps escape sharp minima) and is why small-batch training generalizes differently from large-batch. Modern "sharpness-aware minimization" and "SAM" methods explicitly exploit the CLT-shaped noise.
+
+**A/B testing.** You&rsquo;re comparing conversion rates between two groups: 3.0% for control, 3.2% for treatment. Is the 0.2% lift real or noise? CLT: the sample means are approximately Gaussian with SE = √(p(1−p)/n) each; the difference is Gaussian with SE = √(SE_A² + SE_B²). Z-statistic = 0.002 / SE. If |Z| &gt; 1.96, you declare significance at 5%. Required sample size for detecting a lift of Δ at 80% power and 5% significance: n ≈ 16 · p(1 − p) / Δ² per arm. Every "how big should my A/B test be?" calculator is running this formula.
+
+**Monte Carlo error bars.** You&rsquo;re estimating an RL policy&rsquo;s expected return by averaging returns over 100 rollouts. That average is a Monte Carlo estimator. Its error bar is SE = σ_rollout / √100. If σ_rollout is large (highly variable episodes), 100 rollouts gives you a wide CI. To halve the error, use 400 rollouts. To narrow the CI by 10×, use 10,000. This is *why* every RL benchmark you read reports "mean ± SE over N seeds/rollouts" — the CI shape is CLT-derived.
+
+The pattern: every &ldquo;how much data do I need?&rdquo; and &ldquo;how confident am I in this estimate?&rdquo; question in ML has an answer with LLN (convergence guarantee) and CLT (rate + shape). Two theorems, endless applications.
+
+</RealWorldML>
+
+<StudyDepth
+  intro={<>LLN + CLT are the two theorems that let you do statistics on real data. Master them and every ML measurement — test accuracy, A/B lift, RL return, SGD noise — has a principled error bar.</>}
+  drill={[
+    <>LLN: iid sample means converge to the true mean as N → ∞ (requires E[|X|] &lt; ∞)</>,
+    <>CLT: standardized sample means → 𝒩(0, 1); equivalently X̄ ≈ 𝒩(μ, σ²/N) for large N</>,
+    <>Universality: CLT applies to any distribution with finite variance, regardless of shape</>,
+    <>1/√N rule: to halve error, quadruple samples; 10× precision → 100× samples</>,
+    <>95% CI for the mean: X̄ ± 1.96 · s / √N (for large N); use Student&rsquo;s t for small N</>,
+    <>Every ML sample-mean measurement (test acc, A/B lift, MC estimate, SGD grad) has CLT-derived error bars</>,
+  ]}
+  skim={[
+    <>Formal proofs of CLT (Lindeberg&rsquo;s method, characteristic functions) — a real analysis exercise, not needed for engineering</>,
+    <>α-stable laws for heavy tails — matters for finance and extreme value theory, less for standard ML</>,
+    <>Berry–Esseen theorem (rate of CLT convergence) — for theorists; the practical rule &ldquo;N &gt; 30 is usually fine&rdquo; suffices</>,
+  ]}
+/>
+
+<CodeItYourself title="Three drills — LLN visualization, CLT universality, CI coverage">
+
+1. **LLN on a biased coin.** Simulate flips of a coin with P(heads) = 0.7. Plot the running sample mean for N up to 10,000 (use log scale on x-axis). Overlay the true mean 0.7 as a horizontal line. Verify that the running mean stays within ±3σ / √N of 0.7 for at least 99.7% of N-values (in principle; the actual coverage of that band varies).
+
+2. **CLT with a bimodal distribution.** Consider a mixture: with probability 0.5 draw from 𝒩(−3, 1), otherwise from 𝒩(3, 1). This distribution is bimodal, but has finite variance. Take averages of N = 5, 10, 30, 100 iid draws and histogram the resulting sample means. The bimodality should disappear as N grows and the histogram should look increasingly Gaussian.
+
+3. **Confidence interval coverage.** Draw 500 random samples of size N = 50 from Exponential(rate = 2). For each sample, compute the 95% CI for the mean using the CLT formula. Count how many contain the true mean 0.5. The coverage should be roughly 95% — but often a bit off because N = 50 and exponential is quite skewed. Try N = 500 and note the coverage improves.
+
+</CodeItYourself>
+
+<Summary>
+
+- **Law of large numbers**: for iid X_i with finite mean μ, the sample mean X̄_N → μ as N → ∞. Convergence is guaranteed — no rate.
+- **Central limit theorem**: for iid X_i with finite mean μ and variance σ², the standardized sample mean Z_N = (X̄_N − μ) / (σ/√N) → 𝒩(0, 1). Rate is 1/√N.
+- **1/√N law**: to reduce standard error by k, need k² more samples. Fundamental to sample-size planning.
+- **95% CI for the mean**: X̄ ± 1.96 · s/√N for large N; Student&rsquo;s t for small N.
+- **Requirements**: iid, finite variance. Heavy tails, strong dependence, or selection bias break the guarantees.
+- **CLT is why every ML measurement has Gaussian-shaped error bars** — from test accuracy to A/B lifts to SGD gradient noise to Monte Carlo estimates.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>You test your model on 400 held-out examples and get 82% accuracy. Give an approximate 95% confidence interval for the true accuracy.</>,
+      hint: <>Model as Bernoulli(p) with p̂ = 0.82, n = 400. Use SE = √(p(1 − p)/n) and 1.96 for 95%.</>,
+      answer: <>SE = √(0.82 · 0.18 / 400) = √(0.000369) ≈ 0.0192. <br /> 95% CI: 0.82 ± 1.96 · 0.0192 = 0.82 ± 0.0377. <br /> <b>(0.782, 0.858)</b>, or roughly &ldquo;82% ± 4%.&rdquo; <br /> If you need tighter than ±2% you&rsquo;d need N ≈ 1600 (four times more test data).</>,
+    },
+    {
+      difficulty: "easy",
+      q: <>Your current SGD batch size is 32 and gradient noise SD is 0.4. What batch size do you need to reduce noise SD to 0.1?</>,
+      hint: <>Gradient noise SD scales as σ_per_sample / √B.</>,
+      answer: <>SD ∝ 1/√B. To reduce SD from 0.4 to 0.1 is a 4× reduction. Need B → 16× current, so <b>B = 512</b>. <br /> Note in practice large batches don&rsquo;t only reduce noise; they also change the effective learning rate schedule and can affect generalization (large-batch training sometimes converges to sharper minima with worse generalization). The point here is just the noise scaling — the CLT part.</>,
+    },
+    {
+      difficulty: "medium",
+      q: <>Prove Var(X̄_N) = σ²/N when X_1, …, X_N are iid with variance σ².</>,
+      hint: <>Var(cY) = c² Var(Y); Var(sum of independents) = sum of variances.</>,
+      answer: <>X̄_N = (1/N) · Σ X_i. Apply Var: <br /> Var(X̄_N) = Var((1/N) · Σ X_i) = (1/N²) · Var(Σ X_i) (constant pulls out squared) <br /> = (1/N²) · Σ Var(X_i) (independence gives additivity of variance) <br /> = (1/N²) · N · σ² <br /> = <b>σ² / N</b>. ∎ <br /> Standard error (the standard deviation of the sample mean) = √(σ²/N) = σ/√N.</>,
+    },
+    {
+      difficulty: "medium",
+      q: <>An A/B test compares CTR between two groups of 5000 users each. Control: 200 clicks (4%). Treatment: 240 clicks (4.8%). Is the lift statistically significant at the 95% level?</>,
+      hint: <>Compute SE of each proportion, SE of the difference, and Z-statistic. Compare |Z| to 1.96.</>,
+      answer: <>Control: p_C = 200/5000 = 0.04. SE_C = √(0.04 · 0.96 / 5000) ≈ 0.00277. <br /> Treatment: p_T = 240/5000 = 0.048. SE_T = √(0.048 · 0.952 / 5000) ≈ 0.00302. <br /> Difference: Δ = 0.048 − 0.04 = 0.008. <br /> SE of difference: √(SE_C² + SE_T²) = √(0.00277² + 0.00302²) ≈ 0.00410. <br /> Z = Δ / SE = 0.008 / 0.00410 ≈ <b>1.95</b>. <br /><br /> Right at the threshold — technically not significant at 5% (|Z| slightly &lt; 1.96), though it&rsquo;s so close that a real practitioner would call it inconclusive and want more data to confirm. Also worth checking: are the two groups actually independent (users in different buckets), and is there any seasonality or interaction that could bias one arm?</>,
+    },
+    {
+      difficulty: "hard",
+      q: <>You want to detect a 1% absolute lift in a conversion rate around 5% at 80% power and 5% significance. How many samples per group do you need?</>,
+      hint: <>Sample-size formula: n = (z_α/2 + z_β)² · 2 · p · (1 − p) / Δ² per arm. Use z_α/2 = 1.96 for 5% significance and z_β = 0.84 for 80% power.</>,
+      answer: <>n ≈ (1.96 + 0.84)² · 2 · 0.05 · 0.95 / 0.01² <br /> = 7.84 · 2 · 0.0475 / 0.0001 <br /> = 0.7448 / 0.0001 <br /> ≈ <b>7448</b> per arm, or about <b>15,000 total</b>. <br /><br /> Every A/B testing calculator on the internet is doing exactly this formula. To detect smaller lifts you need many more samples — a 0.5% lift needs 4× as many samples as a 1% lift (Δ² in the denominator). This is why detecting small lifts on core metrics can take weeks of traffic.</>,
+    },
+    {
+      difficulty: "hard",
+      q: <>Show that for iid X_i with finite variance σ², the sample variance S² = (1/(N-1)) · Σ (X_i − X̄)² is an unbiased estimator of σ². Why does the N-1 (Bessel&rsquo;s correction) appear instead of N?</>,
+      hint: <>Compute E[Σ (X_i − X̄)²] by expanding around the true mean μ and using Var(X̄) = σ²/N.</>,
+      answer: <>Expand: Σ (X_i − X̄)² = Σ (X_i − μ + μ − X̄)² = Σ (X_i − μ)² − 2 (X̄ − μ) Σ (X_i − μ) + N (X̄ − μ)². <br /> But Σ (X_i − μ) = N (X̄ − μ), so the middle term is −2 N (X̄ − μ)². Thus: <br /> Σ (X_i − X̄)² = Σ (X_i − μ)² − N (X̄ − μ)². <br /><br /> Take expectations. E[Σ (X_i − μ)²] = N σ² (each term has expectation σ²). E[N (X̄ − μ)²] = N · Var(X̄) = N · σ²/N = σ². So: <br /> E[Σ (X_i − X̄)²] = N σ² − σ² = (N − 1) σ². <br /><br /> Dividing by (N − 1): <br /> E[S²] = <b>σ²</b>. ∎ <br /><br /> Intuition: because you center around the sample mean X̄ (not the true μ), the deviations are systematically smaller — you&rsquo;ve &ldquo;used up&rdquo; one degree of freedom estimating X̄, so only N − 1 residuals are &ldquo;free.&rdquo; Dividing by N − 1 corrects for this. Dividing by N would give a systematically biased-low estimate.</>,
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "The law of large numbers says that as N → ∞, the sample mean of iid samples:",
+      choices: [
+        { text: "Equals the true mean at every N" },
+        { text: "Converges to the true mean", correct: true },
+        { text: "Oscillates around the true mean forever" },
+        { text: "Approaches zero" },
+      ],
+      explanation: <>LLN is a convergence statement: given enough iid samples, the sample mean gets arbitrarily close to the true mean. It doesn&rsquo;t say the sample mean equals μ at any finite N (that would require zero variance).</>,
+    },
+    {
+      q: "The central limit theorem says the standardized sample mean of iid random variables with finite variance:",
+      choices: [
+        { text: "Converges to a uniform distribution" },
+        { text: "Converges to a standard normal 𝒩(0, 1) distribution", correct: true },
+        { text: "Stays whatever shape the original distribution had" },
+        { text: "Requires the original distribution to be Gaussian" },
+      ],
+      explanation: <>The CLT is universal: any iid distribution with finite variance produces a Gaussian-shaped sample-mean distribution once N is large enough. This is why the Gaussian is <em>the</em> noise model in ML — sample averages become Gaussian regardless of microstructure.</>,
+    },
+    {
+      q: "To halve the standard error of a Monte Carlo estimate, you need to multiply the sample size by:",
+      choices: [
+        { text: "2" },
+        { text: "4", correct: true },
+        { text: "√2" },
+        { text: "16" },
+      ],
+      explanation: <>SE scales as 1/√N. To reduce SE by 2× you need N to grow by 4×. This 1/√N &ldquo;expensive&rdquo; scaling is why very precise Monte Carlo estimates require astronomical sample sizes.</>,
+    },
+    {
+      q: "In an A/B test, the 95% confidence interval multiplier of 1.96 comes from:",
+      choices: [
+        { text: "The Poisson distribution" },
+        { text: "The 97.5th percentile of the standard normal (Φ⁻¹(0.975))", correct: true },
+        { text: "The number of test users" },
+        { text: "The p-value" },
+      ],
+      explanation: <>By CLT, the sampling distribution of the sample mean is approximately N(μ, σ²/N). The two-sided 95% central interval of a standard normal spans ±1.96 σ (from Φ⁻¹(0.025) to Φ⁻¹(0.975)). Any 95% CI built via CLT uses this exact number.</>,
+    },
+    {
+      q: "The CLT can fail (produce a non-Gaussian limit) when:",
+      choices: [
+        { text: "The distribution has heavy tails (infinite variance) or the samples are strongly dependent", correct: true },
+        { text: "N is very large" },
+        { text: "The distribution is discrete" },
+        { text: "You are using it for A/B testing" },
+      ],
+      explanation: <>CLT&rsquo;s requirements are iid and finite variance. Heavy-tailed distributions (Cauchy, some Pareto) have infinite variance and produce α-stable limits instead. Strong dependence (autocorrelated time series) means the effective sample size is smaller than N. Both regimes need specialized machinery beyond classical CLT.</>,
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/probability/clt-lln" title="Law of large numbers & CLT" />

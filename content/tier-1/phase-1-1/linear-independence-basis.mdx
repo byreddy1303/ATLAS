@@ -97,6 +97,13 @@ print("but w[0] + w[3] is well-determined:", round(w[0] + w[3], 3))`;
   { href: "/learn/mathematics/vectors-space/norms-distances", label: "Norms & distances", blurb: "The 'no direction' meaning of the zero vector — the vanishing point for dependence." },
 ]} />
 
+<NewConcepts
+  concepts={[
+    { name: "LoRA (Low-Rank Adaptation)", blurb: "a fine-tuning technique that adds a low-rank update ΔW = A B^T to a frozen weight matrix. Directly motivated by rank / basis ideas — full case-study in later phases." },
+    { name: "GPT / LLM", blurb: "the family of large language models. Their weight matrices are enormous; understanding effective rank and basis is how modern efficient fine-tuning works." },
+  ]}
+/>
+
 <Motivation title="How many coordinates does your world need?">
 
 An LLM embedding says a token lives in ℝ¹²²⁸⁸, but studies keep finding models actually use far fewer axes than that — the interesting motion happens on a lower-dimensional slab inside the space. The word for that slab is a **subspace**; the word for its true axis count is **dimension**; the tool for finding both is **linear independence**.

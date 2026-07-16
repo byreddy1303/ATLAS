@@ -1,0 +1,430 @@
+---
+title: Derivatives — the single-variable story
+tier: 1
+phase: "1.3"
+---
+
+export const secantToTangentCode = `import numpy as np
+
+# f(x) = x^2. At x0 = 2, average rate over shrinking intervals should
+# approach f'(2) = 2*2 = 4.
+def f(x): return x**2
+
+x0 = 2.0
+
+for h in [1.0, 0.5, 0.1, 0.01, 0.001, 1e-6]:
+    slope = (f(x0 + h) - f(x0)) / h
+    print(f"h = {h:8.6f}   secant slope = {slope:.8f}")
+
+print()
+print("As h -> 0, the average rate approaches the DERIVATIVE, f'(2) = 4.")
+`;
+
+export const numericalDerivativeCode = `import numpy as np
+
+# Compare three numerical estimates of f'(x0) for f(x) = sin(x).
+# f'(x0) = cos(x0) is the true answer.
+def f(x): return np.sin(x)
+def f_prime_true(x): return np.cos(x)
+
+x0 = 1.0
+truth = f_prime_true(x0)
+
+for h in [1e-1, 1e-3, 1e-6, 1e-8, 1e-12]:
+    forward = (f(x0 + h) - f(x0)) / h                     # 1st order
+    backward = (f(x0) - f(x0 - h)) / h                    # 1st order
+    central = (f(x0 + h) - f(x0 - h)) / (2 * h)           # 2nd order
+    print(f"h = {h:9.1e} | forward err = {forward - truth:+.2e} | "
+          f"central err = {central - truth:+.2e}")
+
+print()
+print(f"true f'(1) = {truth:.10f}")
+print("Central is much more accurate at same h.")
+print("Extremely small h (1e-12) makes ALL methods WORSE — floating-point noise dominates.")
+`;
+
+export const derivativeRulesCode = `import numpy as np
+import sympy as sp
+
+# Symbolic derivatives — verify the standard rules against a formula
+x = sp.symbols('x')
+
+funcs = [
+    ('x**5',              'polynomial:  d/dx x^5'),
+    ('sin(x)',            'trig:        d/dx sin(x)'),
+    ('cos(x)',            'trig:        d/dx cos(x)'),
+    ('exp(x)',            'exp:         d/dx e^x'),
+    ('log(x)',            'log:         d/dx ln(x)'),
+    ('x**2 * sin(x)',     'product rule (x^2)(sin x)'),
+    ('sin(x) / (x + 1)',  'quotient rule sin(x)/(x+1)'),
+    ('sin(x**2)',         'chain rule   sin(x^2)'),
+    ('(x**2 + 1)**3',     'chain rule   (x^2+1)^3'),
+]
+
+for expr_str, label in funcs:
+    e = sp.sympify(expr_str)
+    d = sp.diff(e, x)
+    print(f"{label}")
+    print(f"    f(x)  = {sp.simplify(e)}")
+    print(f"    f'(x) = {sp.simplify(d)}")
+    print()
+`;
+
+export const optimizerStepCode = `import numpy as np
+
+# Gradient descent to find minimum of f(x) = (x - 3)^2 + 2, starting from x = 0.
+# True answer: x* = 3, f(x*) = 2.
+def f(x):       return (x - 3)**2 + 2
+def fprime(x):  return 2 * (x - 3)                   # by the power rule + chain rule
+
+x = 0.0
+lr = 0.1
+history = [x]
+
+for step in range(30):
+    grad = fprime(x)                                  # DERIVATIVE at current x
+    x    = x - lr * grad                              # move opposite the gradient
+    history.append(x)
+    if step in (0, 4, 9, 19, 29):
+        print(f"step {step + 1:2d}: x = {x:.6f}, f(x) = {f(x):.6f}, grad = {grad:.6f}")
+
+print()
+print(f"converged to x* ≈ {x:.6f}  (true minimum at x = 3)")
+print("The whole algorithm rests on knowing f'(x). Derivatives ARE optimization.")
+`;
+
+export const lossDerivativeCode = `import numpy as np
+
+# Fit a line y = w*x + b to noisy data by MINIMIZING MSE = (1/n) * sum((y - (wx+b))^2)
+# We only need dLoss/dw and dLoss/db — one derivative per parameter.
+np.random.seed(0)
+n = 100
+x = np.random.uniform(-2, 2, n)
+true_w, true_b = 1.5, -0.3
+y = true_w * x + true_b + 0.2 * np.random.randn(n)   # noisy line
+
+# Init
+w, b = 0.0, 0.0
+lr = 0.1
+
+for step in range(500):
+    y_hat = w * x + b
+    err   = y_hat - y                                # residual
+
+    # Derivatives of MSE w.r.t. w and b:
+    #   d MSE / dw = (2/n) * sum(err * x)
+    #   d MSE / db = (2/n) * sum(err)
+    dLdw = (2.0 / n) * np.sum(err * x)
+    dLdb = (2.0 / n) * np.sum(err)
+
+    w -= lr * dLdw
+    b -= lr * dLdb
+
+    if step in (0, 49, 199, 499):
+        loss = np.mean(err ** 2)
+        print(f"step {step + 1:3d}: w = {w:6.4f}   b = {b:+6.4f}   MSE = {loss:.6f}")
+
+print()
+print(f"true parameters: w = {true_w}, b = {true_b}")
+print("Recovered w and b are close — every gradient step needed the DERIVATIVES.")
+`;
+
+<Prerequisites items={[
+  { href: "/learn/foundations/scientific-stack/numpy-arrays-vectorization", label: "NumPy arrays & vectorization", blurb: "Derivatives in code are one-liners over arrays — the numerical stability tricks all rely on vectorized differences." },
+]} />
+
+<NewConcepts
+  concepts={[
+    { name: "SGD / Adam", blurb: "the workhorse optimizers of modern ML — every update step is w ← w − η · gradient. Deep-dive in Phase 1.6." },
+    { name: "autograd (PyTorch, JAX)", blurb: "automatic differentiation systems that compute gradients of arbitrary code. Backprop chapter covers the mechanics." },
+    { name: "cross-entropy loss", blurb: "the standard classification loss; its derivative combined with softmax produces the elegant `predicted − target` gradient." },
+    { name: "transformer", blurb: "LLM architecture. Every layer&rsquo;s parameters are updated by one derivative — this chapter is the foundation of that machinery." },
+  ]}
+/>
+
+<Motivation title="Every optimization step in every ML model is one derivative">
+
+Training a neural network is an optimization problem: find weights that minimize a loss function. The algorithm — gradient descent — is a repeated `w := w − learning_rate · dLoss/dw`. That `dLoss/dw` is a **derivative**: the slope of the loss at the current weight value. It tells you which way to move to make the loss smaller, and by how much.
+
+Every ML training loop, every backprop pass, every step of every optimizer (SGD, Adam, RMSProp, everything) rests on being able to compute a derivative. Deep learning libraries automate the computation with autograd, but *what* they're automating is the derivative rules of single-variable calculus applied to a computation graph. To understand what your framework is doing (and to debug it when it goes wrong), you need a rock-solid picture of what a derivative is: geometric meaning, algebraic rules, numerical approximation, and what "the derivative doesn't exist here" means.
+
+This chapter builds that picture from scratch. It's the foundation the chain-rule, multivariable-partials, jacobian-hessian, and backprop chapters all build on. If a single ML paper's math has ever felt inscrutable, the odds are the missing skill was a comfortable feel for f′.
+
+</Motivation>
+
+<Intuition title="A derivative is the local slope of a function — the sensitivity of output to input">
+
+Picture the graph of a smooth function f. Pick a point (x₀, f(x₀)). Zoom in enough and the curve looks almost like a straight line — a *tangent line* at that point. The **derivative** f′(x₀) is the slope of that tangent line: rise over run, in the limit where the run gets infinitesimally small.
+
+Operationally: **f′(x₀) is the number that tells you "if I nudge x by a tiny amount Δx, then f changes by approximately f′(x₀) · Δx."** Small in, small out, with the multiplier being the derivative. If f′(x₀) = 3, then a nudge of 0.01 in x produces about 0.03 change in f. If f′(x₀) = 0, the tangent is horizontal — f is locally flat there.
+
+A derivative captures *local sensitivity*. That's why it's the right tool for optimization: it tells you the direction (positive means f is increasing, negative means f is decreasing) and the magnitude (bigger absolute value = steeper slope = bigger opportunity to change f). Follow the slope downhill and you'll find a minimum.
+
+</Intuition>
+
+<Recall term="Limit">
+
+`limₕ→₀ g(h) = L` means: for any small tolerance ε, you can find a δ such that whenever h is within δ of 0 (but not equal to 0), g(h) is within ε of L. In plain English: g(h) gets arbitrarily close to L as h approaches 0. Derivatives are defined via limits of average rates of change; if that limit doesn't exist, the derivative doesn't exist.
+
+</Recall>
+
+## The definition — average rate becomes instantaneous rate
+
+For a function f, the **average rate of change** between x and x + h is:
+
+$$
+\frac{f(x + h) - f(x)}{h}
+$$
+
+Geometrically this is the slope of the *secant line* joining (x, f(x)) and (x + h, f(x + h)). The **derivative** at x is the limit of this quantity as h shrinks to zero:
+
+$$
+f'(x) \;=\; \lim_{h \to 0}\; \frac{f(x + h) - f(x)}{h}
+$$
+
+When that limit exists, we say f is differentiable at x. The result is the *instantaneous rate of change* — the slope of the tangent line.
+
+Three equivalent notations for the same object:
+
+- **Prime notation**: f′(x) — most common in written math and in ML papers.
+- **Leibniz notation**: df/dx — better for chain rule and multivariable extensions.
+- **Rate notation**: "the rate at which f changes with respect to x" — best for intuition.
+
+<RunnableCode title="Secant slopes approaching the tangent slope as h → 0" code={secantToTangentCode} packages={["numpy"]} />
+
+## The rules — how derivatives combine (memorize these)
+
+You almost never compute a derivative from the limit definition in practice. Instead you use combining rules and a table of elementary derivatives.
+
+**The table (memorize)**:
+
+| f(x) | f′(x) |
+|---|---|
+| c (constant) | 0 |
+| xⁿ | n · xⁿ⁻¹ |
+| eˣ | eˣ |
+| ln(x) | 1/x |
+| sin(x) | cos(x) |
+| cos(x) | −sin(x) |
+| tan(x) | sec²(x) |
+
+**The combining rules**:
+
+- **Linearity**: (a·f + b·g)′ = a·f′ + b·g′. Constants pull out; sums split.
+- **Product rule**: (f·g)′ = f′·g + f·g′. Both terms contribute; each with the other function un-differentiated. This is exactly the "sum over paths" rule of the chain rule specialized to two paths into a product node.
+- **Quotient rule**: (f/g)′ = (f′·g − f·g′) / g². Special case of product + chain applied to f·g⁻¹.
+- **Chain rule**: (f(g(x)))′ = f′(g(x)) · g′(x). The star of the next chapter — every composition of functions multiplies the local slopes.
+
+Once you have the table and the four rules, you can differentiate essentially anything a beginner ML course throws at you.
+
+<RunnableCode title="Verify the standard derivative rules with SymPy" code={derivativeRulesCode} packages={["numpy", "sympy"]} />
+
+## Numerical derivatives — when SymPy isn't available
+
+Sometimes you don't have a closed-form function — you only have a black-box function you can call, or a table of values. Then you approximate the derivative numerically. Three flavors:
+
+- **Forward difference**: `(f(x + h) − f(x)) / h`. Accuracy is O(h) — halving h halves the error.
+- **Backward difference**: `(f(x) − f(x − h)) / h`. Same accuracy.
+- **Central difference**: `(f(x + h) − f(x − h)) / (2h)`. Accuracy is O(h²) — halving h *quarters* the error. Much better for the same h.
+
+The trade-off: smaller h = more accuracy in principle, but at some point (~1e-8 for float64), floating-point subtractive cancellation dominates. `f(x + h) − f(x)` is two nearly-equal numbers; their difference loses most of your significant digits. The optimal h for a central difference is around √(machine ε) ≈ 1e-8 for double precision — smaller than that and things get *worse*, not better.
+
+Real ML code almost never uses numerical differentiation for gradients (autograd is exact and cheap). Numerical differentiation is used for **gradient checking** — comparing autograd's answer to a central-difference estimate to catch bugs in a custom layer or loss function.
+
+<RunnableCode title="Forward vs central difference — accuracy and the numerical-noise cliff" code={numericalDerivativeCode} packages={["numpy"]} />
+
+## Where derivatives don't exist — and why it matters
+
+A derivative can fail to exist at a point x for three reasons:
+
+- **Corners** (like `f(x) = |x|` at x = 0): the left and right secant slopes approach different limits. Left slope is −1, right slope is +1 — no single tangent line.
+- **Cusps** (like `f(x) = x^(2/3)` at x = 0): the tangent is vertical, so the "slope" is ±∞ — no finite derivative.
+- **Discontinuities**: if f jumps at x, there's no way to define a tangent line — the limit blows up.
+
+In ML this matters more than it seems. **ReLU** (`max(0, z)`) has a corner at z = 0 — its derivative is undefined there. In practice deep-learning libraries use a *subgradient*: they define the derivative as 0 or 1 arbitrarily at z = 0 (usually 0). This works because z = 0 is a measure-zero event with random data. But if you ever encounter a "gradient is nan/inf" bug, the story is often "we hit a non-differentiable point in some clever new activation." Non-smooth functions require care.
+
+Absolute value in an L1 loss has the same issue at zero — one reason L1-based methods use "soft" versions of the derivative (`sign(x)`) for x ≠ 0 and treat 0 as a special case. Same story for `min` and `max` functions used in loss ceilings and floors.
+
+## The one-page bridge to optimization
+
+Here's the entire connection between derivatives and gradient descent, in one sentence:
+
+**The direction of steepest ascent of f at x₀ is +sign(f′(x₀)); the direction of steepest descent is −sign(f′(x₀)); the magnitude of the slope tells you how big a step matters.**
+
+For a 1D minimization problem `find x that minimizes f(x)`:
+
+1. Start at some x₀.
+2. Compute f′(x₀).
+3. Update: `x := x − η · f′(x₀)` for some small step size η (the *learning rate*).
+4. Repeat until f′(x) ≈ 0 (a critical point — where the tangent is horizontal).
+
+Everything you'll learn about neural network training — SGD, momentum, Adam, learning-rate schedules, weight decay — is a variation on this loop, generalized to millions of dimensions. The 1D story is the whole story, in miniature.
+
+<RunnableCode title="Gradient descent finding the minimum of (x-3)^2 + 2 — one derivative per step" code={optimizerStepCode} packages={["numpy"]} />
+
+<RealWorldML title="Linear regression by gradient descent — every step is two derivatives">
+
+The simplest supervised learning problem: given training data (x_1, y_1), …, (x_n, y_n), find weights w and b such that `ŷ_i = w·x_i + b` is a good prediction of y_i. The standard measure of "good" is the mean squared error:
+
+`MSE(w, b) = (1/n) · Σᵢ (w·x_i + b − y_i)²`
+
+To minimize it, we take derivatives with respect to each parameter (partial derivatives, but for now think of them as one-variable derivatives that hold the other parameter fixed):
+
+- `d MSE / dw = (2/n) · Σᵢ (w·x_i + b − y_i) · x_i` — by chain rule + linearity.
+- `d MSE / db = (2/n) · Σᵢ (w·x_i + b − y_i) · 1` — same reasoning.
+
+Then gradient descent alternates:
+- Compute the derivatives.
+- Update: `w := w − η · dMSE/dw`; `b := b − η · dMSE/db`.
+
+Repeat until convergence. That's linear regression — the "hello world" of supervised learning — reduced to exactly two derivatives per step.
+
+<RunnableCode title="Linear regression by gradient descent on synthetic data — recover true w and b" code={lossDerivativeCode} packages={["numpy"]} />
+
+Read the output:
+
+- Each of 500 steps evaluates the two derivatives and takes a small step in the opposite direction.
+- The MSE drops monotonically as w and b converge to the true values (1.5 and −0.3).
+- The learning rate η = 0.1 works here because f is nicely convex and well-conditioned. Too large → divergence; too small → slow convergence — the classic learning-rate tradeoff you'll see in every deep-learning tutorial.
+
+Every neural network trainer generalizes this exact pattern. The loss is more complex (categorical cross-entropy, contrastive, RL policy gradient), the model has more parameters (billions), the derivatives are computed by autograd instead of by hand, and there are 100+ layers — but the algorithm is *literally the same three-line loop*, iterated at massive scale. `derivative → subtract → repeat` is all of deep learning at its core, and every single step of every single ML model in production is built on the same primitive: computing derivatives correctly.
+
+</RealWorldML>
+
+<StudyDepth
+  intro={<>Derivatives are the fundamental object in ML — the machinery every training loop is built on. Master the rules table + combining rules + geometric intuition + numerical approximation; the rest of calculus in ML is generalizations of this one idea.</>}
+  drill={[
+    <>Derivative = instantaneous slope = limit of the secant slope as h → 0 = local sensitivity of output to input</>,
+    <>The rules table: constant, power (n·xⁿ⁻¹), exp, log, sin, cos — commit to memory</>,
+    <>The four combining rules: linearity, product, quotient, chain — the four moves that let you differentiate anything</>,
+    <>Central difference for numerical derivative when needed (much more accurate than forward difference); optimal h ≈ √(machine ε) ≈ 1e-8</>,
+    <>Non-differentiable points (corners, cusps, discontinuities) matter for ReLU, L1 loss, and any max/min function — use subgradients</>,
+    <>Every optimization step is `param := param − η · dLoss/dparam`; the whole story of gradient-based ML training rests on this one idea</>,
+  ]}
+  skim={[
+    <>The formal ε–δ definition of the limit and the corresponding derivative — you'll trust the operational rules; the epsilontics is for real-analysis courses</>,
+    <>Higher-order derivatives (f'', f''') — occasionally useful (Newton's method, Taylor series), rarely load-bearing in first-order ML</>,
+    <>Implicit differentiation and inverse function derivatives — nice for theoretical work, less common in day-to-day ML</>,
+  ]}
+/>
+
+<CodeItYourself title="Three drills to make derivatives second nature">
+
+1. **Verify the power rule numerically.** Write `numerical_derivative(f, x, h=1e-6)` using the central difference. Test on f(x) = x⁵ at x = 2, x = 3, x = 5. Compare to the closed-form 5·x⁴. All three should agree to ~6 decimal places.
+
+2. **Watch cancellation kill accuracy.** For f(x) = e^x at x = 1 (true derivative = e ≈ 2.71828), compute forward-difference estimates for h = 10⁻¹, 10⁻², …, 10⁻¹⁵. Plot the error `|estimate - true|` on a log scale. You should see error decrease with h at first, then blow up around h ≈ 10⁻⁸ due to floating-point cancellation. This is why "smaller h is better" is a lie past a certain point.
+
+3. **Gradient descent on a nonconvex 1D function.** Take f(x) = x⁴ − 4·x² + 2 (a double-well: minima near x = ±√2). Run gradient descent from three different starting points (x₀ = −3, x₀ = 0.1, x₀ = 3) with a small learning rate and print the trajectory. Different starting points find different minima (or, at x₀ = 0, a saddle where f′ = 0 but it's not a minimum). This is the "nonconvex optimization" problem in miniature — the same phenomenon at play in every neural network's loss surface.
+
+</CodeItYourself>
+
+<Summary>
+
+- The **derivative** `f'(x) = lim_{h→0} (f(x+h) − f(x))/h` is the instantaneous slope of f at x — the local sensitivity of output to input.
+- **Notation**: f′(x), df/dx, "rate of f with respect to x" — three names for the same quantity.
+- **Rules table**: derivatives of xⁿ, eˣ, ln(x), sin(x), cos(x) — memorize these.
+- **Combining rules**: linearity, product rule (fg)′ = f′g + fg′, quotient rule, chain rule f(g(x))′ = f′(g(x))·g′(x). Together they let you differentiate anything.
+- **Numerical derivatives**: use central difference `(f(x+h) − f(x−h))/(2h)`, second-order accurate. Optimal h ≈ 1e-8 (for float64); smaller h makes accuracy worse due to floating-point cancellation. Used mainly for gradient checking.
+- **Non-differentiable points** (corners, cusps, discontinuities) require subgradients. ReLU's kink at 0 is the classic ML example — libraries set the gradient to 0 or 1 arbitrarily.
+- **Every ML training step** is `param := param − η · dLoss/dparam`. Gradient descent = repeated application of derivative-computation + subtraction. All the sophistication (Adam, momentum, LR schedules) is variations on this loop.
+- The **chain rule** — the next chapter — is what extends this from f(x) to compositions like a 96-layer transformer.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>Compute f'(x) for f(x) = 3x⁴ − 5x² + 7.</>,
+      hint: <>Linearity + power rule term by term.</>,
+      answer: <>By linearity: f'(x) = 3 · (x⁴)' − 5 · (x²)' + 0 = 3 · 4x³ − 5 · 2x = <b>12x³ − 10x</b>. <br /> Verify at x = 1: f(1) = 3 − 5 + 7 = 5; f'(1) = 12 − 10 = 2. Numerical check: (f(1.001) − f(0.999)) / 0.002 ≈ 2.0000006 ≈ 2 ✓.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>What is the derivative of f(x) = 2 · sin(x) − 4 · e^x?</>,
+      hint: <>Linearity + table lookup.</>,
+      answer: <>By linearity: f'(x) = 2 · (sin x)' − 4 · (e^x)' = 2 · cos(x) − 4 · e^x. So <b>f'(x) = 2 cos(x) − 4 e^x</b>. <br /> Sanity: at x = 0, f'(0) = 2 · 1 − 4 · 1 = −2 (negative — f is decreasing at 0). Since sin(0) = 0 and e^0 = 1, the second term (which is decreasing steeply due to its coefficient) dominates.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Use the product rule to differentiate f(x) = x² · e^x. Then evaluate f'(0) and f'(1).</>,
+      hint: <>Product rule: (uv)' = u'v + uv'.</>,
+      answer: <>Let u = x², v = e^x. Then u' = 2x, v' = e^x. <br /> f'(x) = u'v + uv' = 2x · e^x + x² · e^x = <b>e^x · (2x + x²) = x(x + 2) · e^x</b>. <br /> f'(0) = 0 · (0 + 2) · 1 = <b>0</b>. (A critical point at the origin — makes sense, since f(0) = 0 and f is non-negative near 0.) <br /> f'(1) = 1 · 3 · e ≈ <b>8.155</b>. (At x = 1, f is increasing rapidly.) <br /> Trap: it's easy to forget to include the u'v term (you'd get just x² · e^x, which is wrong). The product rule always gives *two* terms.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Differentiate f(x) = sin(3x² + 1) using the chain rule.</>,
+      hint: <>Outer function is sin, inner function is 3x² + 1. Chain: f'(x) = (outer derivative at inner value) · (inner derivative).</>,
+      answer: <>Let u = 3x² + 1. Then f = sin(u), so df/du = cos(u) = cos(3x² + 1). <br /> du/dx = 6x. <br /> By the chain rule: f'(x) = (df/du) · (du/dx) = <b>cos(3x² + 1) · 6x = 6x · cos(3x² + 1)</b>. <br /> Common mistake: forgetting the chain and writing f'(x) = cos(3x² + 1) alone. Always ask "what's the inner function?" and multiply by its derivative.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Find all values of x where f(x) = x³ − 3x has critical points (f'(x) = 0). For each, determine whether it's a local minimum, local maximum, or neither, without using the second derivative.</>,
+      hint: <>Critical points where f'(x) = 0. Test with the sign of f'(x) just left and just right of each critical point.</>,
+      answer: <>f'(x) = 3x² − 3 = 3(x² − 1) = 3(x − 1)(x + 1). Setting to zero: <b>x = −1 or x = 1</b>. <br /><br /><b>Classification via first-derivative test (sign of f' around each critical point):</b> <br /> • At x = −1: for x slightly less than −1 (say x = −2), f'(−2) = 3·4 − 3 = 9 (positive — f is increasing). For x slightly greater than −1 (say x = −0.5), f'(−0.5) = 3·0.25 − 3 = −2.25 (negative — f is decreasing). Slope goes from + to − ⇒ <b>local maximum at x = −1</b>. <br /> • At x = 1: for x slightly less (say x = 0.5), f'(0.5) = −2.25 (negative). For x slightly greater (say x = 2), f'(2) = 9 (positive). Slope goes from − to + ⇒ <b>local minimum at x = 1</b>. <br /><br /> Check by evaluating: f(−1) = −1 + 3 = 2; f(1) = 1 − 3 = −2. Consistent with min lower than max. <br /><br /> Second-derivative test would give the same answer faster (f''(x) = 6x; f''(−1) = −6 &lt; 0 → max, f''(1) = 6 &gt; 0 → min), but the first-derivative test is more fundamental and works even for functions where f'' is hard to compute.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Prove: if f is differentiable at x₀, then f is continuous at x₀. (This is why "differentiable implies continuous" but not vice versa.)</>,
+      hint: <>Continuity at x₀ means limₓ→x₀ f(x) = f(x₀), equivalently limₕ→₀ [f(x₀ + h) − f(x₀)] = 0. Use the definition of the derivative.</>,
+      answer: <>We want to show limₕ→₀ [f(x₀ + h) − f(x₀)] = 0. <br /><br /> Rewrite the difference: <br /> f(x₀ + h) − f(x₀) = h · [f(x₀ + h) − f(x₀)] / h. <br /><br /> Take the limit as h → 0. On the right side, the factor h → 0 and the factor [f(x₀ + h) − f(x₀)] / h → f'(x₀) (by definition of the derivative, which exists by hypothesis). So the product tends to 0 · f'(x₀) = 0. ∎ <br /><br /> This shows f(x₀ + h) → f(x₀) as h → 0, which is continuity. <br /><br /> <b>Converse fails:</b> f(x) = |x| is continuous at x = 0 (the graph doesn't jump) but not differentiable there (left slope −1 ≠ right slope +1). Differentiability is stronger than continuity — it requires the function to be *smooth enough* to have a well-defined tangent line, not just to have no gaps. <br /><br /> Consequence in ML: any function you can differentiate through (with autograd) is automatically continuous, so you never have to worry about jump discontinuities in a differentiable model — but you *do* have to worry about corners (ReLU, absolute value) where the gradient is undefined.</>
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "The derivative f'(x₀) of a differentiable function represents:",
+      choices: [
+        { text: "The value of f at x₀" },
+        { text: "The instantaneous rate of change of f at x₀, equivalently the slope of the tangent line at (x₀, f(x₀))", correct: true },
+        { text: "The maximum value of f over all x" },
+        { text: "The area under the curve of f up to x₀" },
+      ],
+      explanation: <>f'(x₀) is the local sensitivity of f to changes in x — how fast f is changing at that specific point. Geometrically it's the slope of the tangent line; algebraically it's the limit of the secant slope as h → 0.</>
+    },
+    {
+      q: "By the chain rule, the derivative of h(x) = f(g(x)) is:",
+      choices: [
+        { text: "f'(x) · g'(x)" },
+        { text: "f'(g(x)) · g'(x)", correct: true },
+        { text: "f(x) · g(x)" },
+        { text: "f'(g'(x))" },
+      ],
+      explanation: <>The outer derivative f' is evaluated at the *inner value* g(x), then multiplied by g'(x). Getting the "evaluation point" right is the classic beginner mistake; forgetting the multiplication is the classic intermediate mistake. This one rule is what powers backprop through every layer of every neural network.</>
+    },
+    {
+      q: "For the numerical central-difference formula (f(x + h) − f(x − h)) / (2h), roughly what value of h is optimal for f(x) = sin(x) in double-precision floating point?",
+      choices: [
+        { text: "h = 1e-2 (too big — approximation error dominates)" },
+        { text: "h ≈ 1e-8 (sqrt of machine epsilon — best trade-off)", correct: true },
+        { text: "h = 1e-15 (extremely tiny — should be very accurate)" },
+        { text: "h = 1.0 (large h is always more stable)" },
+      ],
+      explanation: <>Approximation error is O(h²) for central differences (halving h quarters the error). But floating-point subtractive cancellation destroys ~log₁₀(1/h) significant digits per subtraction. The two error sources balance around h = √(machine ε) ≈ 1e-8 for float64. Smaller h makes things WORSE, not better — a common surprise for beginners.</>
+    },
+    {
+      q: "Gradient descent on a scalar function f uses the update rule:",
+      choices: [
+        { text: "x := x + η · f'(x)" },
+        { text: "x := x − η · f'(x)", correct: true },
+        { text: "x := f(x)" },
+        { text: "x := x · f'(x)" },
+      ],
+      explanation: <>To *minimize* f, move in the direction of DECREASING f — which is the negative of the slope direction. If f'(x) &gt; 0 (f is increasing), subtract to move left; if f'(x) &lt; 0 (f is decreasing), subtracting a negative moves right. Either way, you head toward smaller f. The step size η (learning rate) controls how far you go.</>
+    },
+    {
+      q: "The function f(x) = |x| is:",
+      choices: [
+        { text: "Differentiable everywhere, with f'(0) = 0" },
+        { text: "Continuous everywhere but NOT differentiable at x = 0 (corner: left slope −1, right slope +1)", correct: true },
+        { text: "Neither continuous nor differentiable" },
+        { text: "Discontinuous at x = 0" },
+      ],
+      explanation: <>|x| is continuous (no jumps) but has a corner at x = 0 where the left and right secant slopes approach different limits — the derivative doesn't exist there. This matters for L1 loss and any absolute-value regularizer, and it's the exact same phenomenon that makes ReLU's kink at z = 0 require a "subgradient" (usually 0 by convention in libraries). "Differentiable implies continuous, but continuous doesn't imply differentiable."</>
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/calculus/derivatives-single-var" title="Derivatives — the single-variable story" />

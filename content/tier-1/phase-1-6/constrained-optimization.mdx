@@ -1,0 +1,449 @@
+---
+title: Constrained optimization & Lagrangians
+tier: 1
+phase: "1.6"
+---
+
+export const equalityConstrainedCode = `# Minimize x^2 + y^2 subject to x + y = 1.
+# The Lagrangian is L(x, y, lam) = x^2 + y^2 - lam * (x + y - 1)
+# Setting the partials to zero: 2x = lam, 2y = lam, x + y = 1.
+# So x = y and x + y = 1 -> x = y = 1/2.
+import numpy as np
+import matplotlib.pyplot as plt
+
+def f(x, y):     return x**2 + y**2
+def constraint(x): return 1 - x           # y = 1 - x is the constraint line
+
+# Grid the objective and highlight the feasible line
+xs, ys = np.meshgrid(np.linspace(-1, 2, 200), np.linspace(-1, 2, 200))
+Z = f(xs, ys)
+
+fig, ax = plt.subplots(figsize=(6, 6))
+cs = ax.contour(xs, ys, Z, levels=15, colors="teal", alpha=0.5)
+ax.clabel(cs, inline=True, fontsize=7)
+ax.plot(np.linspace(-1, 2, 100), constraint(np.linspace(-1, 2, 100)), color="crimson", lw=2, label="x + y = 1")
+ax.plot(0.5, 0.5, "*", color="gold", markersize=18, label="constrained min (0.5, 0.5)")
+ax.plot(0, 0, "o", color="royalblue", markersize=8, label="unconstrained min (0, 0)")
+ax.set_xlabel("x"); ax.set_ylabel("y"); ax.legend()
+ax.set_title("Equality-constrained: min x^2+y^2 s.t. x+y=1"); ax.grid(alpha=0.3)
+ax.set_aspect("equal"); plt.tight_layout()
+
+# Sanity check via the Lagrangian conditions
+print("At (0.5, 0.5):")
+print(f"  f = {f(0.5, 0.5):.4f}   constraint x+y-1 = {0.5 + 0.5 - 1:.4f}")
+print(f"  grad f = (1, 1)  parallel to grad g = (1, 1)  -> lambda = 1")
+print("The gradient of the objective is antiparallel to the constraint normal.")
+print("That's the geometric picture of the Lagrangian: level set of f is tangent to the constraint.")`;
+
+export const penaltyMethodCode = `# Same problem via a QUADRATIC PENALTY: minimize f(x, y) + rho * (x + y - 1)^2.
+# As rho -> infinity, the penalty forces the constraint to be satisfied.
+import numpy as np
+
+def penalized(w, rho):
+    x, y = w
+    return x**2 + y**2 + rho * (x + y - 1) ** 2
+
+def dpenalized(w, rho):
+    x, y = w
+    dx = 2*x + 2 * rho * (x + y - 1)
+    dy = 2*y + 2 * rho * (x + y - 1)
+    return np.array([dx, dy])
+
+def gd(rho, x0=np.array([2.0, 2.0]), lr=0.1, steps=200):
+    w = x0.copy()
+    for _ in range(steps):
+        w = w - lr * dpenalized(w, rho)
+    return w
+
+for rho in [0.1, 1, 10, 100, 1000]:
+    w = gd(rho)
+    print(f"rho = {rho:>5}: (x, y) = ({w[0]:+.4f}, {w[1]:+.4f})   violation |x+y-1| = {abs(w[0]+w[1]-1):.6f}")
+print()
+print("As rho grows, the solution approaches the constrained minimum (0.5, 0.5).")
+print("This is 'soft constraints via a penalty' -- easier than solving the KKT system")
+print("but requires tuning the penalty weight, and pushes the effective loss to be ill-conditioned.")`;
+
+export const dualLpCode = `# Primal-dual duality on a tiny LP:
+#   Primal:  max 3x + 4y s.t. x + 2y <= 8, 3x + y <= 9, x, y >= 0
+#   Dual:    min 8p1 + 9p2 s.t. p1 + 3p2 >= 3, 2p1 + p2 >= 4, p1, p2 >= 0
+# Strong duality: primal-opt = dual-opt.  Verify numerically.
+import numpy as np
+
+# Solve primal by brute-force grid (only for illustration)
+best_primal = (-np.inf, None)
+for x in np.linspace(0, 5, 100):
+    for y in np.linspace(0, 5, 100):
+        if x + 2*y <= 8 and 3*x + y <= 9:
+            val = 3*x + 4*y
+            if val > best_primal[0]:
+                best_primal = (val, (x, y))
+
+# Solve dual by brute-force grid
+best_dual = (np.inf, None)
+for p1 in np.linspace(0, 5, 100):
+    for p2 in np.linspace(0, 5, 100):
+        if p1 + 3*p2 >= 3 and 2*p1 + p2 >= 4:
+            val = 8*p1 + 9*p2
+            if val < best_dual[0]:
+                best_dual = (val, (p1, p2))
+
+print(f"Primal optimum: max = {best_primal[0]:.4f}   at (x, y) = ({best_primal[1][0]:.2f}, {best_primal[1][1]:.2f})")
+print(f"Dual   optimum: min = {best_dual[0]:.4f}   at (p1, p2) = ({best_dual[1][0]:.2f}, {best_dual[1][1]:.2f})")
+print(f"Duality gap: {best_dual[0] - best_primal[0]:.4f}   (should be ~0 for LP -- strong duality holds)")
+print()
+print("This is why LP solvers can 'certify' optimality: reach primal = dual and you've proven you're optimal.")`;
+
+export const rlhfKlCode = `# RLHF as constrained optimization: maximize reward while staying close to a reference policy.
+# The KL penalty is the Lagrangian relaxation of the constraint KL(policy || ref) <= budget.
+import numpy as np
+
+# Toy setup: 4 possible actions; reward vector R; reference policy p_ref (softmax over some logits)
+R       = np.array([0.5, 1.5, -0.5, 2.0])
+z_ref   = np.array([0.0, 0.4, 0.1, 0.3])
+p_ref   = np.exp(z_ref) / np.exp(z_ref).sum()
+
+def policy_from_beta(beta):
+    "In-closed-form solution to  max_p sum p_i R_i - (1/beta) KL(p || p_ref)"
+    # p*(a) proportional to p_ref(a) * exp(beta * R(a))
+    logits = np.log(p_ref) + beta * R
+    p = np.exp(logits - logits.max())
+    return p / p.sum()
+
+print(f"{'beta':>5} | {'p_ref matched':>13} | {'reward-max':>10} | {'KL(p||p_ref)':>12}")
+print("-" * 60)
+for beta in [0.0, 0.5, 1.0, 3.0, 10.0, 30.0]:
+    p = policy_from_beta(beta)
+    reward = (p * R).sum()
+    kl = (p * (np.log(p + 1e-12) - np.log(p_ref + 1e-12))).sum()
+    print(f"{beta:>5.2f} | {p.round(3)} | {reward:>10.3f} | {kl:>12.4f}")
+
+print()
+print("As beta increases (LOWER penalty weight = 1/beta), the policy is allowed to move further")
+print("from p_ref toward the reward-maxing action. beta = 0: policy = p_ref (no reward chase).")
+print("beta -> inf: policy = one-hot on max reward action, KL blows up.")
+print("This is the RLHF trade-off: reward vs KL.  1/beta is the Lagrange multiplier of a KL constraint.")`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/optimization/convex-vs-nonconvex", label: "Convex vs non-convex objectives", blurb: "Constrained convex problems have clean theory (strong duality, KKT necessary+sufficient); non-convex constrained problems inherit the harder story from the unconstrained case." },
+  { href: "/learn/mathematics/calculus/multivariable-partials", label: "Multivariable partial derivatives & gradients", blurb: "The Lagrangian condition ∇f = λ ∇g uses gradient vectors directly; the geometric picture is 'level sets are tangent to the constraint surface.'" },
+  { href: "/learn/mathematics/probability/information-entropy", label: "Information, entropy & KL divergence", blurb: "The RLHF constraint is a KL divergence budget; the Lagrangian relaxation reproduces the standard RLHF loss." },
+]} />
+
+<NewConcepts
+  concepts={[
+    { name: "KKT conditions (Karush-Kuhn-Tucker)", blurb: "the first-order necessary conditions for a constrained optimum. On convex problems with a mild qualification (Slater's), they're also sufficient." },
+    { name: "Slater's condition", blurb: "constraint qualification that says the feasible region has a non-empty interior. When Slater holds, strong duality holds for convex problems." },
+    { name: "Strong vs weak duality", blurb: "weak duality (dual value ≤ primal value) always holds; strong duality (dual = primal) is a bonus for convex problems that satisfy Slater's condition." },
+    { name: "SVM (support vector machine)", blurb: "the canonical constrained-optimization classifier: minimize weight norm subject to margin ≥ 1 for every training point. Dualized to a quadratic program in the α variables. Full deep-dive in Volume II." },
+    { name: "PPO (Proximal Policy Optimization)", blurb: "RL algorithm that clips the policy ratio inside a trust region. Referenced here as a soft-constraint alternative to hard KL bounds — full detail in Tier 4." },
+  ]}
+/>
+
+<Motivation title="Half the tricks in modern ML are constrained optimization in disguise">
+
+You've seen unconstrained optimization: pick a loss L(θ), take gradients, minimize. But look at what modern GenAI systems actually do:
+
+- **RLHF** maximizes reward **subject to** KL(new-policy || reference-policy) ≤ budget. A hard constraint keeps the fine-tuned model close to its base.
+- **PPO** clips gradient updates so the new policy stays inside a **trust region** around the old one — an inequality constraint on how far you can move per step.
+- **SVMs** minimize weight norm **subject to** margin ≥ 1 on every training point.
+- **Weight decay** as a "soft constraint" on parameter norm — implemented as an L2 penalty, but the underlying problem is "minimize training loss subject to ‖w‖ ≤ C."
+- **LP-relaxation for combinatorial problems** shows up in ILP-based planners and OR-Tools schedulers.
+
+For a GenAI engineer, understanding constrained optimization unlocks two important things:
+
+1. **Reading modern papers.** When a paper says "we optimize L subject to some KL bound" or "we add a KL penalty with coefficient β," those two formulations are related by Lagrangian duality. Knowing that connection lets you understand what the "β" parameter is doing and how to set it.
+2. **Building your own trust-region-style updates.** If you want to fine-tune a model without destroying its prior behavior, you need to know how to formulate a distance constraint on parameters or on distributions.
+
+This chapter builds the machinery: Lagrangian, KKT conditions, dual problem, and the two ways to enforce constraints in practice (hard: Lagrangian; soft: penalty).
+
+</Motivation>
+
+<Intuition title="Lagrangian = objective + shadow price × constraint violation">
+
+Imagine you're minimizing a loss f(x) but a constraint g(x) ≤ 0 must be satisfied. The **Lagrangian** is:
+
+$$
+L(x, \lambda) = f(x) + \lambda \cdot g(x), \quad \lambda \ge 0
+$$
+
+The multiplier λ is a **shadow price**: for each unit of constraint violation, we pay λ · violation in the objective. The optimal λ is exactly the "market price" of relaxing the constraint by one unit — i.e., how much the objective would improve if you were allowed to violate the constraint slightly.
+
+**Two extreme cases:**
+
+- **Constraint not active** at the optimum (`g(x*) < 0`): the constraint is slack. The shadow price is zero — you don't need to pay anything to satisfy something that's already true. So λ* = 0.
+- **Constraint active** at the optimum (`g(x*) = 0`): the constraint is tight; the optimum sits ON the constraint boundary. The shadow price is positive — you'd love to loosen it. So λ* > 0.
+
+**The KKT complementary-slackness condition** encodes both cases: `λ* · g(x*) = 0`. Either λ* = 0 (constraint slack) OR g(x*) = 0 (constraint active). Never both non-zero.
+
+**Solving the Lagrangian:** find x* and λ* such that ∇_x L(x*, λ*) = 0 AND the constraint is satisfied. For convex problems, this is enough. For nonconvex, it's necessary but not sufficient.
+
+</Intuition>
+
+<Recall term="Feasible region">
+
+The **feasible region** of a constrained problem is the set of all points that satisfy every constraint. Optimization is: find the minimum of the objective **inside the feasible region**. If the unconstrained minimum happens to lie in the feasible region, the constrained problem is trivial. When it doesn't, the constrained optimum sits **on the boundary** of the feasible region — and that's the case the Lagrangian and KKT machinery is built for.
+
+</Recall>
+
+## Equality-constrained problems
+
+**The problem.** Minimize f(x) subject to g(x) = 0 (one or more equality constraints).
+
+**The Lagrangian.** Introduce a multiplier λ for each constraint:
+
+$$
+L(x, \lambda) = f(x) - \lambda \cdot g(x)
+$$
+
+(Sign convention: we subtract λ·g here; other books add. Either works — the sign of λ just flips.)
+
+**The first-order conditions.** At an optimum, the gradient of L with respect to both x and λ must be zero:
+
+$$
+\nabla_x L = \nabla f(x) - \lambda \nabla g(x) = 0 \quad \Rightarrow \quad \nabla f(x^*) = \lambda^* \nabla g(x^*)
+$$
+$$
+\nabla_\lambda L = -g(x) = 0 \quad \Rightarrow \quad g(x^*) = 0
+$$
+
+**Geometric picture.** At the constrained optimum, `∇f` is parallel to `∇g` — the objective's contour lines are **tangent** to the constraint surface. If ∇f had any component along the constraint surface, you could move slightly to reduce f while staying feasible.
+
+<RunnableCode title="Minimize x²+y² subject to x+y=1 — visualize the tangency" code={equalityConstrainedCode} packages={["numpy", "matplotlib"]} captureFig={true} />
+
+## Inequality constraints and KKT
+
+**The problem.** Minimize f(x) subject to g_i(x) ≤ 0 for i = 1..m (inequality constraints) and h_j(x) = 0 for j = 1..p (equality constraints).
+
+**The Lagrangian.**
+
+$$
+L(x, \lambda, \nu) = f(x) + \sum_i \lambda_i g_i(x) + \sum_j \nu_j h_j(x)
+$$
+
+with `λ_i ≥ 0` (inequality multipliers must be nonneg — a slack constraint gets zero price, an active one gets positive) and `ν_j` free.
+
+**The KKT conditions** (necessary at any local optimum, sufficient under convex problem + Slater):
+
+1. **Stationarity:** `∇_x L = 0`
+2. **Primal feasibility:** `g_i(x*) ≤ 0`, `h_j(x*) = 0`
+3. **Dual feasibility:** `λ_i* ≥ 0`
+4. **Complementary slackness:** `λ_i* · g_i(x*) = 0` for each `i`
+
+That fourth condition is the key: for each inequality constraint, either the constraint is active (`g_i = 0`) or its multiplier is zero (`λ_i = 0`).
+
+**Example: SVM classifier.** Minimize ½‖w‖² subject to `y_i (w·x_i + b) ≥ 1` for each training point. KKT gives: only training points **on the margin boundary** (`y_i(w·x_i + b) = 1`) have non-zero multipliers. Those are the "support vectors." Everything else has α_i = 0 and can be forgotten. That's the origin of the name.
+
+## The dual problem
+
+For each choice of λ ≥ 0 and ν, the **Lagrange dual function** is:
+
+$$
+q(\lambda, \nu) = \min_x L(x, \lambda, \nu)
+$$
+
+Two key facts:
+
+- `q(λ, ν)` is **always concave** in `(λ, ν)`, regardless of whether `f` is convex — because it's an infimum of linear functions.
+- `q(λ, ν) ≤ f(x*)` for every feasible λ, ν. This is **weak duality** — the dual gives a **lower bound** on the primal optimum.
+
+**Strong duality:** for convex `f` and constraints satisfying Slater's condition (there exists a strictly-feasible point), we have `max_{λ,ν} q(λ, ν) = f(x*)`. Solving the dual gives the primal answer.
+
+<RunnableCode title="Primal-dual duality on a small LP" code={dualLpCode} packages={["numpy"]} />
+
+**Why we care about the dual:**
+
+- **It's often easier.** SVM's primal has n weights + n margin constraints; the dual has n Lagrange multipliers with a simpler structure and works entirely with inner-products `<x_i, x_j>` — enabling the **kernel trick**.
+- **Certificate of optimality.** Reach `primal = dual` and you've proven you're at the optimum. LP solvers use this for correctness.
+- **Sensitivity analysis.** The optimal λ_i is the shadow price of constraint i — how much the objective would improve if you relaxed constraint i by one unit.
+
+## Soft constraints — the penalty method
+
+**Hard constraints** (as above) enforce `g(x) ≤ 0` exactly. **Soft constraints** are enforced approximately by adding a penalty term:
+
+$$
+\text{minimize} \quad f(x) + \rho \cdot g(x)^2
+$$
+
+for some penalty weight `ρ > 0`. As `ρ → ∞`, the penalized problem's optimum approaches the constrained optimum.
+
+<RunnableCode title="Penalty method — sweep ρ to see the solution converge to the constrained optimum" code={penaltyMethodCode} packages={["numpy"]} />
+
+**Trade-off.** Small `ρ` = the constraint is barely enforced (solution is close to unconstrained). Large `ρ` = the constraint is nearly enforced but the loss becomes **ill-conditioned** (Hessian eigenvalue ratio scales as `ρ`), which makes gradient descent slow. Modern practice: use a moderate `ρ`, accept some constraint slack, and treat the penalty weight as a hyperparameter.
+
+**Connection to Lagrangian:** the penalty method with an increasing schedule of ρ is called the **exterior penalty method**. Set ρ correctly and it converges to the same solution as the Lagrangian. In practice, augmented Lagrangian methods combine both ideas (add both a Lagrange multiplier term and a penalty term).
+
+<RealWorldML title="RLHF's KL constraint is Lagrangian duality">
+
+The standard RLHF training loss is:
+
+$$
+\mathcal{L}(\theta) = -\mathbb{E}_{y \sim \pi_\theta}[R(y)] + \beta \cdot \mathrm{KL}(\pi_\theta \parallel \pi_{\mathrm{ref}})
+$$
+
+Where π_θ is the fine-tuned policy, π_ref is the (frozen) reference policy, R is the reward model, and β is a hyperparameter.
+
+**This is exactly the Lagrangian relaxation of a constrained problem:**
+
+$$
+\text{maximize} \quad \mathbb{E}_{y \sim \pi_\theta}[R(y)] \quad \text{subject to} \quad \mathrm{KL}(\pi_\theta \parallel \pi_{\mathrm{ref}}) \le B
+$$
+
+for some budget `B`, with Lagrangian:
+
+$$
+L(\theta, \lambda) = -\mathbb{E}[R] + \lambda \cdot (\mathrm{KL} - B)
+$$
+
+The `β` in the RLHF loss IS the Lagrange multiplier `λ*` — the shadow price of the KL constraint. Different papers pick β differently: some fix β to a constant (soft constraint), others adapt β to keep KL close to a target budget (essentially solving the dual).
+
+**In closed form** (for a bandit setup — single-step RL), the reward-maximizing policy under KL penalty is:
+
+$$
+\pi^*(y) \propto \pi_{\mathrm{ref}}(y) \cdot \exp(R(y) / \beta)
+$$
+
+This is exactly the "reward-weighted policy" that shows up in DPO's derivation. β = 0 makes the policy delta-function on the reward-maximizing y. β → ∞ makes the policy equal to π_ref (no reward chasing).
+
+<RunnableCode title="RLHF policy under KL penalty — sweep β" code={rlhfKlCode} packages={["numpy"]} />
+
+**PPO's clipping** is a soft-constraint alternative: enforce that the policy ratio π_θ(y) / π_old(y) stays within [1 − ε, 1 + ε]. Instead of a Lagrangian, PPO uses a min-max clip. It's less clean mathematically but empirically robust to hyperparameter choice.
+
+</RealWorldML>
+
+<StudyDepth
+  drill={[
+    "Lagrangian: L(x, λ) = f(x) + λ·g(x) for constraint g(x) ≤ 0, with λ ≥ 0.",
+    "Complementary slackness: λ* · g(x*) = 0 — either the constraint is active or its multiplier is zero.",
+    "For equality-constrained problems: ∇f is parallel to ∇g at the optimum.",
+    "The dual function q(λ) is always concave; weak duality gives q ≤ primal always.",
+    "RLHF loss = Lagrangian relaxation of 'max reward s.t. KL ≤ budget'. β is the multiplier.",
+    "Soft constraints via penalty: add ρ · (constraint)² to the loss. As ρ → ∞, get the hard constraint.",
+  ]}
+  skim={[
+    "Slater's condition and full proof of strong duality for convex problems.",
+    "SVM's dual QP derivation with kernel trick.",
+    "Augmented Lagrangian methods (Lagrangian + penalty).",
+    "Interior-point methods for convex constrained optimization.",
+    "Trust-region methods vs line-search under constraints.",
+  ]}
+/>
+
+<CodeItYourself title="Three drills — Lagrangian on paper, penalty in code, RLHF trade-off">
+
+1. **Solve by hand.** Minimize `f(x, y) = 2x² + y²` subject to `x + 2y = 3`. Write the Lagrangian, take partials, solve the 3×3 system. Verify by plugging back into the original objective. (Answer: x = 1, y = 1, f = 3.)
+
+2. **Penalty method sweep.** For `min x² + 4y²` subject to `x + y = 1`, use gradient descent on `f + ρ(x + y − 1)²` for `ρ = 0.1, 1, 10, 100`. Plot each converged `(x, y)` and observe how it approaches the constrained optimum (which is `(4/5, 1/5)`).
+
+3. **RLHF sensitivity.** Take the closed-form policy `π*(a) ∝ π_ref(a) · exp(β · R(a))` for 5 actions with your choice of R and π_ref. Sweep β from 0.1 to 100 and plot `E[R]` (reward achieved) vs `KL(π* || π_ref)`. This is the RLHF Pareto frontier — every point on the curve is a valid trade-off between staying close to the base model and chasing reward.
+
+</CodeItYourself>
+
+<Summary>
+
+- **Constrained optimization** = minimize f(x) subject to g(x) ≤ 0 or g(x) = 0.
+- **Lagrangian:** L(x, λ) = f(x) + λ·g(x). Set gradients to zero AND constraints satisfied.
+- **KKT conditions:** stationarity, primal feasibility, dual feasibility (λ ≥ 0), complementary slackness (λ·g = 0). Necessary at any local optimum; sufficient for convex problems under Slater's.
+- **Duality:** q(λ) = min_x L(x, λ) is always concave. Weak duality: q ≤ primal. Strong duality: q_max = primal_min (holds for convex + Slater).
+- **Soft constraints:** add ρ · g(x)² to the loss. As ρ → ∞, approaches the hard constraint but Hessian gets ill-conditioned.
+- **RLHF loss = Lagrangian relaxation** of "max reward subject to KL ≤ budget." The β coefficient is the KL constraint's shadow price.
+- **Closed-form RLHF policy:** π* ∝ π_ref · exp(R/β) — the reward-weighted policy. Underpins DPO and every RLHF derivation.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>What is the geometric picture of the Lagrangian condition ∇f = λ ∇g at the optimum of an equality-constrained problem?</>,
+      hint: <>Think about level sets of f and the constraint surface.</>,
+      answer: <>The gradient of the objective is parallel to the gradient of the constraint. Equivalently, the <b>level set of f is tangent to the constraint surface</b> at the optimum. If ∇f had any component along the constraint surface, we could move a tiny bit along the surface and reduce f — so we can't be at the optimum. Only when ∇f points entirely perpendicular to the surface (i.e., parallel to ∇g) are we truly stuck.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>In RLHF, if you increase β (the KL coefficient), what happens to the policy?</>,
+      hint: <>Recall the closed-form: π* ∝ π_ref · exp(R / β).</>,
+      answer: <>Higher β makes exp(R / β) closer to 1 (less reward-dependent), so π* looks more like π_ref. Effectively, a stronger KL penalty means the policy is <b>pulled closer to the reference model</b> and reward has less influence. β = ∞ gives π* = π_ref (no reward chasing at all). β = 0 gives a delta on the max-reward action. Setting β well is the main hyperparameter tuning knob in RLHF training.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Suppose you're minimizing 2x² + y² subject to x + y ≥ 3 (inequality). Set up the KKT conditions and find the solution.</>,
+      hint: <>Rewrite as x + y − 3 ≥ 0, so g(x, y) = 3 − x − y ≤ 0. Then Lagrangian is L = 2x² + y² + λ(3 − x − y).</>,
+      answer: <>Stationarity: ∂L/∂x = 4x − λ = 0 → x = λ/4;  ∂L/∂y = 2y − λ = 0 → y = λ/2. <br /> Primal feasibility: x + y ≥ 3, i.e., λ/4 + λ/2 = 3λ/4 ≥ 3 → λ ≥ 4. <br /> Complementary slackness: λ · (3 − x − y) = 0 → either λ = 0 or x + y = 3. <br /><br /> If λ = 0: x = y = 0, but then x + y = 0 &lt; 3 (infeasible). So λ ≠ 0. <br /> Then x + y = 3: substitute x = λ/4, y = λ/2 → 3λ/4 = 3 → λ = 4. <br /> Solution: <b>x = 1, y = 2</b>, objective = 2(1)² + (2)² = <b>6</b>. <br /><br /> The constraint is active (x + y = 3) — the shadow price λ = 4 tells you the objective would improve by 4 units per unit of constraint relaxation (from 3 to 2, say).</>
+    },
+    {
+      difficulty: "medium",
+      q: <>The Lagrange dual function q(λ) is always concave, even if the primal f(x) is non-convex. Why?</>,
+      hint: <>q(λ) is the infimum over x of a linear function of λ.</>,
+      answer: <>The Lagrangian L(x, λ) = f(x) + λ · g(x) is <b>linear in λ</b> (with x held fixed). For each x, L(x, ·) is a linear function of λ. The dual function is q(λ) = inf_x L(x, λ), which is the infimum of a family of linear functions in λ. <br /><br /> The infimum of any family of concave (or linear) functions is concave — pointwise minimum of concave stays concave. So q(λ) is concave, regardless of what f(x) looks like as a function of x. <br /><br /> This is why the DUAL of a non-convex problem is a convex optimization problem (in λ) — a general fact of enormous practical importance. Weak duality still gives you a valid lower bound on the non-convex primal optimum.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Derive the closed-form RLHF policy π*(a) ∝ π_ref(a) · exp(R(a) / β) starting from the constrained problem "maximize E[R] subject to KL(π || π_ref) ≤ B."</>,
+      hint: <>Write the Lagrangian, take gradient with respect to π, and solve — being careful about the normalization constraint Σ π = 1.</>,
+      answer: <>Lagrangian: L(π, λ, ν) = -Σ_a π(a) R(a) + λ (KL(π || π_ref) - B) + ν (Σ_a π(a) - 1). <br /><br /> Expand KL: Σ_a π(a) log(π(a) / π_ref(a)). Take derivative w.r.t. π(a): <br /> ∂L/∂π(a) = -R(a) + λ [log(π(a) / π_ref(a)) + 1] + ν = 0 <br /><br /> Solve: log(π(a) / π_ref(a)) = (R(a) - ν - λ) / λ. So π(a) = π_ref(a) · exp((R(a) - ν - λ) / λ). <br /><br /> The `-ν - λ` inside the exp is a constant that just normalizes. Absorbing it as a normalizing constant Z: <br /> <b>π*(a) ∝ π_ref(a) · exp(R(a) / λ)</b>. <br /><br /> Setting β = λ (renaming), we get the RLHF closed form. The multiplier β can be optimized by tuning to make KL(π* || π_ref) = B — this is why RLHF implementations often use an adaptive β schedule. <br /><br /> DPO derivation starts from this closed form and rearranges it to derive a preference-based training objective without an explicit reward model.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Why does the penalty method (soft constraint) become ill-conditioned as ρ → ∞? Give a concrete example.</>,
+      hint: <>Look at the Hessian of f(x) + ρ · g(x)² and consider how its eigenvalue spectrum grows with ρ.</>,
+      answer: <>The penalized objective is F(x) = f(x) + ρ · g(x)². Its Hessian is: <br /> ∇²F = ∇²f + 2ρ · (∇g)(∇g)ᵀ + 2ρ · g(x) · ∇²g <br /><br /> Near the constrained optimum where g ≈ 0, the second term dominates: <b>∇²F ≈ ∇²f + 2ρ · (∇g)(∇g)ᵀ</b>. <br /><br /> The rank-1 term (∇g)(∇g)ᵀ has one eigenvalue proportional to ρ · ‖∇g‖², growing without bound. The other eigenvalues of ∇²F stay of order 1 (from ∇²f). <br /><br /> Result: the <b>condition number</b> of ∇²F is roughly ρ / (smallest eigenvalue of ∇²f), which blows up as ρ → ∞. Ill-conditioned problems make gradient descent painfully slow (steps in the "steep" direction are tiny relative to the "flat" direction). <br /><br /> <b>Concrete example:</b> minimize x² + y² subject to x + y = 1. Penalty version: F = x² + y² + ρ(x + y - 1)². Hessian: [[2 + 2ρ, 2ρ], [2ρ, 2 + 2ρ]]. Eigenvalues: 2 (in direction (1,-1)) and 2 + 4ρ (in direction (1,1)). Condition number: 1 + 2ρ, growing linearly in ρ. GD needs LR ∝ 1/(1 + 2ρ) to be stable, which means it barely moves in the (1,-1) direction. <br /><br /> <b>Fixes:</b> augmented Lagrangian (adds a Lagrange multiplier term to reduce needed ρ), or use a solver that leverages the constraint structure directly (interior-point methods, SQP).</>
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "The Lagrangian for 'minimize f(x) subject to g(x) ≤ 0' is:",
+      choices: [
+        { text: "L(x, λ) = f(x) − g(x)" },
+        { text: "L(x, λ) = f(x) + λ · g(x), with λ ≥ 0", correct: true },
+        { text: "L(x, λ) = λ · f(x) + g(x)" },
+        { text: "L(x, λ) = f(x) / g(x)" },
+      ],
+      explanation: <>Standard form for an inequality constraint g(x) ≤ 0: Lagrangian is f + λ·g with λ ≥ 0. The nonnegative λ ensures the multiplier represents a "cost of violation" — increasing g (worse violation) can only increase L. This is the sign convention used throughout convex optimization.</>
+    },
+    {
+      q: "In KKT conditions, complementary slackness says:",
+      choices: [
+        { text: "λ + g = 0" },
+        { text: "λ · g = 0 — either the constraint is active or its multiplier is zero", correct: true },
+        { text: "λ = g" },
+        { text: "λ and g are both always positive" },
+      ],
+      explanation: <>Complementary slackness: for each inequality constraint, either it's active (g = 0) at the optimum OR its Lagrange multiplier is zero (constraint has no "market price" because it's slack). One or the other, but not both non-zero. This is the KKT condition that identifies the ACTIVE set — for SVMs, it identifies the support vectors.</>
+    },
+    {
+      q: "Strong duality (dual optimum = primal optimum) is guaranteed for:",
+      choices: [
+        { text: "Any optimization problem." },
+        { text: "Convex problems satisfying Slater's constraint qualification.", correct: true },
+        { text: "Only linear programs (LP)." },
+        { text: "Only problems with no equality constraints." },
+      ],
+      explanation: <>Weak duality (dual ≤ primal) always holds. Strong duality (dual = primal) requires additional structure: for convex problems, Slater's condition — the existence of a strictly-feasible point — is enough. LP is a special convex case where strong duality always holds. For non-convex problems, strong duality may fail; the duality gap can be arbitrarily large.</>
+    },
+    {
+      q: "The RLHF training loss L = -E[R] + β · KL(π || π_ref) is the Lagrangian of:",
+      choices: [
+        { text: "An unconstrained problem." },
+        { text: "'Maximize E[R] subject to KL(π || π_ref) ≤ B' with β as the multiplier.", correct: true },
+        { text: "A minimum-cover set problem." },
+        { text: "The SVM classification problem." },
+      ],
+      explanation: <>RLHF is exactly this constrained problem in Lagrangian form. β is the shadow price of the KL constraint — small β = weak KL constraint = policy is free to chase reward far from π_ref. Large β = strong KL constraint = policy hugs π_ref. Some implementations adaptively tune β to hit a target KL budget, which is essentially solving the dual by adjusting the multiplier.</>
+    },
+    {
+      q: "Soft constraints via the penalty method become numerically difficult as ρ → ∞ because:",
+      choices: [
+        { text: "The gradient stops existing." },
+        { text: "The Hessian becomes ill-conditioned — one direction has eigenvalue O(ρ), others stay O(1).", correct: true },
+        { text: "The loss becomes infinite." },
+        { text: "The GPU runs out of memory." },
+      ],
+      explanation: <>The penalty term ρ · g(x)² adds a rank-1 term ρ · (∇g)(∇g)ᵀ to the Hessian, whose eigenvalue in the direction of ∇g grows linearly in ρ. Other eigenvalues stay O(1). Condition number blows up as ρ → ∞, so gradient descent stalls. Practical fixes: (1) use a moderate ρ and accept small constraint violation, (2) use augmented Lagrangian (Lagrangian + penalty combination) which needs much smaller ρ, or (3) switch to methods that handle constraints natively (interior-point, SQP).</>
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/optimization/constrained-optimization" title="Constrained optimization & Lagrangians" />

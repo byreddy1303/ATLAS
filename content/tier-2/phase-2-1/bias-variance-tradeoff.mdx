@@ -1,0 +1,498 @@
+---
+title: Bias–variance trade-off
+tier: 2
+phase: "2.1"
+---
+
+export const biasVarianceEmpiricalCode = `# Empirical bias-variance decomposition on polynomial regression.
+# For each model complexity, resample the training set many times, retrain,
+# and measure BIAS (average prediction vs truth) and VARIANCE (spread of predictions).
+import numpy as np, matplotlib.pyplot as plt
+
+np.random.seed(0)
+
+def true_fn(x):    return np.sin(2 * x) + 0.5 * x
+def make_data(N):
+    x = np.random.uniform(-2, 2, N)
+    y = true_fn(x) + 0.4 * np.random.randn(N)
+    return x, y
+
+def poly_features(x, degree):
+    return np.stack([x**k for k in range(degree + 1)], axis=1)
+
+def fit_poly(x, y, degree):
+    X = poly_features(x, degree)
+    return np.linalg.lstsq(X, y, rcond=None)[0]
+
+x_test = np.linspace(-2, 2, 200)
+y_true = true_fn(x_test)
+
+# For each degree, resample training data 100 times, compute prediction at each test point
+degrees = [1, 3, 8, 20]
+N_train = 40
+N_resamples = 100
+
+fig, axes = plt.subplots(1, 4, figsize=(15, 3.5))
+bias_sq_list, var_list = [], []
+
+for ax, deg in zip(axes, degrees):
+    preds = np.zeros((N_resamples, len(x_test)))
+    for i in range(N_resamples):
+        x_tr, y_tr = make_data(N_train)
+        w = fit_poly(x_tr, y_tr, deg)
+        preds[i] = poly_features(x_test, deg) @ w
+
+    mean_pred = preds.mean(axis=0)
+    bias_sq   = np.mean((mean_pred - y_true) ** 2)
+    variance  = np.mean(preds.var(axis=0))
+    bias_sq_list.append(bias_sq); var_list.append(variance)
+
+    # Show fanned resamples + mean + truth
+    for i in range(min(30, N_resamples)):
+        ax.plot(x_test, preds[i], "-", color="rosybrown", lw=0.6, alpha=0.4)
+    ax.plot(x_test, mean_pred, "-", color="crimson", lw=2, label=f"mean pred")
+    ax.plot(x_test, y_true,   "-", color="teal",    lw=2, label=f"true")
+    ax.set_title(f"degree {deg}: bias^2={bias_sq:.3f}, var={variance:.3f}")
+    ax.set_ylim(-3, 3); ax.legend(fontsize=8); ax.grid(alpha=0.3)
+
+plt.tight_layout()
+
+print(f"{'degree':>8}  {'bias^2':>10}  {'variance':>10}  {'total':>10}")
+for deg, b2, v in zip(degrees, bias_sq_list, var_list):
+    print(f"{deg:>8}  {b2:>10.4f}  {v:>10.4f}  {b2+v:>10.4f}")
+print()
+print("Low degree (underfits): HIGH bias, LOW variance.")
+print("High degree (overfits): LOW bias, HIGH variance.")
+print("Middle degree: minimizes bias + variance (best generalization).")`;
+
+export const learningCurveCode = `# Learning curves: how training and validation MSE change as N grows.
+# Different curves = different diagnoses:
+#   HIGH BIAS: both losses converge to a HIGH value -> underfitting
+#   HIGH VAR:  large GAP between train and val losses -> overfitting
+import numpy as np, matplotlib.pyplot as plt
+
+np.random.seed(0)
+def true_fn(x): return 3 * np.sin(x) + 0.5 * x**2 - x
+
+def make_data(N):
+    x = np.random.uniform(-3, 3, N)
+    y = true_fn(x) + 0.6 * np.random.randn(N)
+    return x, y
+
+def poly_features(x, degree):
+    return np.stack([x**k for k in range(degree + 1)], axis=1)
+
+def eval_at_size(N, degree, n_trials=20):
+    train_losses, val_losses = [], []
+    for _ in range(n_trials):
+        x_tr, y_tr = make_data(N)
+        x_val, y_val = make_data(500)
+        X_tr = poly_features(x_tr, degree)
+        X_val = poly_features(x_val, degree)
+        w = np.linalg.lstsq(X_tr, y_tr, rcond=None)[0]
+        train_losses.append(np.mean((X_tr @ w - y_tr) ** 2))
+        val_losses.append(np.mean((X_val @ w - y_val) ** 2))
+    return np.mean(train_losses), np.mean(val_losses)
+
+Ns = [10, 25, 50, 100, 200, 500]
+
+fig, axes = plt.subplots(1, 3, figsize=(14, 4))
+for ax, (deg, label) in zip(axes, [(1, "degree 1 (UNDERFITTING)"),
+                                    (5, "degree 5 (GOOD FIT)"),
+                                    (20, "degree 20 (OVERFITTING)")]):
+    train, val = [], []
+    for N in Ns:
+        t, v = eval_at_size(N, deg)
+        train.append(t); val.append(v)
+    ax.plot(Ns, train, "o-", color="crimson", lw=2, label="training loss")
+    ax.plot(Ns, val,   "o-", color="teal",    lw=2, label="validation loss")
+    ax.set_xlabel("N (training samples)"); ax.set_ylabel("MSE")
+    ax.set_title(label); ax.legend(); ax.grid(alpha=0.3)
+
+plt.tight_layout()
+print("Read a learning curve:")
+print("  Both curves HIGH & CONVERGED: high bias -> model is too simple.  Add capacity.")
+print("  Curves have a BIG GAP:        high variance -> model overfits. Regularize, get more data.")
+print("  Both curves LOW & CONVERGED: good fit.")
+print("Adding more data helps only if variance is high. Doesn't fix an underfitting model.")`;
+
+export const doubleDescentCode = `# The double-descent phenomenon: modern deep learning wrinkle in bias-variance.
+# For over-parameterized models, test error DECREASES beyond the interpolation
+# threshold -- opposite of the classical U-shape.
+import numpy as np, matplotlib.pyplot as plt
+
+np.random.seed(0)
+
+# Small linear-regression-with-random-features problem, sweep model width
+N_train = 100
+N_test  = 500
+D_in = 20
+x_train = np.random.randn(N_train, D_in)
+x_test  = np.random.randn(N_test,  D_in)
+w_true  = np.random.randn(D_in)
+y_train = x_train @ w_true + 0.5 * np.random.randn(N_train)
+y_test  = x_test  @ w_true + 0.5 * np.random.randn(N_test)
+
+def random_features(x, D_feat, seed):
+    rng = np.random.default_rng(seed)
+    W = rng.normal(0, 1, size=(x.shape[1], D_feat))
+    b = rng.normal(0, 1, size=D_feat)
+    return np.tanh(x @ W + b)             # random-feature MLP-style
+
+# Sweep number of random features
+D_feats = [5, 10, 20, 40, 80, 99, 100, 105, 150, 300, 600, 1000]
+train_mse, test_mse = [], []
+for D_feat in D_feats:
+    Phi_train = random_features(x_train, D_feat, seed=42)
+    Phi_test  = random_features(x_test,  D_feat, seed=42)
+    # Use lstsq (min-norm solution when over-parameterized)
+    w, *_ = np.linalg.lstsq(Phi_train, y_train, rcond=None)
+    train_mse.append(np.mean((Phi_train @ w - y_train) ** 2))
+    test_mse.append (np.mean((Phi_test  @ w - y_test)  ** 2))
+
+# Print results
+print(f"{'D_feat':>8}  {'train MSE':>10}  {'test MSE':>10}")
+for D, tr, te in zip(D_feats, train_mse, test_mse):
+    marker = " <-- interpolation threshold" if D == N_train else ""
+    print(f"{D:>8}  {tr:>10.4f}  {te:>10.4f}{marker}")
+
+fig, ax = plt.subplots(figsize=(8, 4))
+ax.plot(D_feats, train_mse, "o-", color="crimson", label="train MSE")
+ax.plot(D_feats, test_mse,  "o-", color="teal",    label="test MSE")
+ax.axvline(N_train, linestyle="--", color="gold", label="interpolation threshold (D = N)")
+ax.set_xscale("log"); ax.set_yscale("log")
+ax.set_xlabel("model width (D_feat)"); ax.set_ylabel("MSE")
+ax.set_title("Double descent: test MSE peaks at D=N, then DROPS again")
+ax.legend(); ax.grid(alpha=0.3, which="both")
+plt.tight_layout()
+
+print()
+print("Classical bias-variance: test error is a U-shape in complexity.")
+print("Modern (large-model) regime: test error has TWO valleys -- one classical,")
+print("one at the highly over-parameterized end. Between them, at D ~= N, there's")
+print("a PEAK. This is 'double descent' and is why very large transformers work.")`;
+
+<Prerequisites items={[
+  { href: "/learn/core-ml/supervised-basics/linear-regression", label: "Linear regression — closed form and gradient", blurb: "Bias-variance is easiest to reason about in the linear-regression setting; we'll use it as the running example." },
+  { href: "/learn/core-ml/supervised-basics/regularization", label: "Regularization (L1, L2, elastic net)", blurb: "Regularization is the primary tool for navigating the bias-variance trade-off — this chapter explains what regularization is actually trading off." },
+  { href: "/learn/mathematics/probability/expectation-variance", label: "Expectation, variance & moments", blurb: "The whole decomposition is E[(ŷ − y_true)²] = bias² + variance + noise — expectation and variance are the machinery." },
+]} />
+
+<NewConcepts
+  concepts={[
+    { name: "Model capacity", blurb: "informal: how flexible a model is (number of parameters, tree depth, kernel bandwidth, etc.). More capacity → lower bias, higher variance, all else equal." },
+    { name: "Interpolation threshold", blurb: "the model complexity at which the model can perfectly fit the training data (training MSE hits 0). Classical wisdom: past this point, test error blows up. Modern reality: it drops again — see double descent." },
+    { name: "Double descent (Belkin et al. 2019)", blurb: "empirical: test error is NOT monotone in model complexity. It has a peak at the interpolation threshold (D ≈ N), then descends again as D grows. Explains why massively over-parameterized nets (100B parameters, 1T tokens) work." },
+    { name: "Effective degrees of freedom", blurb: "the 'true' complexity of a fitted model — not just the raw parameter count. For ridge regression, tr((X(XᵀX + λI)⁻¹Xᵀ)) counts how many independent directions the model actually uses." },
+    { name: "Learning curve", blurb: "plot of training and validation error as a function of training set size N. Diagnoses whether the model is bias-limited (both curves flat and high) or variance-limited (big gap between them)." },
+  ]}
+/>
+
+<Motivation title="Every ML system runs on a bias-variance dial — you have to know which way to turn it">
+
+Suppose you're fitting a model and its test loss is bad. There are only two fundamental reasons:
+
+1. **The model can't represent the true function** — it's too simple. This is **bias**.
+2. **The model can represent it, but the specific fit is sensitive to the noise in your training set** — you'd get a different fit from another random sample. This is **variance**.
+
+The two failure modes require **opposite** interventions:
+
+- **High bias:** need more model capacity (bigger network, more features, less regularization).
+- **High variance:** need less capacity (smaller network, more regularization, more data).
+
+Try to fix a high-bias problem by adding more data or regularization, and things get WORSE. Try to fix a high-variance problem by adding more parameters, and you overfit even more. Diagnosing which regime you're in is the difference between an intern's confused Slack messages and an experienced ML engineer's decisive fix.
+
+For a GenAI engineer, bias-variance shows up everywhere:
+
+1. **Model selection.** Choosing between GPT-3.5 and GPT-4 for a task; picking the right size fine-tune (7B vs 70B); deciding how many layers of LoRA to unfreeze. All bias-variance judgments.
+2. **Regularization choices.** Weight decay strength, LoRA rank, dropout rate, KL penalty in RLHF. All are dials on the bias-variance trade-off.
+3. **When to gather more data.** Adding data reduces variance but not bias. If validation loss is high AND close to training loss, more data won't help — you need a better model.
+4. **Double descent understanding.** Modern LLMs live on the far right of the double-descent curve, where "more parameters keep helping" beats the classical U-shape. This is why "scale is all you need" often wins.
+
+This chapter builds the formal decomposition, the visual intuition, and the modern deep-learning wrinkle.
+
+</Motivation>
+
+<Intuition title="Bias = aim; variance = precision; total error = both">
+
+**The dart-throwing analogy.** You're throwing darts at a bullseye:
+
+- **Low bias, low variance:** darts cluster tightly around the bullseye. Your aim is right AND you're consistent. Ideal.
+- **Low bias, high variance:** darts scatter around the bullseye — average position is on target, but each individual throw is far off. Your aim is right, your delivery is inconsistent.
+- **High bias, low variance:** darts cluster tightly in the WRONG place (say, always upper-right of the bullseye). Consistent, but consistently off.
+- **High bias, high variance:** darts scatter over a wide area of the wrong region. Neither aim nor consistency.
+
+For an ML model, "throwing darts" = getting fresh training data and refitting; "bullseye" = the true function. The **average prediction** across many resampled fits reveals the bias; the **spread** reveals the variance. Total expected error at any point = bias² + variance + irreducible noise.
+
+**In model complexity:**
+
+- **Simple model (few parameters):** the model can't represent the true function no matter what data you feed it → HIGH bias. But it's the same simple fit every time → LOW variance.
+- **Complex model (many parameters):** the model can perfectly represent the true function → LOW bias. But the specific fit hugs the training noise → HIGH variance.
+- **Somewhere in between:** the sweet spot where bias² + variance is minimized. This is what CV finds.
+
+**In regularization:**
+
+- **Weak regularization:** the model uses all its capacity → low bias, high variance. Overfits.
+- **Strong regularization:** the model is constrained → higher bias, lower variance. Underfits at the extreme.
+- **Just-right λ:** minimizes total error. This is what CV picks.
+
+</Intuition>
+
+<Recall term="Expectation and variance">
+
+For a random variable X, expectation E[X] is the average, variance Var(X) = E[(X − E[X])²] is the squared spread around the mean. The bias-variance decomposition treats the model's prediction ŷ(x) at a fixed x as a random variable — random because the training data used to fit the model is random. Bias = E[ŷ(x)] − y_true(x). Variance = Var(ŷ(x)).
+
+</Recall>
+
+## The formal decomposition
+
+Consider a fixed test point x* with true value y* = f(x*) + ε where ε has zero mean and variance σ². The model produces prediction ŷ(x*), which depends on the (random) training set.
+
+**Expected squared error at x*:**
+
+$$
+\mathbb{E}[(\hat{y}(x^*) - y^*)^2] = \underbrace{(\mathbb{E}[\hat{y}(x^*)] - f(x^*))^2}_{\text{bias}^2} + \underbrace{\text{Var}(\hat{y}(x^*))}_{\text{variance}} + \underbrace{\sigma^2}_{\text{irreducible noise}}
+$$
+
+Three terms:
+
+1. **Bias²** = how far the AVERAGE prediction is from the truth. Only zero if the model class contains the true function AND we picked the right one.
+2. **Variance** = how much the prediction fluctuates as the training set changes. Only zero for a deterministic (data-independent) model.
+3. **Noise** = irreducible error from the labels themselves. Can't be eliminated by any model.
+
+**Derivation (short version):**
+
+Let `μ = E[ŷ(x*)]` (the expected prediction). Expand:
+
+$$
+\mathbb{E}[(\hat{y} - y^*)^2] = \mathbb{E}[(\hat{y} - \mu + \mu - f - \varepsilon)^2]
+$$
+
+Expand the square, take expectation, use that cross-terms vanish (since ε is independent of ŷ and has zero mean, and ŷ − μ has zero mean by definition):
+
+$$
+= \mathbb{E}[(\hat{y} - \mu)^2] + (\mu - f)^2 + \mathbb{E}[\varepsilon^2]
+$$
+
+$$
+= \text{Var}(\hat{y}) + \text{bias}^2 + \sigma^2 \quad \blacksquare
+$$
+
+**Why it matters:** the decomposition tells us that **increasing model capacity trades bias for variance**. A more complex model can represent more functions (lower bias) but is more sensitive to the training set (higher variance). The sum of the two — the actual test error — has a U-shape in model complexity.
+
+<RunnableCode title="Empirical bias-variance: resample training set, refit, measure both" code={biasVarianceEmpiricalCode} packages={["numpy", "matplotlib"]} captureFig={true} />
+
+## Learning curves — diagnosing bias vs variance
+
+**A learning curve** plots training and validation error as a function of training set size N.
+
+**Three patterns:**
+
+- **Both curves converge to a high value:** HIGH BIAS. The model can't fit even with plenty of data. Fix: more capacity (bigger network, richer features, less regularization). More data won't help.
+- **Big gap between training and validation error, both decreasing with more data:** HIGH VARIANCE. The model is overfitting. Fix: more data, more regularization, or less capacity.
+- **Both curves low and converged:** the model is well-tuned. Ship it.
+
+<RunnableCode title="Learning curves for 3 model complexities" code={learningCurveCode} packages={["numpy", "matplotlib"]} captureFig={true} />
+
+**Diagnostic algorithm:**
+
+1. Plot the learning curve at the current model + training size.
+2. If big gap: high variance → regularize / add data.
+3. If both high & converged: high bias → increase capacity / better features.
+4. If both low: good, deploy.
+
+This diagnostic is one of the cheapest and most useful in classical ML.
+
+## Regularization and the trade-off
+
+Regularization directly implements bias-variance control. A regularized model:
+
+- Has **higher bias** than the unregularized fit (the penalty distorts the optimum away from the "best data-fit" solution).
+- Has **lower variance** (the penalty constrains the model to a smaller region of parameter space).
+
+**The classical bias-variance curve as a function of regularization strength λ:**
+
+- **λ = 0:** minimum bias (as low as the model allows), maximum variance.
+- **λ = ∞:** maximum bias (model = constant), zero variance.
+- **Optimal λ:** somewhere in between, where dBias²/dλ + dVariance/dλ = 0.
+
+This is why CV works to pick λ: it estimates test error (= bias² + variance + noise) and finds the λ that minimizes it.
+
+## The modern deep-learning wrinkle — double descent
+
+Classical ML said: test error is a U-shape in model complexity. Beyond the "interpolation threshold" (where the model can perfectly fit the training data), performance would blow up.
+
+**Reality for modern deep learning:** the U-shape only holds up to the interpolation threshold. Past that, test error DECREASES AGAIN. This is **double descent** (Belkin et al. 2019).
+
+The "peak" of test error at the interpolation threshold happens because:
+
+- Just before D = N, the model is barely flexible enough to fit the training data — it uses all its capacity, so any fit is highly sensitive to noise.
+- Right at D = N, the "least-norm interpolating solution" tends to be pathological.
+- For D >> N, there are many possible interpolating solutions, and GD picks the min-norm one — which is well-conditioned and generalizes surprisingly well.
+
+<RunnableCode title="Double descent: empirical demo with random features" code={doubleDescentCode} packages={["numpy", "matplotlib"]} captureFig={true} />
+
+**Consequences for GenAI:**
+
+- **Big models with lots of parameters CAN generalize well, even beyond the interpolation threshold.** This is one theoretical justification for scaling.
+- **Small dataset + medium-sized model = danger zone.** Right at the interpolation threshold you get the worst of both worlds. Either shrink the model or (better) grow the dataset.
+- **"Grokking" and other late-training phenomena** are related: models that fit training data early can continue improving on test set for many more epochs, effectively descending into the second (over-parameterized) valley.
+
+<RealWorldML title="Bias-variance thinking in LLM training and fine-tuning">
+
+Every decision in LLM development is implicitly a bias-variance judgment:
+
+**Model size selection.** GPT-3.5 vs GPT-4 vs Claude-Sonnet vs Claude-Opus. Bigger = more capacity = lower bias, but also more expensive and (until double descent kicks in) higher variance. Practical rule: for tasks with abundant labeled examples, bigger models help; for tasks with few examples, smaller/finetunable models often generalize better.
+
+**Fine-tuning vs prompting.** Prompting is a very-high-bias, very-low-variance approach — you're using the model exactly as trained (bias comes from the pretraining data's distribution mismatch with your task). Fine-tuning reduces bias (adapts to your task) but adds variance (the fine-tune is sensitive to your specific dataset). The FLAN paper's message was: intermediate positions (instruction tuning on many tasks) can win on both.
+
+**LoRA rank selection.** LoRA constrains fine-tuning updates to be rank-r. Small r = more bias (can't adapt as much), less variance (the rank-1 constraint stabilizes training). Large r = closer to full fine-tuning. Practical range: r = 8-64 for most tasks.
+
+**RLHF's KL penalty.** The β coefficient controls how far the fine-tuned policy can move from the reference. Small β = high-variance policy (chases reward, may drift wildly). Large β = high-bias policy (stays close to reference, doesn't fully use reward signal). Bias-variance dial.
+
+**Adding data.** In classical ML, if variance is high, more data helps. In LLM land: more high-quality data is nearly always net positive (both reduces variance AND lets you use larger models). The pretraining-data scaling laws (Kaplan/Chinchilla) are basically empirical bias-variance curves at scale.
+
+**Double descent at scale.** Modern LLMs live in the second "descent" (right side of the U). Test loss keeps improving as you add parameters, past the interpolation threshold, because the training data is essentially infinite (trillions of tokens) and the min-norm solution generalizes. This is why "just make it bigger" often wins.
+
+</RealWorldML>
+
+<StudyDepth
+  drill={[
+    "Bias-variance decomposition: E[(ŷ − y)²] = bias² + variance + noise.",
+    "Bias comes from model class limitations; variance comes from training-set sensitivity.",
+    "Classical U-curve: test error is bias² + variance, minimized at intermediate model complexity.",
+    "High bias: both training and validation loss high. Fix: more capacity.",
+    "High variance: training loss low, validation loss high (big gap). Fix: more data, more regularization.",
+    "Regularization strength λ is a direct bias-variance dial.",
+    "Double descent: past interpolation threshold, test error DROPS as model grows further.",
+    "Modern LLMs live in the double-descent regime — over-parameterization is a feature.",
+  ]}
+  skim={[
+    "Formal derivation of bias-variance decomposition with cross-term cancellation.",
+    "Effective degrees of freedom for ridge regression.",
+    "Belkin et al. 2019 double-descent theory in random-features models.",
+    "Grokking phenomenon (delayed generalization) and its bias-variance interpretation.",
+    "Scaling laws (Kaplan et al.) as empirical bias-variance curves.",
+  ]}
+/>
+
+<CodeItYourself title="Three drills — empirical decomposition, learning curves, double descent replication">
+
+1. **Compute bias² and variance for a KNN classifier.** Vary k = 1, 3, 5, 10, 25, 100 on a synthetic 2D dataset. Resample training data 30 times, retrain, measure bias² and variance at test points. Small k = high variance (overfits); large k = high bias (underfits).
+
+2. **Plot a learning curve.** For a fixed model, plot training and validation MSE as N = 20, 50, 100, 200, 500, 1000. Diagnose: is the model bias-limited or variance-limited?
+
+3. **Replicate double descent.** Use random-feature regression (features = tanh(random projection)), sweep D_feat around the D_feat = N line. Plot train and test MSE. See the peak at the interpolation threshold and the descent beyond.
+
+</CodeItYourself>
+
+<Summary>
+
+- **Bias-variance decomposition:** E[(ŷ − y)²] = bias² + variance + irreducible noise.
+- **Bias** = model can't represent true function even with unlimited data. Fix: more capacity.
+- **Variance** = model's fit changes a lot with different training sets. Fix: more data, more regularization.
+- **Classical U-shape:** test error is minimized at intermediate model complexity — CV picks that complexity.
+- **Learning curves diagnose:** big gap → variance; both high & converged → bias; both low → good fit.
+- **Regularization strength λ is a direct dial** on the bias-variance trade-off.
+- **Double descent** (Belkin et al. 2019): past the interpolation threshold, test error DROPS again — modern-LLM regime.
+- **Practical decision-making:** know whether your problem is bias- or variance-limited before you spend money on more data or bigger models.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>Your model has training MSE = 0.02 and validation MSE = 0.85. What does this suggest?</>,
+      hint: <>Big gap = which failure mode?</>,
+      answer: <>The huge gap between training and validation loss is the classic signature of <b>HIGH VARIANCE / OVERFITTING</b>. The model memorizes the training set but doesn't generalize. Fixes (in order of typical cost): (1) more regularization (increase λ / weight_decay / dropout), (2) reduce model capacity (fewer parameters, less flexible model class), (3) more training data. Try (1) first — cheapest.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>You add 10x more training data and your validation loss stays the same. What does this suggest about your model?</>,
+      hint: <>Adding data reduces variance but not bias. If nothing changed...</>,
+      answer: <>Adding data specifically reduces VARIANCE — it doesn't help with BIAS. If your validation loss is stubbornly high despite more data, the model is <b>BIAS-LIMITED (UNDERFITTING)</b>. You need more model capacity: more parameters, richer features, or a fundamentally different model class. This is why "just add more data" isn't always the answer.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Explain in one sentence why bias² and variance BOTH contribute to test error but noise σ² doesn't get to be "designed away."</>,
+      hint: <>Where does the noise σ² come from in the data generation model?</>,
+      answer: <>Noise σ² comes from the LABELS themselves being noisy (y = f(x) + ε, and ε has variance σ² independent of any model you might fit) — no matter how perfect your model is, you can't predict the random noise on a specific test example. Bias and variance are properties of the MODEL and can be reduced by choosing model, capacity, and regularization well. Noise is a property of the DATA-GENERATING PROCESS and is a floor on any model's test error.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>You have a KNN classifier. What happens to bias and variance as you decrease k from 100 to 1?</>,
+      hint: <>Consider what k=1 vs k=100 does to the decision boundary.</>,
+      answer: <>k = 100 averages over many neighbors — the decision boundary is smooth and NOT very responsive to individual training points. HIGH BIAS (smooth boundary can't capture fine detail), LOW VARIANCE (boundary is stable under resampling). <br /><br /> k = 1 uses the single nearest training point for every prediction. The boundary is jagged and hugs every training example. LOW BIAS (can represent any decision boundary the training data traces), HIGH VARIANCE (each training point becomes a "decision island" — different resamples produce wildly different boundaries). <br /><br /> Optimal k depends on the problem: dense data with low noise → small k (low bias wins); sparse or noisy data → large k (smoothing helps).</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Complete the derivation of the bias-variance decomposition, showing why the cross-terms vanish. Start from E[(ŷ(x*) − y*)²] where y* = f(x*) + ε.</>,
+      hint: <>Let μ = E[ŷ]. Expand (ŷ − y*)² by adding and subtracting μ inside. Take expectation over both the training data and the noise ε.</>,
+      answer: <>Start: (ŷ − y*)² = (ŷ − μ + μ − f − ε)². Group: let a = ŷ − μ, b = μ − f, c = -ε. Then (a + b + c)² = a² + b² + c² + 2ab + 2ac + 2bc. <br /><br /> Take expectation. Cross terms: <br /> - E[2ab] = 2 E[(ŷ − μ)(μ − f)] = 2 (μ − f) · E[ŷ − μ] = 2(μ − f)(μ − μ) = 0. <br /> - E[2ac] = -2 E[(ŷ − μ) ε] = 0 (because ŷ depends on training data, independent of test-point noise ε). <br /> - E[2bc] = -2 (μ − f) · E[ε] = 0 (because E[ε] = 0). <br /><br /> All three cross terms vanish. Remaining: <br /> E[(ŷ − y*)²] = E[(ŷ − μ)²] + (μ − f)² + E[ε²] = <b>Var(ŷ) + bias² + σ²</b>. ∎ <br /><br /> Note: this assumes the noise ε at the test point is independent of the training data — a standard iid assumption. When it's violated (e.g., train/test distribution shift), the decomposition needs extra terms.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>What is "double descent" and why does it explain why modern LLMs benefit from more parameters even when they already fit the training data perfectly?</>,
+      hint: <>Think about the min-norm interpolating solution for over-parameterized models.</>,
+      answer: <><b>Double descent</b> (Belkin et al. 2019): test error as a function of model complexity has two local minima with a peak in between. The peak sits at the "interpolation threshold" (model complexity D ≈ training set size N). <br /><br /> <b>Left of the peak</b>: classical U-curve. Small models underfit (high bias); moderate models balance bias-variance well. <br /><br /> <b>The peak at D = N</b>: the model has JUST enough capacity to fit the training data. It uses all its capacity for that; any small change in the training set moves the fit dramatically. High variance, test error spikes. <br /><br /> <b>Right of the peak</b>: D &gt;&gt; N. Many possible interpolating solutions exist. Gradient descent (and lstsq) find the min-norm one, which is smooth and well-conditioned. Test error DROPS as D grows further, sometimes below its earlier minimum. <br /><br /> <b>Why LLMs benefit from more parameters:</b> they live in the "right descent" region — 100B+ parameters, training data of trillions of tokens. The min-norm solution generalizes because the sheer diversity of pretraining data doesn't leave room for the model to memorize specific noise. Over-parameterization is a feature, not a bug, when data is abundant and the min-norm bias helps. <br /><br /> This is the mathematical justification behind "scaling laws" (Kaplan et al., Chinchilla): more parameters + more data both continue to improve performance because we're on the descending part of the double descent curve. Classical wisdom says "stop scaling once you interpolate the training data"; modern practice says "keep scaling, you're still descending." Both were empirically correct in their respective regimes.</>
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "The bias-variance decomposition of squared error is:",
+      choices: [
+        { text: "E[(ŷ − y)²] = bias × variance" },
+        { text: "E[(ŷ − y)²] = bias² + variance + irreducible noise", correct: true },
+        { text: "E[(ŷ − y)²] = bias + variance + noise" },
+        { text: "E[(ŷ − y)²] = bias × noise + variance" },
+      ],
+      explanation: <>bias² + variance + noise. Cross terms vanish because (1) prediction error and training-data variance are independent by definition, (2) label noise is independent of the training data. The decomposition is additive — increasing one component doesn't reduce the others (except through the trade-off inherent in model complexity). Noise is irreducible; bias and variance can both be tuned by model choice and regularization.</>
+    },
+    {
+      q: "A model's training loss is 0.05 and validation loss is 0.06. Its bias-variance status is most likely:",
+      choices: [
+        { text: "High bias — need more capacity." },
+        { text: "Well-tuned; low bias and low variance.", correct: true },
+        { text: "High variance — need more regularization." },
+        { text: "Impossible to tell without more info." },
+      ],
+      explanation: <>Both losses are low AND close to each other. Low means bias isn't a problem; small gap means variance isn't a problem. This is the "well-tuned" state where the model has enough capacity to fit and isn't overfitting. Ship it. (Assuming validation loss is on a meaningful validation set that's representative of the test distribution.)</>
+    },
+    {
+      q: "Adding more training data helps most when:",
+      choices: [
+        { text: "The model has high bias." },
+        { text: "The model has high variance (large train-val gap).", correct: true },
+        { text: "Never — data doesn't matter." },
+        { text: "The model is unregularized." },
+      ],
+      explanation: <>Data reduces variance (the fit is less sensitive to any single training example when there are more of them). It doesn't reduce bias — a fundamentally-too-simple model can't fit even with infinite data. So the correct rule: if you have a big gap between training and validation loss, adding data helps. If both are high, more data won't help — you need a better model.</>
+    },
+    {
+      q: "The 'double descent' phenomenon means:",
+      choices: [
+        { text: "Loss decreases in two phases during training." },
+        { text: "Test error is U-shaped in model size, but then DECREASES again past the interpolation threshold.", correct: true },
+        { text: "Two different loss functions are used." },
+        { text: "The learning rate is halved twice." },
+      ],
+      explanation: <>Empirical: test error as a function of model complexity has a classical U (small models underfit → balance → medium models overfit), a PEAK at the interpolation threshold (D ≈ N), and then DESCENDS AGAIN for very over-parameterized models (D &gt;&gt; N). This is what allows extremely large LLMs to work despite classical wisdom saying "stop scaling once you interpolate the training data." Modern DL lives in the right descent regime.</>
+    },
+    {
+      q: "In a k-nearest-neighbors classifier, choosing k = 1 gives:",
+      choices: [
+        { text: "High bias, low variance." },
+        { text: "Low bias, high variance (each training point becomes a decision island).", correct: true },
+        { text: "Zero bias and zero variance." },
+        { text: "Random predictions." },
+      ],
+      explanation: <>k = 1: each prediction uses the single nearest training example. The decision boundary hugs every training point — extremely flexible, LOW BIAS. But this flexibility makes the boundary hyper-sensitive to which specific points are in the training set — HIGH VARIANCE. Contrast with k = 100: averaging over 100 neighbors smooths the boundary, giving high bias (can't represent fine detail) but low variance (boundary is stable). Choosing k is a bias-variance dial you tune with cross-validation.</>
+    },
+  ]}
+/>
+
+<MarkDone slug="core-ml/supervised-basics/bias-variance-tradeoff" title="Bias–variance trade-off" />

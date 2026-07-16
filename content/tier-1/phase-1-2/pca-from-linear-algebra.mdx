@@ -1,0 +1,487 @@
+---
+title: PCA — from linear algebra alone
+tier: 1
+phase: "1.2"
+---
+
+export const covarianceEigenCode = `import numpy as np
+
+# Generate 2D data with a clear elongated shape
+np.random.seed(0)
+n = 300
+# Elongated cloud oriented at ~45 degrees
+angle = np.pi / 4
+R = np.array([[np.cos(angle), -np.sin(angle)],
+              [np.sin(angle),  np.cos(angle)]])
+S = np.diag([3.0, 0.7])                          # scale in x, then in y
+X = np.random.randn(n, 2) @ S.T @ R.T             # rotate + scale a standard cloud
+
+# Center the data (PCA REQUIRES centering)
+X_centered = X - X.mean(axis=0)
+
+# Sample covariance matrix (2x2, symmetric PSD)
+C = np.cov(X_centered.T)                          # shape (2, 2)
+
+# Eigen-decomposition of the covariance
+eigvals, eigvecs = np.linalg.eigh(C)               # SORTED ASCENDING by eigh
+order = np.argsort(-eigvals)                       # sort descending
+eigvals = eigvals[order]
+eigvecs = eigvecs[:, order]
+
+print("Sample covariance C:")
+print(np.round(C, 3))
+print()
+print("Eigenvalues (variance along each principal direction):", np.round(eigvals, 3))
+print()
+print("Eigenvectors (principal directions, columns):")
+print(np.round(eigvecs, 3))
+print()
+print("First eigenvector points along the DATA'S long axis")
+print("Second is perpendicular to it (spectral theorem — orthogonal)")
+`;
+
+export const pcaSVDCode = `import numpy as np
+
+# Same 2D elongated cloud as above
+np.random.seed(0)
+n = 300
+angle = np.pi / 4
+R = np.array([[np.cos(angle), -np.sin(angle)],
+              [np.sin(angle),  np.cos(angle)]])
+S = np.diag([3.0, 0.7])
+X = np.random.randn(n, 2) @ S.T @ R.T
+
+# Center
+X_centered = X - X.mean(axis=0)
+
+# SVD of the CENTERED data matrix (n x d)
+# X = U diag(singular_values) V.T
+# The rows of V.T are the principal components (= eigenvectors of covariance)
+U, sing_vals, Vt = np.linalg.svd(X_centered, full_matrices=False)
+
+# Principal components:  each row of Vt is a component in feature space
+components = Vt                                    # d x d
+# Variances along principal directions (link between SVD and eigen):
+# eigenvalues of covariance == (singular_values ** 2) / (n - 1)
+variances = (sing_vals ** 2) / (n - 1)
+
+print("Principal components (rows of Vt):")
+print(np.round(components, 3))
+print()
+print("Variance explained by each component:", np.round(variances, 3))
+print()
+print("This matches the eigenvalue / eigenvector output of the previous cell.")
+print()
+print("Explained variance ratio (relative):",
+      np.round(variances / variances.sum(), 3))
+`;
+
+export const pcaReduceCode = `import numpy as np
+
+# Higher-dim data example: reduce 8-D data down to 2-D for visualization
+np.random.seed(42)
+n = 400
+# True signal is 2-D, then embedded into 8-D by a random projection + noise
+signal = np.random.randn(n, 2) * np.array([4.0, 1.0])   # anisotropic
+proj = np.random.randn(2, 8) * 0.5
+X = signal @ proj + 0.1 * np.random.randn(n, 8)          # 8-D observations
+
+# 1. Center
+Xc = X - X.mean(axis=0)
+
+# 2. SVD
+U, S, Vt = np.linalg.svd(Xc, full_matrices=False)
+
+# 3. Sum explained variance and choose k
+var = (S ** 2) / (n - 1)
+cum = np.cumsum(var) / var.sum()
+print("Cumulative explained variance:", np.round(cum, 3))
+
+# 4. Project onto top-k principal directions
+k = 2
+X_reduced = Xc @ Vt[:k].T                                # n x k
+
+print()
+print(f"Reduced shape: {X_reduced.shape}")
+print(f"Kept {100*cum[k-1]:.1f}% of variance with {k}/8 components")
+
+# 5. Approximate reconstruction from k components (best rank-k under Frobenius norm)
+X_approx = X_reduced @ Vt[:k]                            # n x d, back in feature space
+recon_err = np.linalg.norm(Xc - X_approx) / np.linalg.norm(Xc)
+print(f"Relative reconstruction error: {recon_err:.4f}")
+`;
+
+export const screePlotCode = `import numpy as np
+import matplotlib.pyplot as plt
+import io, base64
+
+# Load a small synthetic dataset with a clear elbow at k=3
+np.random.seed(0)
+n = 200
+d = 12
+# True latent dim is 3
+latent = np.random.randn(n, 3) * np.array([5.0, 3.0, 1.5])
+mixing = np.random.randn(3, d)
+X = latent @ mixing + 0.3 * np.random.randn(n, d)
+
+# Center + SVD
+Xc = X - X.mean(axis=0)
+U, S, Vt = np.linalg.svd(Xc, full_matrices=False)
+variances = (S ** 2) / (n - 1)
+ratio = variances / variances.sum()
+cum = np.cumsum(ratio)
+
+# Plot
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4), facecolor='none')
+
+ax1.bar(range(1, len(variances) + 1), ratio, color='#a3ff12', alpha=0.85)
+ax1.set_xlabel('component', color='#e8e8ea')
+ax1.set_ylabel('variance explained (fraction)', color='#e8e8ea')
+ax1.set_title('Scree plot — look for the elbow', color='#e8e8ea')
+
+ax2.plot(range(1, len(cum) + 1), cum, 'o-', color='#a3ff12', markersize=6)
+ax2.axhline(0.9, color='#8f8f96', linestyle='--', alpha=0.6, label='90% variance')
+ax2.set_xlabel('components kept', color='#e8e8ea')
+ax2.set_ylabel('cumulative variance', color='#e8e8ea')
+ax2.set_title('Cumulative variance curve', color='#e8e8ea')
+ax2.legend()
+
+for ax in (ax1, ax2):
+    ax.set_facecolor('none')
+    for s in ax.spines.values(): s.set_color('#8f8f96')
+    ax.tick_params(colors='#8f8f96')
+
+plt.tight_layout()
+buf = io.BytesIO()
+plt.savefig(buf, format='png', transparent=True, dpi=110)
+print('__PLOT__' + base64.b64encode(buf.getvalue()).decode())
+plt.close()
+
+print(f"\\nCumulative variance:")
+for k in range(1, len(cum) + 1):
+    print(f"  keep {k:2d} components -> {100*cum[k-1]:.1f}% variance retained")
+`;
+
+export const embeddingCompressCode = `import numpy as np
+
+# Simulate a small "embedding matrix" from a language model: (vocab, dim)
+# Real ones are e.g. 50,000 x 1,024. We'll use 500 x 128 for speed.
+np.random.seed(0)
+V, D = 500, 128
+# The "true" structure is intrinsically low-rank + noise
+rank_r = 16
+low_rank = np.random.randn(V, rank_r) @ np.random.randn(rank_r, D)
+embeddings = low_rank + 0.1 * np.random.randn(V, D)
+
+# Center
+Xc = embeddings - embeddings.mean(axis=0)
+
+# SVD
+U, S, Vt = np.linalg.svd(Xc, full_matrices=False)
+
+var_ratio = (S ** 2) / (S ** 2).sum()
+cum = np.cumsum(var_ratio)
+
+# Find how few components capture 95% variance
+k_star = int(np.searchsorted(cum, 0.95) + 1)
+print(f"Components needed for 95% variance: {k_star}  (out of {D})")
+
+# Compression: original storage vs. compressed (U_k, S_k, Vt_k)
+orig_bytes = V * D * 8                          # float64
+comp_bytes = 8 * (V * k_star + k_star + k_star * D)
+print(f"Original:  {orig_bytes / 1024:.1f} KB")
+print(f"Rank-{k_star} approximation: {comp_bytes / 1024:.1f} KB")
+print(f"Compression ratio: {orig_bytes / comp_bytes:.2f}x")
+
+# Reconstruction error at rank k*
+Xk = U[:, :k_star] @ np.diag(S[:k_star]) @ Vt[:k_star]
+err = np.linalg.norm(Xc - Xk) / np.linalg.norm(Xc)
+print(f"Relative reconstruction error: {err:.4f}")
+`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/matrices-transformations/eigenvectors-eigenvalues", label: "Eigenvectors & eigenvalues", blurb: "PCA finds the eigenvectors of the covariance matrix — this chapter is that story in one place." },
+  { href: "/learn/mathematics/matrices-transformations/svd-decomposition", label: "Singular Value Decomposition (SVD)", blurb: "SVD is the numerically preferred route to PCA and connects to low-rank approximation via Eckart–Young." },
+  { href: "/learn/mathematics/matrices-transformations/positive-definite", label: "Symmetric & positive-definite matrices", blurb: "Covariance matrices are symmetric PSD; the spectral theorem is why PCA's principal axes are orthogonal." },
+]} />
+
+<NewConcepts
+  concepts={[
+    { name: "embedding compression (OpenAI, Cohere)", blurb: "productionalized dimensionality reduction of 1500–3000-dim text embeddings down to 32–256 dim with negligible retrieval-quality loss. The RealWorldML case study." },
+    { name: "LoRA (Low-Rank Adaptation)", blurb: "efficient LLM fine-tuning — motivated by the same low-rank thinking as PCA. Chapter deep-dive in Tier 4." },
+    { name: "manifold hypothesis", blurb: "the belief that real high-dimensional data (images, text, audio) lives on or near a low-dimensional smooth surface. PCA is the linear approximation to finding that manifold." },
+    { name: "principal components", blurb: "the k directions of maximum variance in a dataset — the &lsquo;natural axes&rsquo; that PCA extracts." },
+  ]}
+/>
+
+<Motivation title="Compressing a 1,024-dim embedding to 32 dimensions while keeping 95% of the signal">
+
+Every embedding-based system in modern ML has the same shape: represent an object (a word, an image, a user, a molecule) as a d-dimensional vector, where d is 512, 1024, 1536, or more. Storage and compute grow with d. Downstream models train faster if d is small. Interpretability improves if you can compress to 2 or 3 dimensions for a plot.
+
+But most of that d-dimensional space is *wasted*. Real embedding matrices have a small number of directions that account for most of the variance in the data; the rest is either noise or nearly-constant. If you find the right d′ &lt; d directions and project onto them, you keep most of the signal at a fraction of the cost.
+
+That's PCA. Principal Component Analysis is the *canonical* algorithm for finding those directions — and, remarkably, it's just linear algebra: an eigendecomposition of the covariance matrix (or equivalently, an SVD of the centered data matrix). No optimization loop, no hyperparameters beyond "how many components to keep." Once you've built the intuition for eigenvectors and SVD, PCA falls out in one page.
+
+This chapter brings everything from Phase 1.2 together — vectors, matrices, eigenvectors, SVD, positive-definite covariances — into one workflow: how to compress data while preserving what matters.
+
+</Motivation>
+
+<Intuition title="Find the directions of biggest variance, keep those, throw away the rest">
+
+Imagine a cloud of 2D points shaped like an elongated ellipse. Any 1D summary of the cloud is a projection onto some line — but which line? Obviously the long axis of the ellipse: projecting onto that axis preserves most of the *spread* of the data, while projecting onto the short axis crushes almost all the differences between points into a narrow window.
+
+**PCA generalizes that idea to n dimensions.** For a d-dimensional dataset, find the direction v₁ that captures the most variance when the data is projected onto it. Then find v₂, perpendicular to v₁, that captures the most of the remaining variance. And v₃ perpendicular to both, and so on. These vectors v₁, v₂, … are the **principal components**, and it turns out they're exactly the *eigenvectors of the data's covariance matrix*, ordered by decreasing eigenvalue.
+
+Once you have them, "compress to k dimensions" is just "project onto the first k principal components." You keep the k directions of maximum variance and discard the d − k directions of noise or redundancy.
+
+**One picture, three views of the same thing:**
+
+- **Statistical**: the direction that maximizes variance of the projected data.
+- **Geometric**: the long axis of the ellipsoid that best fits the data.
+- **Linear algebra**: the top eigenvector of the covariance matrix (or the top-right singular vector of the centered data matrix).
+
+The magic is that all three views give the same answer, and the algorithm to find them is just one eigen-decomposition or one SVD.
+
+</Intuition>
+
+<Recall term="Covariance matrix">
+
+For centered data X (n samples, d features, mean subtracted), the sample covariance matrix is `Σ = (1/(n-1)) · Xᵀ X`. It's a d×d symmetric PSD matrix; Σ(i, j) is the covariance between feature i and feature j. Diagonal entries are variances of individual features.
+
+</Recall>
+
+## Route 1 — PCA as an eigen-problem on the covariance
+
+Given a data matrix X of shape (n, d):
+
+1. **Center**: subtract the column mean from each column, getting X_c. This is not optional — PCA is a statement about variance, and variance is defined relative to the mean.
+2. **Form the covariance**: C = (1 / (n − 1)) · X_cᵀ X_c. This is a d×d symmetric PSD matrix.
+3. **Eigen-decompose** C: `eigenvalues, eigenvectors = np.linalg.eigh(C)`. Sort in descending order of eigenvalue.
+
+The top-k eigenvectors are the top-k principal components; the corresponding eigenvalues are the variances of the data projected onto each component. To reduce X to k dimensions:
+
+$$
+X_{\text{reduced}} \;=\; X_c \cdot V_k
+$$
+
+where V_k is the d×k matrix whose columns are the top-k eigenvectors.
+
+<RunnableCode title="PCA via covariance eigendecomposition on a 2D elongated cloud" code={covarianceEigenCode} packages={["numpy"]} />
+
+Notice how the first principal component aligns with the data's long axis (~45°) and captures ~4× the variance of the second component. The 2×2 covariance matrix encodes both the *spread* and the *orientation* of the cloud in one object — and eigendecomposition unpacks it.
+
+## Route 2 — PCA via SVD of the centered data matrix
+
+The eigendecomposition route works but has a numerical cost: forming the covariance matrix Xᵀ X squares the condition number, so tiny numerical errors in X become larger errors in C. The **SVD route** avoids this entirely.
+
+If the SVD of the centered data matrix is:
+
+$$
+X_c \;=\; U\, \Sigma\, V^{\top}
+$$
+
+then:
+
+- **The rows of Vᵀ (equivalently, columns of V) are the principal components.**
+- **The variance along the k-th principal component is σ²_k / (n − 1)**, where σ_k is the k-th singular value.
+- **Projecting X onto the top-k principal components** gives `X_reduced = U_k · Σ_k` (a shortcut — you can skip the explicit V multiplication).
+
+The relationship to Route 1: eigenvectors of `C = Xᵀ X / (n − 1)` are exactly the right singular vectors of X_c, and eigenvalues of C are exactly the squared singular values divided by (n − 1). Same answer, better numerics.
+
+<RunnableCode title="Same PCA via SVD of centered X — same answer, better conditioning" code={pcaSVDCode} packages={["numpy"]} />
+
+**Rule of thumb**: for n or d small (say, up to 1000), either route is fine. For large n or d, always use SVD (via `np.linalg.svd` or, for very large data, truncated SVD with `sklearn.decomposition.TruncatedSVD` or `scipy.sparse.linalg.svds`). Never form the explicit covariance when d is large.
+
+## The full PCA workflow
+
+Combining everything into one pipeline that dimension-reduces a d-dimensional dataset to k dimensions:
+
+1. **Center**: subtract column mean. (Optionally *standardize* by dividing by column std if features are on wildly different scales — but only if that makes sense for your problem.)
+2. **Choose k** (see next section for the scree-plot approach).
+3. **SVD**: `U, S, Vt = np.linalg.svd(X_centered, full_matrices=False)`. The top-k rows of `Vt` (equivalently, top-k columns of `V`) are the principal components.
+4. **Project**: `X_reduced = X_centered @ Vt[:k].T`, shape (n, k).
+5. **(Optional) reconstruct back**: `X_approx = X_reduced @ Vt[:k]`, shape (n, d). This is the best rank-k approximation to X_centered in Frobenius norm (Eckart–Young).
+6. **Uncenter** for reconstruction: add back the mean.
+
+<RunnableCode title="Reduce 8-D to 2-D and measure explained variance + reconstruction error" code={pcaReduceCode} packages={["numpy"]} />
+
+## Choosing k — the scree plot
+
+How many principal components should you keep? Two standard tools:
+
+- **Cumulative explained variance**: plot `cumsum(σ²_i) / sum(σ²_j)` vs number of components. Choose the smallest k that captures, say, 90% or 95% of the total variance. This is the "keep enough to preserve the signal" heuristic.
+- **Scree plot**: bar plot of variance-per-component. Look for an **"elbow"** — a point after which additional components contribute very little. The elbow is often where the "signal" ends and the "noise floor" begins.
+
+<RunnableCode title="Scree plot + cumulative variance curve for a synthetic dataset" code={screePlotCode} packages={["numpy", "matplotlib"]} />
+
+For images and text embeddings you often see a very clean elbow at 20–100 components; the tail is noise. For "wide" data (d large, n small), the meaningful number is at most n − 1 (a rank-nullity argument on X_centered — it can never have more than min(n − 1, d) nonzero singular values).
+
+## What PCA is not, and its two biggest limitations
+
+PCA is a **linear**, **variance-based**, **global** compressor. This gives it three limitations you should know:
+
+- **Linear**: PCA can only capture axis-aligned linear structure (rotate, scale, project). It won't find curved manifolds (a swiss roll unrolled), interaction effects between features, or anything nonlinear. For nonlinear structure you need t-SNE, UMAP, or a nonlinear autoencoder.
+- **Variance-based**: PCA gives priority to *high-variance* directions, which may or may not be the *discriminative* directions for a downstream task. A tiny-variance direction can be the most predictive of the label (imagine class means very close together and class variance small — PCA discards this signal). If you care about labels, use Linear Discriminant Analysis (LDA), or simply supervise your dim-reduction.
+- **Global**: PCA gives one linear projection valid everywhere in the data. It cannot represent local structure — clusters that live in different subspaces of the same ambient space get mashed together.
+
+For most preprocessing purposes (compress embeddings, initialize algorithms, denoise, visualize) PCA is the right first tool. When you need more, you know why to reach elsewhere.
+
+<RealWorldML title="Embedding-model dimension reduction — cutting the 1,536-D OpenAI embedding to 128-D while keeping 99% of quality">
+
+Modern text-embedding models (OpenAI's `text-embedding-3-large`, Cohere's models, sentence-transformers) return vectors of dimension 1,024 to 3,072. For a database of a million documents, storing at full dimension is ~6 GB per million; at 128-D it's ~500 MB. Query time (nearest-neighbor search) scales roughly linearly in dimension, so reducing to 1/12 the dimension makes queries 12× faster.
+
+The empirical finding, reported in the OpenAI embeddings model card and confirmed by many teams: PCA-reducing these embeddings to 256 or 128 dimensions preserves *almost all* the retrieval quality. Loss of nDCG or accuracy is often less than 1% — while the storage and query cost drop by 10× or more.
+
+<RunnableCode title="Compress a 128-D 'embedding matrix' via PCA; measure compression + reconstruction error" code={embeddingCompressCode} packages={["numpy"]} />
+
+Read the output:
+
+- The synthetic embeddings were built to have intrinsic rank 16 (with noise). SVD discovers this: only ~16–20 components are needed to capture 95% of the variance.
+- The compression ratio is roughly `d / (k*(n + 1 + d) / (n * d))` — for realistic (n, d) it's dominated by the ratio d/k. A 1,536-D embedding compressed to 128-D is 12× smaller.
+- The reconstruction error stays tiny (a few percent) because the low-rank hypothesis holds — the embeddings *really are* nearly in a 16-D subspace, and everything past that is noise or negligible variation.
+
+In production, the workflow is: (1) compute embeddings for a representative sample of your corpus with the full model, (2) fit PCA (or truncated SVD) once to learn the projection matrix, (3) apply the projection to every new embedding at ingestion or query time — one matrix multiply. The projection matrix is small (d × k) and cheap; you save the projection along with your embedding index. Cosine similarity in the reduced space closely tracks cosine similarity in the original space, so downstream retrieval is unchanged (up to the ~1% quality loss).
+
+The connection to LoRA is direct: both are low-rank approximations, both exploit the fact that ML-relevant matrices are almost never full-rank in practice, and both trade a small amount of quality for a huge amount of efficiency. Once you see "the signal is intrinsically low-rank," rank-based tricks become the first thing to try in every compute-constrained ML system.
+
+</RealWorldML>
+
+<StudyDepth
+  intro={<>PCA is the payoff chapter of Phase 1.2: everything you learned about eigenvectors, SVD, and PSD matrices comes together in one algorithm. Master the two routes (covariance eigen vs SVD) and the workflow (center → SVD → project → choose k via scree), and you have the most useful linear dim-reduction technique in ML.</>}
+  drill={[
+    <>PCA's principal components = top eigenvectors of the covariance matrix = top right singular vectors of the centered data matrix</>,
+    <>Variance along k-th component = k-th eigenvalue of covariance = (σ_k)² / (n − 1), where σ_k is the SVD singular value</>,
+    <>Always CENTER before PCA (subtract column mean); optionally standardize if feature scales differ wildly</>,
+    <>Use SVD route (`np.linalg.svd(X_centered)`) not covariance eigen — better numerics, especially for large d</>,
+    <>Choose k with the scree plot (elbow) OR cumulative-variance threshold (e.g., 90%–95%)</>,
+    <>PCA gives the BEST rank-k linear approximation in Frobenius norm (Eckart–Young theorem — same one that justifies truncated SVD compression)</>,
+    <>Compression ratio d / k for the projection; reconstruction error decays with the tail of singular values</>,
+  ]}
+  skim={[
+    <>PCA via power iteration or Lanczos — useful when d is so large that even SVD is too expensive; sklearn.decomposition.TruncatedSVD handles this</>,
+    <>Whitening (dividing by singular value) — a post-processing that decorrelates and normalizes components</>,
+    <>Probabilistic PCA (a latent Gaussian model that recovers classical PCA in a limit) — theoretical interest, rarely used directly in modern ML</>,
+    <>Kernel PCA — nonlinear extension via the kernel trick; superseded by autoencoders and UMAP in most workflows</>,
+  ]}
+/>
+
+<CodeItYourself title="Three drills to internalize PCA end-to-end">
+
+1. **PCA on the iris dataset.** Load iris from sklearn: `from sklearn.datasets import load_iris; X, y = load_iris(return_X_y=True)` (150 samples, 4 features). Center, SVD, and reduce to 2 components. Scatter-plot the 2D projection with points colored by class y. You should see three well-separated clusters — this is the classic "PCA finds structure without seeing labels" demo. Report the explained-variance ratios; the first two components should capture &gt; 95% of the variance.
+
+2. **Reconstruct an image from top-k principal components.** Take an 8×8 grayscale image from sklearn: `from sklearn.datasets import load_digits; digits = load_digits(); X = digits.data` (1797 samples, 64 features — flattened 8×8 digit images). Fit PCA on all data. For k in [1, 4, 16, 32, 64], reconstruct one sample (say `X[0]`) and reshape back to 8×8 for display. Watch the digit sharpen from a blur (k = 1) to the original (k = 64).
+
+3. **Whitening — the after-PCA rescaling.** After projecting X to k dimensions via PCA, divide each column of the reduced data by its standard deviation. This gives you *whitened* data: mean 0, identity covariance, uncorrelated features. Verify by computing `np.cov(whitened.T)` and confirming it's approximately the identity. Whitening is a common preprocessing step for downstream algorithms that assume decorrelated, scaled features.
+
+</CodeItYourself>
+
+<Summary>
+
+- **PCA finds the directions of maximum variance** in a dataset. These directions — the *principal components* — are exactly the top eigenvectors of the data's covariance matrix, ordered by eigenvalue.
+- **Two equivalent routes** to compute them: (a) eigendecomposition of `Xᵀ X / (n − 1)`, (b) SVD of the centered data matrix `X_c = U Σ Vᵀ` — the right singular vectors (rows of Vᵀ) are the principal components, and singular values give the variances via σ² / (n − 1).
+- **Always center** before PCA (subtract column mean). Optionally *standardize* if features have wildly different scales. Never forget these preprocessing steps — they change the answer.
+- **Prefer SVD** in code — `np.linalg.svd(X_centered)`. It's numerically more stable than forming the covariance and taking eigenvalues (which squares the condition number).
+- **Choose k** with a *scree plot* (look for the elbow) or a *cumulative variance* threshold (e.g., keep 90% or 95%).
+- **PCA gives the best rank-k linear approximation** to the data in Frobenius norm (Eckart–Young). This is the algebraic reason PCA-based compression works.
+- **Limitations**: linear (can't capture curved manifolds), variance-based (ignores label information), global (one projection for all data). For those cases: t-SNE, UMAP, autoencoders, LDA.
+- **In modern ML**: PCA is the go-to for compressing embeddings (10× storage savings at &lt;1% quality loss), initializing algorithms, denoising, and visualizing high-dim data. Same low-rank story as LoRA and truncated SVD.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>You have a 2D dataset with covariance matrix C = [[4, 0], [0, 1]]. What are the principal components and how much variance does each capture?</>,
+      hint: <>The matrix is diagonal, so its eigenvectors are the standard basis and eigenvalues are the diagonal entries.</>,
+      answer: <>Since C is already diagonal, the eigenvectors are just <b>e₁ = (1, 0)</b> and <b>e₂ = (0, 1)</b>. Eigenvalues are 4 and 1. Ordered by decreasing eigenvalue: PC1 = (1, 0) capturing variance 4, PC2 = (0, 1) capturing variance 1. <br /> Cumulative explained variance: PC1 alone captures 4/(4+1) = <b>80%</b> of total variance. This means projecting onto PC1 (i.e., keeping only the x-coordinate) preserves 80% of the data's spread — a rank-1 approximation loses just 20%.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>Why must you center the data before running PCA?</>,
+      hint: <>PCA is about variance. What does variance measure?</>,
+      answer: <>Variance is defined as the mean squared deviation from the mean. If you don't center, the "principal component" that PCA finds is dominated by the offset from the origin, not the direction of maximum spread. <br /> Concretely: for uncentered data, the first "principal component" of PCA (defined as the top eigenvector of `XᵀX / (n−1)`) points roughly toward the mean of the data. This is generally not the direction that captures the most variance — it's the direction of the largest offset. Centering removes this artifact and makes PCA a statement about variance rather than about magnitude.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Show that the k-th eigenvalue of `C = XᵀX/(n-1)` equals `σ_k² / (n-1)` where σ_k is the k-th singular value of the centered X.</>,
+      hint: <>Write out the SVD of X_c and substitute into `Xᵀ X`.</>,
+      answer: <>Let X_c = U Σ Vᵀ be the SVD of the centered data matrix (Σ diagonal with singular values σ_i). Then: <br /> Xᵀ_c X_c = (U Σ Vᵀ)ᵀ (U Σ Vᵀ) = V Σᵀ Uᵀ U Σ Vᵀ = V Σ² Vᵀ  (since Uᵀ U = I). <br /><br /> So C = (1/(n−1)) Xᵀ_c X_c = V · (Σ²/(n−1)) · Vᵀ. <br /><br /> This is exactly an eigendecomposition of C with orthogonal eigenvector matrix V and diagonal eigenvalue matrix Σ²/(n−1). Reading off: the k-th eigenvalue of C = <b>σ_k² / (n − 1)</b>, and the k-th eigenvector of C is the k-th column of V (equivalently, the k-th row of Vᵀ). ∎ <br /><br /> This is the algebraic bridge between the two PCA routes: eigen of covariance and SVD of centered data give the exact same principal components, they just arrive there through different arithmetic.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>You have a dataset of shape (n=50, d=200). What is the maximum rank of the centered data matrix, and therefore the maximum number of principal components with non-zero variance?</>,
+      hint: <>Consider the effect of centering.</>,
+      answer: <>Without centering, rank(X) ≤ min(n, d) = 50. <br /> Centering subtracts the mean, which removes one degree of freedom (the rows of X_c sum to zero in each column), so rank(X_c) ≤ <b>min(n − 1, d) = 49</b>. <br /><br /> Consequence: PCA can extract at most 49 principal components with nonzero variance from this dataset. Components 50 through 200 will have singular value zero — they're not "in" the data. This is the algebraic reason why "wide" datasets (d ≫ n) can't be described by more than n − 1 latent factors, and why techniques like PCA regression, ridge regression, and dropout regularization exist to handle this case gracefully. <br /><br /> This is also why "reduce to k principal components" only makes sense for k ≤ min(n − 1, d) — asking for more doesn't produce anything; you'd just get zero-variance components corresponding to random directions in the orthogonal complement.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>PCA gives the best rank-k approximation to X in Frobenius norm. Sketch why this is the Eckart–Young theorem applied to X.</>,
+      hint: <>Best rank-k approximation to X is X_k = U_k Σ_k V_kᵀ (truncated SVD). Now think about what "projecting onto top-k PCs and reconstructing" is doing to X.</>,
+      answer: <><b>Eckart–Young theorem</b>: for any matrix M with SVD M = U Σ Vᵀ, the closest rank-k matrix to M in Frobenius (or spectral) norm is M_k = U_k Σ_k V_kᵀ (truncate SVD to top k singular values/vectors), with error ‖M − M_k‖_F² = Σᵢ&gt;ₖ σ²ᵢ. <br /><br /> Now apply this to X_c (the centered data). The PCA reconstruction using top-k components is: <br /> X_approx = (X_c · V_k) · V_kᵀ = X_c · V_k V_kᵀ. <br /> Substituting the SVD: X_c V_k V_kᵀ = (U Σ Vᵀ) V_k V_kᵀ = U Σ (Vᵀ V_k) V_kᵀ = U Σ [I_k; 0] V_kᵀ = U_k Σ_k V_kᵀ = X_ck. <br /><br /> So PCA's rank-k reconstruction is *exactly* the Eckart–Young optimal rank-k approximation. No other rank-k matrix comes closer to X_c in Frobenius norm. The reconstruction error is: <br /> ‖X_c − X_approx‖_F² = Σᵢ&gt;ₖ σᵢ² = (n − 1) · Σᵢ&gt;ₖ λᵢ  (where λᵢ are covariance eigenvalues) <br /> = (n − 1) · (unexplained variance). <br /><br /> That's exactly why "PCA preserves the most variance" and "PCA gives the best low-rank approximation" are the same statement in two different languages.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>You have a dataset where all features live on very different scales (e.g., one feature is age in years [0–100], another is income in dollars [10,000–1,000,000], another is a probability [0–1]). Naive PCA gives principal components dominated by the largest-scale feature. What's the fix and why does it work?</>,
+      hint: <>What if you standardize each feature to unit variance before PCA?</>,
+      answer: <><b>Fix — standardize (z-score) each feature</b>: after centering, also divide each column by its standard deviation. Formally: `Z = (X − mean) / std`. Then run PCA on Z. <br /><br /> <b>Why it works</b>: PCA maximizes variance in the projected data, and variance is measured in the *feature's own units*. An "income" feature with values in the tens of thousands has a variance of hundreds of millions; an "age" feature with values in the tens has a variance of hundreds. Their contribution to the covariance is wildly unequal — income will dominate the first principal component just because of its scale, not because it's more informative. <br /><br /> Standardizing puts every feature on the same scale (variance = 1) before PCA. Now covariance becomes *correlation*: `cov(z_i, z_j) = corr(x_i, x_j)`. PCA on standardized data is PCA on the correlation matrix. Features contribute to principal components based on their *correlation structure*, not their raw magnitudes. <br /><br /> <b>When NOT to standardize</b>: if the features are already on the same physical scale (e.g., pixel intensities in an image, or all-in-cm measurements), standardizing throws away meaningful magnitude information. Standardize when scales are arbitrary; skip when scales carry information. This is one of the classic "the right default depends on your problem" ML choices — most sklearn tutorials use StandardScaler + PCA together, but for pixel data or embeddings that already have a natural scale, plain PCA is better.</>
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "The principal components of a dataset are:",
+      choices: [
+        { text: "The first k features of the raw data" },
+        { text: "The top eigenvectors of the sample covariance matrix, ordered by decreasing eigenvalue", correct: true },
+        { text: "Randomly chosen orthogonal directions" },
+        { text: "The columns of the data matrix" },
+      ],
+      explanation: <>Principal components = top eigenvectors of the (sample) covariance matrix. Equivalently, they're the top right singular vectors of the centered data matrix. Ordering matters — the first PC captures the most variance, the second captures the next most (subject to being orthogonal to the first), and so on.</>
+    },
+    {
+      q: "Before running PCA on data X, you should:",
+      choices: [
+        { text: "Nothing — PCA works on any matrix" },
+        { text: "Subtract the column mean (center); optionally divide by column std (standardize) if features have very different scales", correct: true },
+        { text: "Take the absolute value" },
+        { text: "Convert to integers" },
+      ],
+      explanation: <>Centering is required — PCA measures variance, and variance is relative to the mean. Standardization is optional but usually needed when features are on wildly different scales (e.g., mixed units), because the raw magnitude will dominate the covariance and skew the components toward the largest-scale features.</>
+    },
+    {
+      q: "Which is the numerically preferred way to compute PCA in code?",
+      choices: [
+        { text: "Form the covariance matrix and take eigenvalues" },
+        { text: "Take the SVD of the centered data matrix (`np.linalg.svd(X_centered)`)", correct: true },
+        { text: "Invert the covariance matrix" },
+        { text: "Compute determinants" },
+      ],
+      explanation: <>SVD is preferred because forming the covariance squares the condition number — small errors in X grow into larger errors in `XᵀX`, especially when d is large. SVD works directly on X_centered and is numerically stable. For very large d, use truncated SVD (`sklearn.decomposition.TruncatedSVD` or `scipy.sparse.linalg.svds`) to avoid computing all singular values.</>
+    },
+    {
+      q: "PCA's rank-k reconstruction of the centered data matrix is:",
+      choices: [
+        { text: "Random" },
+        { text: "The best rank-k approximation in Frobenius norm (Eckart–Young theorem)", correct: true },
+        { text: "Equivalent to k-means clustering" },
+        { text: "Always exactly equal to the original data" },
+      ],
+      explanation: <>Eckart–Young: for any matrix, the truncated SVD (keep top-k singular values/vectors) is the closest rank-k approximation in both Frobenius and spectral norm. PCA's rank-k reconstruction is exactly this truncated SVD applied to the centered data matrix. This is why "PCA preserves the most variance" and "PCA gives the best low-rank approximation" are the same statement.</>
+    },
+    {
+      q: "You've reduced a 512-D embedding to 128-D via PCA. When would you also want to *whiten* the reduced data?",
+      choices: [
+        { text: "Never — whitening throws away information" },
+        { text: "When downstream algorithms assume features are uncorrelated and unit-variance (e.g., some clustering algorithms, some optimization methods)", correct: true },
+        { text: "Always, unconditionally" },
+        { text: "Only for classification tasks" },
+      ],
+      explanation: <>Whitening = dividing each principal component by its standard deviation (equivalently, by the singular value / sqrt(n-1)). This gives you a dataset with identity covariance — features are uncorrelated and unit-variance. Useful when downstream methods assume this structure (e.g., ICA, some clustering methods, gradient descent with poor conditioning). Not always desirable — you lose the natural variance ordering, so small-variance components (often noise) get amplified.</>
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/matrices-transformations/pca-from-linear-algebra" title="PCA — from linear algebra alone" />

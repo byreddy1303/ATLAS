@@ -145,6 +145,13 @@ def train_epoch(model, batches):
   { href: "/learn/foundations/python-craft/errors-testing-logging", label: "Errors, testing & logging", blurb: "Exceptions cross thread and coroutine boundaries in specific ways — matters here." },
 ]} />
 
+<NewConcepts
+  concepts={[
+    { name: "LLM API calls (RAG pipeline)", blurb: "modern RAG systems fan out many LLM / embedding / retrieval requests concurrently — the flagship asyncio use-case for a GenAI engineer. Deep-dive in Tier 4." },
+    { name: "PyTorch DataLoader workers", blurb: "the multi-process pattern PyTorch uses to load training data in parallel. A canonical example of Python multiprocessing." },
+  ]}
+/>
+
 <Motivation title="Why one loop is sometimes not enough">
 
 Three flavors of "do many things at once" show up over and over: **fetch 100 URLs from a slow API** (almost all the time is spent waiting, so waiting in parallel is nearly free), **crunch numbers on a 16-core CPU** (real computation — you need real parallelism or 15 cores sit idle), and **serve many concurrent clients** (each request should progress while others wait).

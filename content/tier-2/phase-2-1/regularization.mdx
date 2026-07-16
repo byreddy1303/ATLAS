@@ -1,0 +1,532 @@
+---
+title: Regularization (L1, L2, elastic net)
+tier: 2
+phase: "2.1"
+---
+
+export const overfitDemoCode = `# Overfitting demo: fit high-degree polynomial regression WITHOUT and WITH ridge.
+# See how L2 tames the wild oscillations.
+import numpy as np, matplotlib.pyplot as plt
+
+np.random.seed(0)
+N_train = 15
+x_train = np.linspace(-3, 3, N_train)
+y_train = np.sin(x_train) + 0.15 * np.random.randn(N_train)
+x_test  = np.linspace(-3, 3, 200)
+y_test  = np.sin(x_test)                                 # noiseless truth
+
+# Polynomial feature matrix
+def poly_features(x, degree):
+    return np.stack([x**k for k in range(degree + 1)], axis=1)
+
+degree = 12
+X_train = poly_features(x_train, degree)
+X_test  = poly_features(x_test,  degree)
+
+def fit(X, y, lam):
+    "Ridge regression: (X.T X + lam I) w = X.T y."
+    D = X.shape[1]
+    return np.linalg.solve(X.T @ X + lam * np.eye(D), X.T @ y)
+
+lambdas = [0.0, 0.01, 1.0, 100.0]
+fig, axes = plt.subplots(1, 4, figsize=(15, 3.6))
+for ax, lam in zip(axes, lambdas):
+    w = fit(X_train, y_train, lam)
+    y_pred = X_test @ w
+    ax.plot(x_test, y_test, "-", color="teal", lw=2, label="true sin(x)")
+    ax.plot(x_test, y_pred, "-", color="crimson", lw=2, label=f"ridge (lam = {lam})")
+    ax.plot(x_train, y_train, "o", color="royalblue", markersize=6, label="noisy train points")
+    ax.set_ylim(-2, 2); ax.set_title(f"lam = {lam}")
+    ax.legend(fontsize=8); ax.grid(alpha=0.3)
+plt.tight_layout()
+
+# Report weight norms
+print("Weight norms (L2) — bigger = model fits noise via wild coefficients")
+for lam in lambdas:
+    w = fit(X_train, y_train, lam)
+    print(f"  lam = {lam:>6.2f}: ||w||_2 = {np.linalg.norm(w):.2f}   max|w_i| = {np.abs(w).max():.2f}")`;
+
+export const l1VsL2Code = `# L1 vs L2: same optimization framework, wildly different behavior.
+# L2 shrinks all weights toward zero; L1 sets many weights exactly to zero.
+import numpy as np, matplotlib.pyplot as plt
+
+np.random.seed(0)
+
+# Synthetic problem with a mix of important and irrelevant features
+N, D = 100, 20
+X = np.random.randn(N, D)
+w_true = np.zeros(D)
+w_true[:5] = np.array([2.0, -1.5, 3.0, 0.5, -2.0])       # only first 5 features matter
+y = X @ w_true + 0.3 * np.random.randn(N)
+
+def ridge(X, y, lam):
+    D = X.shape[1]
+    return np.linalg.solve(X.T @ X + lam * np.eye(D), X.T @ y)
+
+def soft_threshold(w, thresh):
+    "Soft-threshold operator: pull each entry toward 0 by 'thresh', clip at 0."
+    return np.sign(w) * np.maximum(np.abs(w) - thresh, 0)
+
+def lasso_cd(X, y, lam, steps=500):
+    "Lasso via coordinate descent — the standard L1 solver."
+    N, D = X.shape
+    w = np.zeros(D)
+    xj_sq = np.sum(X ** 2, axis=0)
+    for _ in range(steps):
+        for j in range(D):
+            residual = y - X @ w + X[:, j] * w[j]
+            rho = X[:, j] @ residual
+            w[j] = soft_threshold(rho / xj_sq[j], lam * N / xj_sq[j])
+    return w
+
+# Fit both at similar effective regularization
+w_ridge = ridge(X, y, lam=5.0)
+w_lasso = lasso_cd(X, y, lam=0.1)
+
+print("True weights (only first 5 nonzero):")
+print(w_true.round(2))
+print()
+print("Ridge fit — shrinks ALL weights toward 0 but leaves them nonzero:")
+print(w_ridge.round(2))
+print(f"  nonzero-count in ridge: {(np.abs(w_ridge) > 0.01).sum()} / {D}")
+print()
+print("Lasso fit — sets many weights EXACTLY to zero:")
+print(w_lasso.round(2))
+print(f"  nonzero-count in lasso: {(np.abs(w_lasso) > 0.01).sum()} / {D}")
+
+# Visualize the difference
+fig, axes = plt.subplots(1, 2, figsize=(11, 3.5))
+axes[0].bar(range(D), w_ridge, color="teal");   axes[0].set_title(f"Ridge (L2): {(np.abs(w_ridge) > 0.01).sum()} nonzero")
+axes[0].axhline(0, color="k", lw=0.5); axes[0].grid(alpha=0.3)
+axes[1].bar(range(D), w_lasso, color="crimson"); axes[1].set_title(f"Lasso (L1): {(np.abs(w_lasso) > 0.01).sum()} nonzero")
+axes[1].axhline(0, color="k", lw=0.5); axes[1].grid(alpha=0.3)
+for ax in axes: ax.set_xlabel("feature index"); ax.set_ylabel("coefficient")
+plt.tight_layout()`;
+
+export const regPathCode = `# Regularization path: how coefficients evolve as lambda changes.
+# Watch L1 progressively zero out features -- that's implicit feature selection.
+import numpy as np, matplotlib.pyplot as plt
+
+np.random.seed(0)
+N, D = 100, 8
+X = np.random.randn(N, D)
+w_true = np.array([3.0, -2.0, 1.0, 0.5, 0.0, 0.0, 0.0, 0.0])   # last 4 are irrelevant
+y = X @ w_true + 0.4 * np.random.randn(N)
+
+def ridge(X, y, lam):
+    return np.linalg.solve(X.T @ X + lam * np.eye(X.shape[1]), X.T @ y)
+
+def soft_threshold(w, thresh):
+    return np.sign(w) * np.maximum(np.abs(w) - thresh, 0)
+
+def lasso_cd(X, y, lam, steps=500):
+    N, D = X.shape
+    w = np.zeros(D)
+    xj_sq = np.sum(X ** 2, axis=0)
+    for _ in range(steps):
+        for j in range(D):
+            r = y - X @ w + X[:, j] * w[j]
+            w[j] = soft_threshold((X[:, j] @ r) / xj_sq[j], lam * N / xj_sq[j])
+    return w
+
+lams = np.logspace(-3, 2, 50)
+ridge_path = np.array([ridge(X, y, l) for l in lams])
+lasso_path = np.array([lasso_cd(X, y, l) for l in lams])
+
+fig, axes = plt.subplots(1, 2, figsize=(11, 4))
+for j in range(D):
+    color = "crimson" if w_true[j] != 0 else "teal"
+    style = "-" if w_true[j] != 0 else "--"
+    axes[0].plot(lams, ridge_path[:, j], style, color=color, lw=1.5, alpha=0.7, label=f"w_{j} (true={w_true[j]:.1f})")
+    axes[1].plot(lams, lasso_path[:, j], style, color=color, lw=1.5, alpha=0.7, label=f"w_{j} (true={w_true[j]:.1f})")
+
+axes[0].set_xscale("log"); axes[1].set_xscale("log")
+axes[0].set_title("Ridge (L2) path — all coefficients SHRINK toward 0"); axes[0].set_xlabel("lambda"); axes[0].set_ylabel("coefficient")
+axes[1].set_title("Lasso (L1) path — irrelevant coefficients hit EXACTLY 0"); axes[1].set_xlabel("lambda"); axes[1].set_ylabel("coefficient")
+axes[0].axhline(0, color="k", lw=0.5); axes[1].axhline(0, color="k", lw=0.5)
+axes[0].grid(alpha=0.3); axes[1].grid(alpha=0.3)
+plt.tight_layout()
+
+print("Solid lines = truly nonzero features (should stay large); dashed = irrelevant (should shrink to 0)")
+print("Notice: Lasso irrelevant coefficients hit EXACTLY 0 at moderate lambda.")
+print("Ridge just squishes everyone smaller as lambda grows.")`;
+
+export const cvLambdaCode = `# Choose lambda via K-fold cross-validation.
+# For each lambda, average validation error over K folds; pick the smallest.
+import numpy as np
+
+np.random.seed(0)
+N, D = 200, 30
+X = np.random.randn(N, D)
+w_true = np.zeros(D)
+w_true[:8] = np.random.randn(8) * 2
+y = X @ w_true + 0.5 * np.random.randn(N)
+
+def ridge(X, y, lam):
+    return np.linalg.solve(X.T @ X + lam * np.eye(X.shape[1]), X.T @ y)
+
+def kfold_ridge_cv(X, y, lam, K=5, seed=1):
+    rng = np.random.default_rng(seed)
+    N = len(y)
+    idx = rng.permutation(N)
+    fold_sizes = np.array_split(idx, K)
+    errors = []
+    for k in range(K):
+        val_idx = fold_sizes[k]
+        train_idx = np.concatenate([f for i, f in enumerate(fold_sizes) if i != k])
+        w = ridge(X[train_idx], y[train_idx], lam)
+        err = np.mean((X[val_idx] @ w - y[val_idx]) ** 2)
+        errors.append(err)
+    return np.mean(errors), np.std(errors)
+
+lams = np.logspace(-3, 3, 30)
+print(f"{'lambda':>8}  {'CV MSE':>10}  {'std':>10}")
+print("-" * 32)
+best_lam, best_mse = None, np.inf
+for lam in lams:
+    mse, sd = kfold_ridge_cv(X, y, lam)
+    if mse < best_mse:
+        best_lam, best_mse = lam, mse
+    if lam in [1e-3, 1e-2, 1e-1, 1.0, 10.0, 100.0, 1000.0]:
+        print(f"{lam:>8.3f}  {mse:>10.4f}  {sd:>10.4f}")
+print()
+print(f"Best lambda: {best_lam:.4f}   with CV MSE {best_mse:.4f}")
+print()
+print("This is exactly what sklearn's RidgeCV does under the hood.")
+print("Standard rule: pick the lambda that minimizes CV error, or")
+print("the 'one-standard-error' rule: pick the LARGEST lambda whose CV MSE")
+print("is within 1 SD of the minimum, for extra regularization.")`;
+
+<Prerequisites items={[
+  { href: "/learn/core-ml/supervised-basics/linear-regression", label: "Linear regression — closed form and gradient", blurb: "Regularization adds a penalty to the linear regression loss. Understanding the base LR (loss, normal equations, gradient) is essential." },
+  { href: "/learn/core-ml/supervised-basics/logistic-regression", label: "Logistic regression", blurb: "Same regularizers apply to logistic regression's log-loss — the mechanics generalize directly." },
+  { href: "/learn/mathematics/statistics/map-and-priors", label: "MAP estimation & regularization", blurb: "L2 = Gaussian prior; L1 = Laplace prior. The Bayesian derivation of the regularizers appears in that chapter." },
+]} />
+
+<NewConcepts
+  concepts={[
+    { name: "Ridge regression (L2)", blurb: "linear regression with an L2 penalty λ‖w‖². Closed-form solution: (XᵀX + λI)⁻¹ Xᵀy. Shrinks all weights toward zero." },
+    { name: "Lasso regression (L1)", blurb: "linear regression with an L1 penalty λ‖w‖₁. No closed form — solved by coordinate descent or proximal gradient. Produces SPARSE solutions (many weights exactly 0)." },
+    { name: "Elastic net", blurb: "linear combination of L1 and L2: α‖w‖₁ + (1-α)‖w‖². Combines sparsity of L1 with the group-shrinkage stability of L2. sklearn's default for high-dim regression." },
+    { name: "Coordinate descent", blurb: "update one coordinate at a time by minimizing over that coordinate holding others fixed. Standard solver for L1-regularized problems because each coordinate step is a soft-threshold." },
+    { name: "One-standard-error rule", blurb: "when picking hyperparameters via CV, choose the LARGEST regularization within 1 SD of the CV-optimal — protects against overfitting the validation set itself." },
+    { name: "Feature standardization", blurb: "subtract mean and divide by std for each feature before regularizing. Essential — without it, the penalty unfairly punishes features that happen to have larger units." },
+  ]}
+/>
+
+<Motivation title="Regularization is the difference between a model that memorizes and one that generalizes">
+
+Every supervised model has a fundamental tension: fit the training data (low training loss) vs. generalize to new data (low test loss). Without any constraint, a flexible model (high polynomial degree, deep network, large tree) can achieve near-zero training loss by memorizing every noisy detail — and then perform terribly on new examples. This is **overfitting**.
+
+**Regularization** is the toolkit for fighting overfitting: add a penalty on model complexity to the loss, so training rewards simple models unless the data really demands complexity. It's the single most widely-applicable technique in classical ML.
+
+For a GenAI engineer, regularization matters everywhere:
+
+1. **Every transformer training config includes `weight_decay=0.1` — that's L2 regularization.** Understanding what L2 does (Bayesian: puts a Gaussian prior on weights; geometric: shrinks weights toward zero) is essential for reading and modifying training configs.
+2. **LoRA is implicitly regularizing.** Constraining fine-tuning to a low-rank update is a form of complexity control — you literally forbid full-rank updates, which is regularization by architectural choice.
+3. **RLHF's KL penalty is regularization on the policy.** It penalizes moving too far from the reference policy — analogous to L2 on the KL divergence between current and reference distributions.
+4. **Sparse fine-tuning (BitFit, prompt tuning) uses L1-style sparsity.** These methods work because most of the parameters in an LLM don't need to change for most downstream tasks — sparsity constraints let the fine-tune focus on the few that do.
+5. **Model compression (pruning, quantization).** Trimming weights to zero (pruning) or quantizing to low precision are aggressive regularizations that maintain accuracy while shrinking model size.
+
+This chapter covers the three classical regularizers — L2 (ridge), L1 (lasso), elastic net — and how to pick the regularization strength via cross-validation.
+
+</Motivation>
+
+<Intuition title="Penalize weights for being big — L2 penalizes squared magnitude, L1 penalizes absolute magnitude">
+
+The vanilla loss for linear regression is `L(w) = ½ ‖Xw − y‖²`. Add a **regularization term** that grows with the size of w:
+
+$$
+L_{\text{reg}}(w) = \frac{1}{2} \|Xw - y\|^2 + \lambda \cdot \text{penalty}(w)
+$$
+
+where λ > 0 controls how much you care about weight-size versus fit-quality. Two common choices:
+
+- **L2 (ridge):** `penalty(w) = ‖w‖² = Σ w_i²`. Punishes big weights quadratically. Shrinks all weights uniformly toward zero (but never exactly to zero unless the data is perfectly noiseless).
+- **L1 (lasso):** `penalty(w) = ‖w‖₁ = Σ |w_i|`. Punishes big weights linearly. Has a **kink at zero** that produces **sparse** solutions — many weights get set exactly to zero. This gives implicit feature selection: features whose coefficient is zero are effectively ignored.
+
+**Geometric picture.** The regularized optimum lies inside a "ball" whose radius shrinks as λ grows. For L2, the ball is round (Euclidean ball); for L1, the ball is a diamond (with corners on the axes). The corners of the L1 diamond touch the coordinate axes — that's why L1 tends to push weights onto axes (i.e., to zero).
+
+**λ (lambda) is the regularization strength.** Small λ = weak regularization = model close to unregularized fit. Large λ = strong regularization = weights pushed to zero. λ is a hyperparameter chosen by cross-validation.
+
+</Intuition>
+
+<Recall term="MSE loss">
+
+Mean squared error `L(w) = (1/N) · Σ (ŷ_i − y_i)² = (1/N) · ‖Xw − y‖²`. This is the standard linear-regression loss, differentiable everywhere, corresponding to MLE under Gaussian noise. All regularizers in this chapter modify MSE by ADDING a penalty term — the base loss stays the same.
+
+</Recall>
+
+## L2 (ridge regression)
+
+**Penalized loss:**
+
+$$
+L_{\text{ridge}}(w) = \frac{1}{2} \|Xw - y\|^2 + \frac{\lambda}{2} \|w\|^2
+$$
+
+**Gradient:**
+
+$$
+\nabla L_{\text{ridge}}(w) = X^\top (Xw - y) + \lambda w
+$$
+
+**Closed-form solution:** set gradient to zero:
+
+$$
+(X^\top X + \lambda I) w = X^\top y \quad \Longrightarrow \quad w^*_{\text{ridge}} = (X^\top X + \lambda I)^{-1} X^\top y
+$$
+
+**Two consequences of adding `λI`:**
+
+1. **Numerical stability.** Even if `X^T X` is nearly singular (multicollinearity), `X^T X + λI` is well-conditioned because we've added λ to every eigenvalue. Ridge is the standard fix for multicollinearity.
+2. **Bias-variance trade-off.** Ridge introduces a small bias (the estimator no longer equals `w_true` in expectation) but dramatically reduces variance. For high-noise or high-dimensional problems, the bias-variance sum is smaller with ridge than OLS.
+
+**Bayesian interpretation.** Adding L2 is equivalent to putting a **Gaussian prior** on w: `w ~ N(0, σ²_w · I)`. Then MAP estimation gives the ridge solution with `λ = σ²_noise / σ²_w`. See [MAP estimation & regularization](/learn/mathematics/statistics/map-and-priors) for the full derivation.
+
+**Standardize features first.** Ridge penalizes `Σ w_i²`. If feature `x_1` is in dollars and `x_2` in cents, the coefficients are on wildly different scales — the ridge penalty unfairly punishes `x_2`'s huge coefficient. Fix: subtract mean and divide by std for each feature before fitting; the same penalty then applies fairly.
+
+<RunnableCode title="Overfitting demo — ridge regularization tames high-degree polynomial oscillation" code={overfitDemoCode} packages={["numpy", "matplotlib"]} captureFig={true} />
+
+## L1 (lasso regression)
+
+**Penalized loss:**
+
+$$
+L_{\text{lasso}}(w) = \frac{1}{2} \|Xw - y\|^2 + \lambda \|w\|_1
+$$
+
+where `‖w‖₁ = Σ|w_i|`. The absolute value has a **kink at zero** where the gradient is not defined — the "subgradient" is [−1, 1]. This kink produces sparsity: the optimizer prefers weights that sit at zero rather than at some tiny positive value, because zero has zero contribution to the penalty and any tiny perturbation increases the penalty by |perturbation|.
+
+**No closed form.** Lasso is solved by **coordinate descent**: iterate over coordinates, and for each one, minimize the loss with respect to that coordinate while holding others fixed. The per-coordinate update turns out to be a **soft-threshold**:
+
+$$
+w_j \leftarrow \text{sgn}(\rho_j) \cdot \max(|\rho_j| - \lambda, 0), \quad \rho_j = \text{residual correlation with feature } j
+$$
+
+If `|ρ_j| < λ`, then `w_j` is set to exactly zero — that's where sparsity comes from. Larger λ = stricter threshold = more zeros.
+
+**Bayesian interpretation.** L1 corresponds to a **Laplace prior** on w: `w_i ~ Laplace(0, b)` with `λ = 1/b`. The Laplace distribution has a sharp peak at zero and heavy tails, unlike Gaussian's soft peak. This is why L1 pushes small weights to exactly zero.
+
+**When to use:**
+
+- **High-dimensional problems where you believe only a few features matter.** L1 automatically selects them.
+- **Interpretability.** A model with 5 nonzero weights is much easier to explain than one with 500.
+- **Storage/inference cost.** Sparse models can be stored and computed on more efficiently.
+
+**When NOT to use:**
+
+- **Correlated features.** L1 tends to arbitrarily pick one of a group of correlated features and zero out the others — the picked one is unstable. Elastic net (below) handles this better.
+- **Every feature genuinely contributes a little.** L2 is a better fit — L1 will artificially zero out some features that actually help.
+
+<RunnableCode title="L1 vs L2 — same features, wildly different sparsity" code={l1VsL2Code} packages={["numpy", "matplotlib"]} captureFig={true} />
+
+## Elastic net — L1 + L2 combined
+
+**Penalized loss:**
+
+$$
+L_{\text{en}}(w) = \frac{1}{2} \|Xw - y\|^2 + \lambda \left[ \alpha \|w\|_1 + \frac{1 - \alpha}{2} \|w\|^2 \right]
+$$
+
+where `α ∈ [0, 1]` controls the L1-vs-L2 mix. `α = 1` is pure lasso; `α = 0` is pure ridge; `α = 0.5` is even mix.
+
+**Why elastic net exists:** pure L1 has two issues that L2 doesn't share:
+
+1. **Instability with correlated features.** L1 arbitrarily picks one of a correlated group and zeros the rest. Adding a small L2 term pulls correlated features together — the "group" of correlated features gets non-zero weights.
+2. **Only D nonzero weights possible when N < D.** In high-dim regression, pure L1 can select at most N features (equal to the number of examples). L2 has no such limit.
+
+Elastic net's L2 component fixes both. sklearn's `ElasticNet` uses this. Typical α values in production: 0.1 to 0.9 depending on how much sparsity you want.
+
+## The regularization path and choosing λ
+
+The **regularization path** shows how each coefficient evolves as λ ranges over `[0, ∞)`. Two extremes:
+
+- **λ = 0:** coefficients equal the unregularized (OLS or logistic regression) solution.
+- **λ → ∞:** coefficients all go to zero.
+
+For a well-chosen λ in the middle, coefficients are neither wildly overfit (λ = 0) nor uniformly squashed (λ = ∞).
+
+<RunnableCode title="Regularization paths — ridge vs lasso" code={regPathCode} packages={["numpy", "matplotlib"]} captureFig={true} />
+
+**Choosing λ by k-fold cross-validation.** Standard recipe:
+
+1. Split training data into K folds (typically K = 5 or 10).
+2. For each candidate λ: fit K models (each on K-1 folds), evaluate on the held-out fold.
+3. Average the K validation errors.
+4. Pick the λ that minimizes the average error.
+
+**One-standard-error rule (optional):** instead of picking the minimum-CV-error λ, pick the LARGEST λ whose CV error is within 1 standard deviation of the minimum. Rationale: the minimum is a noisy estimator, and picking slightly-more-regularization protects against overfitting the CV score.
+
+<RunnableCode title="K-fold CV to pick lambda — the standard recipe" code={cvLambdaCode} packages={["numpy"]} />
+
+**In sklearn**, use `RidgeCV`, `LassoCV`, `ElasticNetCV` for automatic λ selection. Under the hood: exactly the loop above.
+
+<RealWorldML title="Weight decay in transformer training — L2 in disguise">
+
+Every modern LLM training config includes a line like:
+
+```yaml
+weight_decay: 0.1
+```
+
+This IS L2 regularization. The `optimizer.step()` after computing gradients applies:
+
+$$
+w \leftarrow w - \eta \cdot \nabla L(w) - \eta \cdot \text{wd} \cdot w
+$$
+
+The second term `−η · wd · w` shrinks every parameter toward zero by a small amount each step. That's exactly the effect of an L2 penalty `½ · wd · ‖w‖²` in the loss (gradient of that penalty w.r.t. w is `wd · w`).
+
+**Why is wd = 0.1 a lot?** In classical ML, ridge `λ` is chosen by CV and typically small (say 0.001–1). In LLM training, "weight decay 0.1" seems large — but it's applied per step, and there are hundreds of thousands of steps. The cumulative shrinkage is enormous. Empirical tuning at scale finds this level of wd is optimal for transformer generalization.
+
+**AdamW vs Adam:** the "W" in AdamW is precisely the correct application of weight decay. Original Adam applied weight decay to the ADAPTIVE step (divided by √v), which meant heavily-updated parameters got extra shrinkage. AdamW decouples wd from the adaptive step, applying it after the Adam update. This is why AdamW is the standard for LLM training and plain Adam is deprecated for transformer work.
+
+**LoRA as regularization by architecture.** LoRA constrains fine-tuning to `W_frozen + B·A` where `B, A` are low-rank. The rank-r constraint IS a form of structural regularization: you literally forbid full-rank updates. This works because most of a pretrained LLM's parameters are already "close to good" for many downstream tasks — you just need small directional nudges, not full re-training.
+
+**Pruning as extreme L1.** Once you've trained a model, you can "prune" (set to exactly zero) the smallest-magnitude weights. Studies show 90%+ of transformer weights can be pruned with minimal accuracy loss — evidence that L1-flavored sparsity is inherent in over-parameterized nets. Structured pruning (removing entire rows/columns) is standard for inference-time model compression.
+
+**Quantization as very coarse regularization.** Reducing weights to 4-bit or 8-bit precision constrains their representable values. This is a discrete regularizer that trades exact precision for storage and compute efficiency. Standard for deployment of LLMs on-device.
+
+</RealWorldML>
+
+<StudyDepth
+  drill={[
+    "L2 (ridge): loss = ½‖Xw − y‖² + (λ/2)‖w‖². Closed form: (XᵀX + λI)⁻¹ Xᵀy.",
+    "L1 (lasso): loss = ½‖Xw − y‖² + λ‖w‖₁. No closed form; solved by coordinate descent.",
+    "L1 produces sparse solutions (many weights exactly 0); L2 shrinks all weights toward 0.",
+    "Elastic net = α · L1 + (1-α)/2 · L2. Handles correlated features better than pure L1.",
+    "Always standardize features before regularizing — otherwise penalty unfairly weighted.",
+    "Choose λ via k-fold cross-validation. Use one-SE rule for extra safety.",
+    "Weight decay in transformer training IS L2 regularization applied per step.",
+    "Bayesian view: L2 = Gaussian prior on weights; L1 = Laplace prior.",
+  ]}
+  skim={[
+    "Full soft-threshold derivation from L1 subgradient calculus.",
+    "Elastic net's coordinate descent update rule.",
+    "Adaptive lasso (data-dependent L1 penalty).",
+    "Group lasso (sparsity at the group level, not individual weight).",
+    "Regularization theory: bias-variance decomposition of MSE(λ).",
+  ]}
+/>
+
+<CodeItYourself title="Three drills — ridge in closed form, lasso by coordinate descent, elastic-net path">
+
+1. **Derive ridge's closed form by hand.** Starting from `L_ridge(w) = ½‖Xw − y‖² + (λ/2)‖w‖²`, take the gradient, set to zero, solve. Verify your derivation matches the code `np.linalg.solve(X.T @ X + lam * np.eye(D), X.T @ y)`.
+
+2. **Implement lasso coordinate descent from scratch.** Given the soft-threshold operator `soft(w, λ) = sign(w) · max(|w| − λ, 0)`, code up coordinate descent for lasso and verify it produces sparse solutions on a problem where you know the "true" sparse w.
+
+3. **Compare regularization paths.** For a fixed dataset, plot both the ridge path and the lasso path as λ varies over a log-scale range. Observe: ridge coefficients smoothly shrink; lasso coefficients hit exactly zero one by one.
+
+</CodeItYourself>
+
+<Summary>
+
+- **Regularization** = add a penalty on model complexity to the training loss. Prevents overfitting.
+- **L2 (ridge):** penalty is (λ/2)‖w‖². Shrinks all weights toward zero, closed-form solvable, Gaussian-prior interpretation.
+- **L1 (lasso):** penalty is λ‖w‖₁. Produces SPARSE solutions (implicit feature selection), no closed form, coordinate-descent solvable, Laplace-prior interpretation.
+- **Elastic net:** α · L1 + (1-α) · L2 combo. Handles correlated features better than pure L1.
+- **Choose λ by k-fold cross-validation.** Use one-standard-error rule for extra safety.
+- **Standardize features first!** Without standardization, the regularizer unfairly penalizes features with larger units.
+- **Every transformer's weight_decay parameter IS L2 regularization.** Understanding L2 in classical ML directly transfers to modern deep learning training.
+- **AdamW = Adam + correctly-applied weight decay.** The "W" is what makes weight decay work with adaptive optimizers.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>Two identical models are trained: one with λ = 0 (no regularization), one with λ = 100. The first has lower TRAINING loss but higher TEST loss. What's going on?</>,
+      hint: <>Think about the bias-variance trade-off.</>,
+      answer: <>Classic <b>overfitting</b>. The λ = 0 model fits the training data (including its noise) perfectly — low training loss — but this "noise fitting" hurts on new data (high test loss). The λ = 100 model is prevented from fitting the noise; it has slightly higher training loss but generalizes better. This is why we choose λ by CROSS-VALIDATION (which estimates test performance), not by training loss.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>The transformer training config says `weight_decay=0.1`. What is this in classical ML terms?</>,
+      hint: <>What penalty produces the update rule w ← w − η · ∇L − η · 0.1 · w?</>,
+      answer: <>It's <b>L2 (ridge) regularization</b> with λ = 0.1 applied per training step. Adding `(0.1/2) · ‖w‖²` to the loss produces the extra `0.1 · w` term in the gradient, which shrinks every weight by that amount each optimizer step. Empirically-tuned wd values for transformer training are around 0.01–0.1 — much higher than typical classical-ML λ values because they're applied hundreds of thousands of times over training.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Why does L1 regularization produce sparse solutions (many weights exactly zero) but L2 does not?</>,
+      hint: <>Consider the shape of the penalty function near w = 0.</>,
+      answer: <>The L1 penalty |w| has a <b>kink at zero</b> — its derivative is +1 for w &gt; 0 and −1 for w &lt; 0, undefined at 0. The L2 penalty w² is smooth at zero (derivative = 0 there). <br /><br /> During optimization, if the gradient from the data term is small (say |gradient| &lt; λ), then: <br /> - <b>L1:</b> the penalty gradient (±λ) dominates and would push w AWAY from zero. But since |w| has zero gradient AT zero (well, subgradient in [−λ, λ]), setting w = 0 exactly is a valid solution. This is where sparsity comes from. <br /> - <b>L2:</b> the penalty gradient (λ · w) is proportional to w. It shrinks w toward zero smoothly, but at exactly w = 0, the penalty gradient is 0. So there's no "kick" to zero — the data gradient dominates and w stays slightly nonzero. <br /><br /> Geometric picture: the L1 ball has corners on the axes; the L2 ball is round. The optimum of a loss constrained to lie inside the L1 ball tends to land on a corner (i.e., a coordinate axis, i.e., zero for some coordinates). The L2 ball's roundness means the optimum lands in the interior or on a smooth boundary, never at a "zero-forcing" corner.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>You standardize your features (subtract mean, divide by std) before fitting ridge regression. Why is this essential?</>,
+      hint: <>What does the ridge penalty do to a feature measured in a different unit?</>,
+      answer: <>The ridge penalty is (λ/2) · Σ w_i². Each coefficient is penalized by its own squared value. But if feature x_1 has magnitude ~1 (say, standardized) and x_2 has magnitude ~10^6 (say, in raw dollars), then the coefficient of x_2 needs to be about 10^6 times smaller for the two features to have comparable predictive power. <br /><br /> With the raw-scale features, ridge will unfairly punish the small-scale feature (its coefficient must be large to compensate for the tiny feature values, then gets crushed by the penalty). With standardized features, both coefficients are on the same scale, and the penalty applies fairly. <br /><br /> Standard practice: before any regularized regression, standardize each feature. Then interpret coefficients as "effect per standard deviation change in the feature" (they're unit-free and comparable). Without standardization, ridge often picks weird solutions that depend on the arbitrary units of your input features. sklearn's `RidgeCV(normalize=True)` (or a `StandardScaler` in a Pipeline) does this automatically.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Derive the closed form solution for ridge regression from scratch.</>,
+      hint: <>Take the gradient of L_ridge(w) = ½‖Xw − y‖² + (λ/2)‖w‖², set to zero, solve.</>,
+      answer: <>Loss: L(w) = ½(Xw − y)ᵀ(Xw − y) + (λ/2) wᵀw. <br /><br /> Expand: L(w) = ½(wᵀXᵀXw − 2yᵀXw + yᵀy) + (λ/2) wᵀw. <br /><br /> Take gradient w.r.t. w: <br /> ∇L(w) = XᵀXw − Xᵀy + λw = (XᵀX + λI)w − Xᵀy. <br /><br /> Set gradient to zero: <br /> (XᵀX + λI)w = Xᵀy <br /><br /> Solve: <br /> <b>w* = (XᵀX + λI)⁻¹ Xᵀy</b>. ∎ <br /><br /> Note two things: <br /> 1. Adding λI to XᵀX makes it invertible even when X has less than full column rank (multicollinearity). All eigenvalues get shifted up by λ. <br /> 2. As λ → ∞, w* → 0. As λ → 0, w* → OLS solution. <br /><br /> In code: `w = np.linalg.solve(X.T @ X + lam * np.eye(D), X.T @ y)`. Never compute inv() explicitly — solve is more stable.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Elastic net's L1 + L2 penalty behaves differently on CORRELATED features than pure L1. Explain what happens and why.</>,
+      hint: <>Consider two features x_a and x_b that are nearly identical. What does pure L1 do? What does elastic net do?</>,
+      answer: <>Say x_a and x_b are nearly identical (correlation ≈ 1) and both contribute equally to y. The unregularized w is not unique — any (w_a, w_b) with w_a + w_b constant gives the same predictions. <br /><br /> <b>Pure L1</b> picks a corner: it will set ONE of w_a or w_b to zero (say w_a = 0, w_b = full weight). Which one gets picked depends on tiny numerical details — the choice is UNSTABLE. Add a small perturbation to the data and L1 might flip its choice. <br /><br /> <b>Pure L2</b> picks the middle: it sets w_a = w_b = half weight each. Stable but not sparse. <br /><br /> <b>Elastic net</b> is a hybrid: the L2 component "pulls together" the correlated pair (like ridge would), and the L1 component provides sparsity for TRULY-uncorrelated irrelevant features. The correlated pair gets shared weight (like ridge); irrelevant features get zero (like lasso). <br /><br /> This is why elastic net is the recommended default for high-dimensional regression with unknown correlation structure — it inherits sparsity from L1 and grouping from L2. sklearn's `ElasticNetCV` with `l1_ratio` = 0.5-0.9 is a solid starting point.</>
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "L2 (ridge) regularization adds this penalty to the loss:",
+      choices: [
+        { text: "λ · Σ |w_i|" },
+        { text: "(λ/2) · Σ w_i² — squared magnitude of weights", correct: true },
+        { text: "λ · max(w_i)" },
+        { text: "λ · number of nonzero weights" },
+      ],
+      explanation: <>Ridge / L2 penalizes the sum of squared weights (or half of it, for cleaner gradient). Gradient of this w.r.t. w is λ · w — shrinks each weight proportionally each step. Closed-form solution is (XᵀX + λI)⁻¹ Xᵀy. Widely-used, numerically stable, corresponds to a Gaussian prior in Bayesian view.</>
+    },
+    {
+      q: "L1 (lasso) regularization is known for producing sparse solutions because:",
+      choices: [
+        { text: "It uses less memory." },
+        { text: "The |w| penalty has a kink at zero, and this kink pushes coefficients to exactly zero when the data gradient is small.", correct: true },
+        { text: "It uses random forests internally." },
+        { text: "It's slower to compute." },
+      ],
+      explanation: <>The L1 penalty |w| has a corner at zero (unlike L2's smooth w²). This kink means the optimization prefers exact zeros over tiny nonzero values — the subgradient at zero is the interval [−λ, λ], and setting w exactly to zero is optimal whenever the data-term gradient is smaller than λ. Feature selection built into the loss.</>
+    },
+    {
+      q: "The `weight_decay=0.1` in a transformer training config is:",
+      choices: [
+        { text: "A form of gradient clipping." },
+        { text: "L2 regularization applied at every optimizer step — the modern name for classical ridge.", correct: true },
+        { text: "A learning-rate decay schedule." },
+        { text: "A momentum coefficient." },
+      ],
+      explanation: <>Weight decay = L2 regularization. It adds a small `−η · wd · w` term to every optimizer update, which is exactly the effect of an L2 penalty in the loss. In transformers, wd = 0.01-0.1 is typical, applied via AdamW (the "W" stands for correctly-decoupled weight decay, unlike original Adam which combined it with the adaptive scaling — a known bug fixed by AdamW).</>
+    },
+    {
+      q: "You choose the regularization strength λ by:",
+      choices: [
+        { text: "Setting it to whatever you feel is right." },
+        { text: "K-fold cross-validation: pick the λ that minimizes average validation error.", correct: true },
+        { text: "The value that makes training loss zero." },
+        { text: "1e-3 always." },
+      ],
+      explanation: <>Standard recipe: split data into K folds, for each candidate λ fit K models and average the K validation errors, pick the λ with the smallest average. sklearn's `RidgeCV`, `LassoCV`, `ElasticNetCV` do this automatically. Advanced practice: the "one-standard-error rule" picks the largest λ within 1 SD of the minimum CV error — protects against overfitting the CV score itself.</>
+    },
+    {
+      q: "Why must you standardize features (subtract mean, divide by std) before regularized regression?",
+      choices: [
+        { text: "It makes the code faster." },
+        { text: "Otherwise, the regularizer unfairly penalizes features that happen to have larger units.", correct: true },
+        { text: "It changes the loss function." },
+        { text: "sklearn requires it." },
+      ],
+      explanation: <>The regularizer penalizes coefficient magnitudes. If feature x_1 is in km and x_2 in mm, they need coefficients that differ by 10⁶ to have comparable predictive power — but the regularizer treats both coefficients equally, crushing the one that's forced to be huge. Standardizing puts all features on the same scale so the penalty is fair. Standard practice: always standardize before any regularized model (ridge, lasso, logistic regression with penalty, SVMs, etc.). Not needed for tree models (splits are scale-invariant).</>
+    },
+  ]}
+/>
+
+<MarkDone slug="core-ml/supervised-basics/regularization" title="Regularization (L1, L2, elastic net)" />

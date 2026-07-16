@@ -1,0 +1,514 @@
+---
+title: Hypothesis testing done honestly
+tier: 1
+phase: "1.5"
+---
+
+export const pValueCode = `# p-value: probability of observing data at least as extreme as what we saw, IF the null hypothesis is true.
+# Small p means "if the null were true, our observation would be very surprising".
+import numpy as np
+from scipy.stats import norm
+rng = np.random.default_rng(0)
+
+# Setting: we suspect the population mean is > 0.  Sample n = 50 observations.
+# Null hypothesis H0: mu = 0.  Alternative H1: mu > 0.
+n = 50
+sample = rng.normal(loc=0.3, scale=1.0, size=n)  # true mu = 0.3
+sample_mean = sample.mean()
+sample_se   = sample.std(ddof=1) / np.sqrt(n)
+
+# Under H0, sample_mean ~ N(0, sigma^2/n).  Compute the z-statistic.
+z = (sample_mean - 0.0) / sample_se
+
+# One-sided p-value (H1: mu > 0).
+p_one_sided = 1 - norm.cdf(z)
+p_two_sided = 2 * (1 - norm.cdf(abs(z)))    # for H1: mu != 0
+
+print(f"Sample: mean = {sample_mean:.4f}, SE = {sample_se:.4f}")
+print(f"z-statistic          = {z:.4f}")
+print(f"One-sided p-value (mu > 0): {p_one_sided:.4f}")
+print(f"Two-sided p-value (mu != 0): {p_two_sided:.4f}")
+
+# Repeat under H0 to visualize the p-value distribution.
+n_repeats = 5000
+p_values_under_null = []
+for _ in range(n_repeats):
+    s = rng.normal(loc=0.0, scale=1.0, size=n)   # H0 true
+    m = s.mean()
+    se = s.std(ddof=1) / np.sqrt(n)
+    p_values_under_null.append(2 * (1 - norm.cdf(abs(m / se))))
+p_values_under_null = np.array(p_values_under_null)
+
+# KEY FACT: under H0, p-values are Uniform(0, 1).  Verify.
+print(f"\\nUnder H0, fraction with p < 0.05 = {(p_values_under_null < 0.05).mean():.4f}   (expected 0.05)")
+print(f"Under H0, fraction with p < 0.01 = {(p_values_under_null < 0.01).mean():.4f}   (expected 0.01)")
+print("The Type I error rate = alpha; you WILL reject H0 falsely alpha fraction of the time.")`;
+
+export const tTestCode = `# Two-sample t-test: compare the means of two independent groups.
+# Common use: A/B testing.  Is the average lift statistically different from zero?
+import numpy as np
+from scipy.stats import ttest_ind
+rng = np.random.default_rng(0)
+
+# Control group: 200 samples with mean 3.0, std 1.0.
+# Treatment group: 200 samples with mean 3.15 (5% lift), std 1.0.
+n_c, n_t = 200, 200
+control   = rng.normal(3.0, 1.0, size=n_c)
+treatment = rng.normal(3.15, 1.0, size=n_t)
+
+diff = treatment.mean() - control.mean()
+print(f"Control mean:   {control.mean():.4f}")
+print(f"Treatment mean: {treatment.mean():.4f}")
+print(f"Observed lift:  {diff:+.4f}")
+
+# Standard error of the difference.
+se_diff = np.sqrt(control.var(ddof=1)/n_c + treatment.var(ddof=1)/n_t)
+t_stat = diff / se_diff
+print(f"\\nSE of difference: {se_diff:.4f}")
+print(f"t-statistic:      {t_stat:.4f}")
+
+# scipy version -- Welch's t-test allows unequal variances.
+result = ttest_ind(treatment, control, equal_var=False)
+print(f"\\nWelch's t-test:")
+print(f"  t-statistic: {result.statistic:.4f}")
+print(f"  p-value:     {result.pvalue:.4f}")
+
+if result.pvalue < 0.05:
+    print("  Reject H0: the two means differ at the 5% level.")
+else:
+    print("  Fail to reject H0: the difference is not statistically significant at 5%.")
+
+# Confidence interval on the difference of means.
+from scipy.stats import t as t_dist
+df = n_c + n_t - 2   # simplified pooled df
+t_crit = t_dist.ppf(0.975, df)
+ci_low  = diff - t_crit * se_diff
+ci_high = diff + t_crit * se_diff
+print(f"\\n95% CI for the lift: ({ci_low:+.4f}, {ci_high:+.4f})")`;
+
+export const permutationTestCode = `# Permutation test: non-parametric.  Combine the two groups, shuffle labels many times,
+# compute the statistic on each shuffled dataset.  The observed statistic's rank in this
+# empirical distribution IS a p-value -- no distributional assumption.
+import numpy as np
+rng = np.random.default_rng(0)
+
+# Skewed data where t-test's Gaussian assumption is questionable.
+n_c, n_t = 60, 60
+control   = rng.exponential(scale=2.0, size=n_c)
+treatment = rng.exponential(scale=2.2, size=n_t)  # ~10% mean lift
+
+# Statistic: difference in means (could equally use median, quantile, etc.)
+observed_diff = treatment.mean() - control.mean()
+print(f"Observed difference (treatment - control): {observed_diff:+.4f}")
+
+# Permutation test: combine samples, shuffle labels, recompute the difference.
+combined = np.concatenate([control, treatment])
+n_c_total = len(control)
+
+n_perm = 5000
+perm_diffs = np.zeros(n_perm)
+for p in range(n_perm):
+    shuffled = rng.permutation(combined)
+    new_control   = shuffled[:n_c_total]
+    new_treatment = shuffled[n_c_total:]
+    perm_diffs[p] = new_treatment.mean() - new_control.mean()
+
+# Two-sided p-value: how often is the shuffled difference at least as extreme as observed.
+p_value = (np.abs(perm_diffs) >= abs(observed_diff)).mean()
+print(f"Permutation p-value: {p_value:.4f}")
+
+# Compare to Welch's t-test on the same data.
+from scipy.stats import ttest_ind
+tt = ttest_ind(treatment, control, equal_var=False)
+print(f"Welch's t-test p-value: {tt.pvalue:.4f}")
+
+print("\\nBoth p-values usually agree closely, even for skewed data.")
+print("Permutation is exact under the null hypothesis of exchangeability -- no CLT needed.")
+print("Prefer permutation for small samples, non-Gaussian statistics, or when you're paranoid about assumptions.")`;
+
+export const multipleComparisonsCode = `# Multiple comparisons: running k tests at level alpha will produce ~alpha*k false positives
+# under the null.  Two standard corrections: Bonferroni (family-wise error) and Benjamini-Hochberg (FDR).
+import numpy as np
+from statsmodels.stats.multitest import multipletests
+rng = np.random.default_rng(0)
+
+# Simulate 20 hypotheses.  5 are truly different from 0 (effect size 0.5).  15 have effect 0.
+n_hyp = 20
+n_true = 5
+true_effects = np.zeros(n_hyp)
+true_effects[:n_true] = 0.5
+
+# For each hypothesis, generate n = 100 samples and compute a one-sample z-test p-value.
+n = 100
+from scipy.stats import norm
+p_values = np.zeros(n_hyp)
+for i in range(n_hyp):
+    s = rng.normal(true_effects[i], 1.0, size=n)
+    z = s.mean() / (s.std(ddof=1) / np.sqrt(n))
+    p_values[i] = 2 * (1 - norm.cdf(abs(z)))
+
+print("Raw p-values (first 10):")
+for i in range(10):
+    truth = "* TRULY DIFFERENT" if true_effects[i] != 0 else ""
+    print(f"  Hypothesis {i:>2}: p = {p_values[i]:.4f}  {truth}")
+
+# Uncorrected: how many with p < 0.05?
+raw_significant = (p_values < 0.05).sum()
+print(f"\\nRaw significant (p < 0.05): {raw_significant} / {n_hyp}")
+
+# Bonferroni: reject H_i iff p_i < alpha / m.  Very conservative.
+_, p_bonf, _, _ = multipletests(p_values, alpha=0.05, method='bonferroni')
+bonf_significant = (p_bonf < 0.05).sum()
+print(f"Bonferroni significant:      {bonf_significant} / {n_hyp}   (alpha_effective = {0.05/n_hyp:.4f})")
+
+# Benjamini-Hochberg: controls false discovery rate (fraction of rejections that are false).
+_, p_bh, _, _ = multipletests(p_values, alpha=0.05, method='fdr_bh')
+bh_significant = (p_bh < 0.05).sum()
+print(f"BH-FDR significant:          {bh_significant} / {n_hyp}   (controls FDR at 5%)")
+
+print("\\nBonferroni is safer if you must avoid ANY false positives.")
+print("BH-FDR is more powerful if you can tolerate a small fraction of false positives among your rejections.")`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/statistics/confidence-bootstrap", label: "Confidence intervals & the bootstrap", blurb: "Hypothesis testing and CI are two sides of the same coin: a 95% CI is the set of null values you would fail to reject at 5%." },
+  { href: "/learn/mathematics/probability/clt-lln", label: "Law of large numbers & CLT", blurb: "Test statistics are approximately Gaussian under the null (for common tests); CLT is the engine." },
+]} />
+
+<NewConcepts
+  concepts={[
+    { name: "Fisher's exact test", blurb: "the correct alternative to a chi-squared test when contingency-table counts are small. Look up for 2×2 tables with cells &lt; 5." },
+    { name: "Mann–Whitney U / Wilcoxon signed-rank", blurb: "non-parametric alternatives to t-tests — use them when your data is heavily non-Gaussian and n is small." },
+    { name: "McNemar's test", blurb: "the paired-proportion test used to compare classifiers on the same test set, or A/B preferences from RLHF pairwise labels." },
+    { name: "Bayes factors", blurb: "the Bayesian analog of p-values: a ratio of posterior odds. Rarely used in ML but a legitimate alternative to significance testing." },
+    { name: "Preregistration & p-hacking", blurb: "modern scientific hygiene concepts — pre-commit to your test to avoid the many ways researchers accidentally invalidate their significance." },
+  ]}
+/>
+
+<Motivation title="p-values, effect sizes, and the traps every practitioner has stepped in">
+
+Hypothesis testing answers a specific question: **&ldquo;is the pattern I observed too unusual to have happened by chance if there were no real effect?&rdquo;** The formal machinery is a null hypothesis (H₀ = &ldquo;no effect&rdquo;), a test statistic, and a p-value that measures how surprising the data would be under H₀.
+
+Two reasons to master this in the context of ML:
+
+- **A/B testing** decides whether a model change ships. &ldquo;Our new prompt design lifted CTR by 1.2%&rdquo; without a p-value or CI is not a decision-grade claim. Sample-size planning, multiple testing, and peeking traps all live here.
+- **Model comparisons** need statistical honesty. Saying &ldquo;model A got 85.1% and model B got 85.3%, so B is better&rdquo; is nonsense unless you check whether that gap is inside the noise. Multiple-run averages with SEs, paired testing, and confidence bands are how mature ML labs report results.
+
+The chapter also comes with a warning: **hypothesis testing has spectacular failure modes**. p-hacking, multiple comparisons without correction, misinterpreting non-significant results, ignoring effect sizes — these show up in ML papers, marketing dashboards, and even scientific literature all the time. Understanding both the math AND the failure modes is what separates a competent statistician from someone who runs scipy commands.
+
+This chapter builds the null/alt framework, defines p-values *precisely* (they are widely misinterpreted), covers the three most-used tests (t-test, chi-squared, permutation), and drills the multiple-comparison corrections that every principled multi-test workflow needs.
+
+</Motivation>
+
+<Intuition title="Hypothesis testing = 'is my observation too far in the tail of the null distribution to be plausible?'">
+
+Under a null hypothesis H₀ (say &ldquo;the two groups are the same&rdquo;), your test statistic has a specific distribution — call it the *null distribution*. You compute the statistic from your actual data and see where it falls in that null distribution.
+
+- **Way out in the tail** → the observation is very surprising under H₀ → &ldquo;reject H₀,&rdquo; conclude the null is unlikely to be right.
+- **Somewhere in the middle** → the observation is consistent with H₀ → &ldquo;fail to reject.&rdquo; This does NOT prove H₀; it just says we don&rsquo;t have evidence against it.
+
+The **p-value** is the probability, under H₀, of getting a statistic at least as extreme as what you observed. Small p → data is very unlikely under H₀ → evidence against H₀. The threshold α (usually 0.05) is the *tolerance* for Type I error (false rejection when H₀ is true).
+
+Two symmetry principles that come from taking p-values seriously:
+
+1. **A 95% CI is the set of null values you would fail to reject at α = 0.05.** Every CI/hypothesis-test framework is two sides of the same coin.
+2. **Not finding significance is not evidence of no effect.** You may have not looked hard enough (low power, small n). Report effect size and CI, not just p-values.
+
+</Intuition>
+
+<Recall term="Null hypothesis">
+
+The null hypothesis H₀ is the default position — usually &ldquo;no effect,&rdquo; &ldquo;no difference,&rdquo; or &ldquo;the parameter equals some baseline value.&rdquo; The alternative H₁ is what you&rsquo;re trying to argue for. Hypothesis testing does NOT compute P(H₀ is true); it computes P(data | H₀), which is a very different quantity. Sometimes the null is called the &ldquo;straw man&rdquo; because you set it up hoping to knock it down.
+
+</Recall>
+
+## The null-alternative framework
+
+You have some data. You want to argue for a claim (H₁: &ldquo;the treatment works&rdquo;). You set up a null hypothesis H₀ that&rsquo;s the negation (&ldquo;the treatment does nothing&rdquo;) — this is the boring, default position.
+
+A **test statistic** T = T(data) is a function of the data whose distribution *under H₀* is known (either exactly or approximately). Compute T from your observed data; call it t_obs.
+
+The **p-value** is:
+
+$$
+p \;=\; P(|T| \geq |t_{\text{obs}}| \mid H_0)  \quad \text{(two-sided)}
+$$
+
+or
+
+$$
+p \;=\; P(T \geq t_{\text{obs}} \mid H_0)  \quad \text{(one-sided, H}_1: \text{effect is positive)}.
+$$
+
+Under H₀, **p-values are uniformly distributed on [0, 1]**. That&rsquo;s a fundamental fact: if H₀ is true, you&rsquo;re equally likely to get any p-value between 0 and 1. Reject at α: you falsely reject 5% of the time under H₀ (Type I error).
+
+Under H₁, p-values are stochastically smaller — they cluster near 0. How close depends on **power**, defined as P(reject H₀ | H₁ true). Higher power = more likely to detect a real effect. Power depends on n, effect size, and α.
+
+<RunnableCode title="p-value distributions under H0 vs H1" code={pValueCode} packages={["numpy", "scipy"]} />
+
+## What p-values are (and, especially, are NOT)
+
+Six things a p-value *does not* mean, in the order of how often people get them wrong:
+
+1. **p is NOT the probability that H₀ is true.** That&rsquo;s a Bayesian posterior, requires a prior, and is generally different.
+2. **p is NOT the probability that H₁ is false.** Symmetric to #1.
+3. **p = 0.03 does NOT mean 3% chance of Type I error &ldquo;in this test.&rdquo;** Type I error rate is α, controlled at the design stage.
+4. **p &gt; 0.05 does NOT mean H₀ is true.** Absence of evidence is not evidence of absence.
+5. **p is NOT the effect size.** You can have p &lt; 0.001 with a tiny, useless-in-practice effect (huge n). Or a real, important effect with p = 0.3 (small n).
+6. **p is NOT comparable across studies of different sample sizes.** A test with n = 10⁶ and p = 0.001 says almost nothing; the same p with n = 20 is remarkable.
+
+What p *is*: P(getting data at least this extreme | H₀). A tool for calibrating your evidence against a specific null, no more, no less.
+
+Best practice: **always report p-value + effect size + CI**. p alone tells you &ldquo;is this likely just noise?&rdquo; The effect size and CI tell you &ldquo;how big is it and how uncertain am I?&rdquo; Both are needed.
+
+## Type I and Type II errors, and power
+
+Two ways a hypothesis test can be wrong:
+
+| Reality | Reject H₀ | Fail to reject H₀ |
+|---|---|---|
+| H₀ true | **Type I error** (α) | correct |
+| H₀ false | correct | **Type II error** (β) |
+
+- **α** = P(Type I) = P(reject H₀ | H₀ true) = the significance level you set.
+- **β** = P(Type II) = P(fail to reject | H₀ false) = depends on effect size, n.
+- **Power** = 1 − β = P(reject H₀ | H₀ false).
+
+For a given significance level α, you can shrink β (increase power) by:
+
+- Increasing n (more data).
+- Reducing variance (better measurement).
+- Increasing α (accept more false positives, discover more true ones).
+
+Standard target: power ≥ 0.80 at your target effect size, with α = 0.05. If your test has less power than that, you might miss real effects and get non-significant results even when the effect is real. This is where sample-size planning (next chapter) becomes essential.
+
+## Common tests
+
+### One-sample t-test
+
+Data: X_1, …, X_n. Null: μ = μ₀. Statistic:
+
+$$
+T = \frac{\bar X - \mu_0}{s / \sqrt{n}}
+$$
+
+Under H₀, T ~ Student t_(n−1). Use `scipy.stats.ttest_1samp`.
+
+### Two-sample (Welch&rsquo;s) t-test
+
+Data: two groups (control, treatment). Null: μ_C = μ_T. Statistic:
+
+$$
+T = \frac{\bar X_T - \bar X_C}{\sqrt{s_C^2 / n_C + s_T^2 / n_T}}
+$$
+
+Under H₀ (assuming approximate normality of the means), T ~ approximately Student t with Welch-Satterthwaite degrees of freedom. This is the workhorse for A/B testing of continuous metrics.
+
+<RunnableCode title="Two-sample t-test for an A/B lift" code={tTestCode} packages={["numpy", "scipy"]} />
+
+### Chi-squared test (categorical data)
+
+Data: contingency table (e.g., counts of clicks vs non-clicks in each of K groups). Null: the row and column classifications are independent. Statistic:
+
+$$
+\chi^2 \;=\; \sum_{i, j} \frac{(O_{ij} - E_{ij})^2}{E_{ij}}
+$$
+
+where O_ij is observed count and E_ij is expected count under independence. Under H₀, χ² ~ χ²_((r−1)(c−1)). Use `scipy.stats.chi2_contingency`.
+
+### Permutation (randomization) test
+
+Non-parametric. Combine the two samples, shuffle labels many times, compute the statistic on each shuffled dataset. The observed statistic&rsquo;s rank in that empirical distribution gives a p-value.
+
+Advantages: no distributional assumption, works for any statistic (median, correlation, custom loss), exact under H₀ (exchangeability).
+
+Disadvantages: computational cost, only exact under H₀ of exchangeability.
+
+<RunnableCode title="Permutation test for a mean difference — non-parametric, no CLT" code={permutationTestCode} packages={["numpy", "scipy"]} />
+
+## Multiple comparisons
+
+Run k independent tests, each at α = 0.05, and even under all nulls you expect roughly 0.05k false positives. For k = 20, that&rsquo;s 1 expected false positive; for k = 100, that&rsquo;s 5. This is the **multiple comparisons problem**, and it&rsquo;s why ML benchmark leaderboards should be read with extreme skepticism.
+
+Two standard corrections:
+
+### Bonferroni — controls the family-wise error rate (FWER)
+
+Reject H_i iff p_i &lt; α / k. Guarantees P(any false rejection) ≤ α under all nulls. Simple; very conservative. In practice this often loses power to detect real effects.
+
+### Benjamini–Hochberg — controls the false discovery rate (FDR)
+
+Sort p-values ascending: p_(1) ≤ p_(2) ≤ … ≤ p_(k). Find the largest i such that p_(i) ≤ (i / k) · q. Reject all hypotheses with p ≤ p_(i). Controls E[false discoveries / total discoveries] ≤ q.
+
+FDR-corrected testing is standard in genomics (many thousands of hypotheses at once) and increasingly in ML benchmark evaluation. More powerful than Bonferroni; guarantees a *fraction* of discoveries is real, not *never* a false one.
+
+<RunnableCode title="Bonferroni vs Benjamini-Hochberg on 20 hypotheses" code={multipleComparisonsCode} packages={["numpy", "scipy", "statsmodels"]} />
+
+## The traps that matter
+
+**p ≠ P(H₀).** Repeat this until it&rsquo;s second nature. p is a probability of the data, not of the hypothesis. Only Bayesian methods give you P(H₀ | data).
+
+**Statistical significance ≠ practical significance.** With enough data, tiny effects reach significance. Ask &ldquo;how big is the effect, and is it big enough to matter for my problem?&rdquo; The effect size and CI answer this; the p-value doesn&rsquo;t.
+
+**p-hacking**: running many tests / stopping when you get p &lt; 0.05 / trying alternate metrics / filtering data / picking your test after seeing the data. All of these invalidate the frequentist guarantees. Pre-register your test and stick to it.
+
+**Peeking**: repeatedly looking at a running A/B test and stopping when it looks significant. This inflates the Type I error rate dramatically — the actual α with 5 peeks can be 3× the nominal α. Fixes: fixed-horizon tests, group-sequential testing with adjusted α, Bayesian methods (see next chapter).
+
+**Not adjusting for multiple comparisons.** Every leaderboard-style comparison with many models should apply Bonferroni or BH. Otherwise the &ldquo;best&rdquo; model may be the luckiest one.
+
+**Small-N tests are underpowered.** Failing to reject with n = 20 tells you little. Compute power at your design stage; if it&rsquo;s below 0.5, redesign or collect more data.
+
+**The dichotomy is fake.** &ldquo;Reject vs fail-to-reject&rdquo; is a bureaucratic bookkeeping choice; the underlying evidence is on a continuum. The American Statistical Association (2016) formally recommended against binary thinking around p = 0.05. Modern practice: report the p-value, effect size, CI, and let the reader judge.
+
+**Test choice matters.** A t-test on non-Gaussian data can be inaccurate; a chi-squared test on small counts is unreliable (use Fisher&rsquo;s exact instead); a permutation test can be too slow for real-time A/B testing. Know your options.
+
+<RealWorldML title="Statistical significance in ML: releases, benchmarks, RLHF, and evaluation">
+
+**A/B testing an LLM prompt change.** You update the system prompt and want to know if user satisfaction improved. Metric: 1–5 star rating averaged per user over a session. Control 5000 users on old prompt, treatment 5000 users on new prompt. Compute means, SEs, and a two-sample t-test. p &lt; 0.05 → ship the new prompt (probably, alongside other business checks). This is the daily bread of production ML deployment. Peeking is a real risk: you look at day 1, day 2, day 3 results. Bayesian A/B methods (Beta-Binomial for conversion rates, or hierarchical Gaussian for continuous metrics) are designed for continuous monitoring without inflating error rates.
+
+**Benchmark leaderboards.** LMSYS Chatbot Arena, MMLU, GSM8K — every LLM benchmark. When one model beats another by 0.3% on MMLU, the community usually asks &ldquo;is that within the noise of the eval?&rdquo; The bootstrap CI on the accuracy (or Elo rating) tells you. Many recent papers do this correctly and report SE; older ones often didn&rsquo;t.
+
+**RLHF preference significance.** In RLHF, you collect pairwise preferences (this-completion-is-better-than-that). To decide which prompt/checkpoint to release, run a paired preference test. McNemar&rsquo;s test on the paired proportion works. For repeated evaluation over checkpoints, you need to correct for multiple comparisons — the model that looks the best across many checkpoints is often the luckiest one, not the best one.
+
+**LLM eval metric multi-testing.** Modern LLM evaluation is often multi-metric: MMLU, GSM8K, HumanEval, MATH, GPQA, LMArena Elo, and internal benchmarks. Running t-tests on each without correction produces many false positives. FDR correction gives you a defensible &ldquo;these k metrics are genuinely better, on average.&rdquo;
+
+**Sequential testing (peeking) fix**. For continuous monitoring in production A/B tests, use group-sequential tests (O&rsquo;Brien–Fleming, Pocock) or Bayesian methods where the posterior probability of the treatment being better is monitored. Modern tools like &ldquo;always-valid p-values&rdquo; and &ldquo;confidence sequences&rdquo; are designed for exactly this problem.
+
+</RealWorldML>
+
+<StudyDepth
+  intro={<>Hypothesis testing is the vocabulary of A/B decisions, benchmark comparisons, and honest ML reporting. Master p-values AND effect sizes; never one without the other.</>}
+  drill={[
+    <>p-value = P(data at least as extreme | H₀); NOT P(H₀ is true)</>,
+    <>Under H₀, p-values are Uniform(0, 1); we reject at α → false positive rate is exactly α</>,
+    <>Type I: reject when H₀ true (rate α). Type II: fail to reject when H₀ false (rate β). Power = 1 − β</>,
+    <>Common tests: one-sample and two-sample t-test (means), chi-squared (contingency), permutation (non-parametric)</>,
+    <>Multiple comparisons: k tests at α produce roughly α·k false positives; correct with Bonferroni (FWER) or Benjamini-Hochberg (FDR)</>,
+    <>Always report effect size + CI + p-value; never p-value alone. Statistical significance ≠ practical significance</>,
+  ]}
+  skim={[
+    <>Full inventory of tests (Mann-Whitney U, Kruskal-Wallis, Wilcoxon signed-rank, Fisher&rsquo;s exact) — look up when needed</>,
+    <>Group-sequential and always-valid methods — needed for continuous-monitoring A/B tests, not core statistics</>,
+    <>Bayesian model comparison via Bayes factors — a legitimate alternative to p-value testing, rarely used in mainstream ML</>,
+  ]}
+/>
+
+<CodeItYourself title="Three drills — p-value distribution, permutation on medians, FDR on many tests">
+
+1. **p-values under H₀ are Uniform(0, 1).** Simulate 5000 experiments where H₀ is true (draw n = 30 samples from 𝒩(0, 1)). For each, compute the one-sample t-test p-value. Plot the histogram — it should be flat. Compute the fraction with p &lt; 0.05, 0.01. They should be very close to 0.05 and 0.01.
+
+2. **Permutation test on medians.** Two groups: control (60 samples from Exp(1)) and treatment (60 samples from Exp(1.2)). The medians differ by roughly 0.15. Run a permutation test with 5000 shuffles. Compare to a Mann-Whitney U test (`scipy.stats.mannwhitneyu`). Both should give similar p-values.
+
+3. **FDR on 100 hypotheses.** 100 z-tests: 10 have true effect size 0.3, 90 have effect size 0. n = 50 per test. Compute all 100 p-values. Apply Bonferroni and BH-FDR at α = 0.05. Count how many true positives and false positives each returns. BH-FDR should have more power (find more of the 10 true effects) at the cost of a few false positives; Bonferroni is safer but misses more.
+
+</CodeItYourself>
+
+<Summary>
+
+- **Hypothesis test** = &ldquo;is my observation too unusual under H₀ to keep believing H₀?&rdquo;
+- **p-value** = P(data at least this extreme | H₀). Small p → evidence against H₀. NOT P(H₀ is true).
+- **Under H₀, p-values are Uniform(0, 1)**; rejecting at α gives false-positive rate α.
+- **Type I** = reject when H₀ true (rate α). **Type II** = miss when H₀ false (rate β). **Power** = 1 − β.
+- **t-test** (means), **chi-squared** (contingency), **permutation** (non-parametric) are the three most-used tests.
+- **Multiple comparisons**: k tests at α gives ~α·k false positives. Correct with **Bonferroni** (FWER) or **BH-FDR** (FDR).
+- **Report p-value + effect size + CI**. Statistical significance is not practical significance. Non-significant is not &ldquo;no effect.&rdquo;
+- **Traps**: p-hacking, peeking, multiple-comparison ignorance, tiny-effect-with-huge-N.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>An A/B test has p = 0.03. Which of the following is a correct interpretation? (a) &ldquo;There is a 3% chance the null hypothesis is true.&rdquo; (b) &ldquo;If the null were true, we would see data at least as extreme as ours only 3% of the time.&rdquo; (c) &ldquo;There is a 3% chance the treatment has no effect.&rdquo; (d) &ldquo;The treatment effect is 3%.&rdquo;</>,
+      hint: <>Only one is a valid p-value interpretation.</>,
+      answer: <>Only <b>(b)</b> is correct. p is a conditional probability of the data given the null, NOT a probability about the hypothesis itself. Statements (a) and (c) are Bayesian posterior claims that would require a prior. Statement (d) confuses p-value with effect size.</>,
+    },
+    {
+      difficulty: "easy",
+      q: <>Given control (n = 200, mean = 4.10, std = 1.20) and treatment (n = 200, mean = 4.28, std = 1.15), compute the z-statistic for the difference. Is it significant at 5%?</>,
+      hint: <>SE_diff = √(s_C²/n_C + s_T²/n_T). z = diff / SE_diff. Compare |z| to 1.96.</>,
+      answer: <>SE_diff = √(1.20²/200 + 1.15²/200) = √(0.0072 + 0.006612) = √0.013813 ≈ 0.1175. <br /> diff = 4.28 − 4.10 = 0.18. <br /> z = 0.18 / 0.1175 ≈ <b>1.53</b>. <br /><br /> |z| = 1.53 &lt; 1.96, so <b>we FAIL to reject H₀ at α = 0.05</b>. The observed difference is not statistically significant. Either the true effect is smaller than we thought, or we need a larger sample. The 95% CI on the difference: 0.18 ± 1.96 · 0.1175 = (−0.050, 0.410) — includes zero, consistent with not rejecting.</>,
+    },
+    {
+      difficulty: "medium",
+      q: <>Explain why running 20 independent A/B tests at α = 0.05 without correction will roughly produce one false positive on average even if all treatments do nothing.</>,
+      hint: <>Under H₀, p-values are Uniform(0, 1). Consider the probability of at least one rejection out of 20 independent tests.</>,
+      answer: <>Under H₀, each test has α = 0.05 probability of rejecting. Across 20 independent tests, expected number of false rejections is 20 · 0.05 = <b>1</b>. <br /><br /> More precisely: P(at least one false rejection) = 1 − (1 − 0.05)^20 ≈ 1 − 0.358 ≈ <b>0.64</b>. <br /><br /> So there is a 64% chance of at least one false positive in 20 tests even if no treatment does anything. This is why running many tests without correction produces &ldquo;discoveries&rdquo; that fail to replicate. <br /><br /> Fix: apply Bonferroni (α_effective = 0.05 / 20 = 0.0025) or BH-FDR to control the error rate across the family of tests.</>,
+    },
+    {
+      difficulty: "medium",
+      q: <>Show that a 95% frequentist CI for μ is the set of null values μ₀ such that a two-sided t-test would fail to reject H₀: μ = μ₀ at α = 0.05.</>,
+      hint: <>Write out the CI formula and the test rejection region; show they're inverses.</>,
+      answer: <>95% CI: X̄ ± t · s/√n where t = t_(n−1).ppf(0.975). This is the set of μ such that: <br /> |X̄ − μ| ≤ t · s/√n <br /> Equivalently: <br /> |(X̄ − μ) / (s/√n)| ≤ t <br /><br /> Two-sided t-test of H₀: μ = μ₀ computes: <br /> T = (X̄ − μ₀) / (s/√n) <br /> Fail to reject at α = 0.05 iff |T| ≤ t_(n−1).ppf(0.975) = t. <br /><br /> Substituting: fail to reject iff |X̄ − μ₀| / (s/√n) ≤ t, exactly the condition above with μ = μ₀. <br /><br /> So <b>the 95% CI is precisely the set of null values you would fail to reject at α = 0.05</b>. This is the &ldquo;CI-hypothesis-test duality&rdquo; — every CI corresponds to a hypothesis-test procedure, and vice versa. Bayesian credible intervals do NOT have this correspondence; they are a different object.</>,
+    },
+    {
+      difficulty: "hard",
+      q: <>You run 100 pairwise model comparisons on a benchmark, all at α = 0.05. Assume no model is truly better than any other (all pairs share the same true mean). Compute (a) the expected number of significant results, (b) the probability of at least 5 significant results, and (c) the Bonferroni-corrected threshold you should use.</>,
+      hint: <>Under all nulls, the number of significant tests is Binomial(100, 0.05). Compute expected value, tail probability, and α/k.</>,
+      answer: <>(a) Expected significant tests = 100 · 0.05 = <b>5</b>. <br /><br /> (b) Number of significant tests ~ Binomial(100, 0.05). P(k ≥ 5) = 1 − Binomial CDF at 4. Using scipy: P(k ≥ 5) ≈ <b>0.564</b>. So more than half the time you&rsquo;d find at least 5 significant differences even with no true effect. <br /><br /> (c) Bonferroni threshold: α_effective = 0.05 / 100 = <b>0.0005</b>. Only p-values below this survive; that&rsquo;s a very strict criterion. <br /><br /> The lesson: benchmark leaderboards with many pairwise comparisons are almost guaranteed to produce &ldquo;significant&rdquo; wins by chance if you don&rsquo;t correct. Papers should either report Bonferroni/BH-corrected significance or (better) report effect sizes and CIs and let readers judge. Preregistration + FDR-controlled comparison is the modern gold standard.</>,
+    },
+    {
+      difficulty: "hard",
+      q: <>Explain why peeking (looking at an A/B test many times and stopping when you get p &lt; 0.05) inflates the Type I error rate. Sketch a fix.</>,
+      hint: <>Each look is a chance to reject; the probability of at least one false rejection compounds. Fix: adjust α per look, or use always-valid methods.</>,
+      answer: <>At each &ldquo;peek,&rdquo; if the test statistic happens to cross the threshold, you stop. So you have multiple chances to falsely reject H₀. Under H₀ with independent-ish tests, the probability of at least one false rejection compounds toward 1 as the number of peeks grows. <br /><br /> Concrete: 5 peeks at α = 0.05 each has FWER approximately 1 − 0.95⁵ ≈ 0.23 — 23% chance of a false positive instead of 5%. <br /><br /> <b>Fixes</b>: <br /> - <b>Fixed-horizon test</b>: commit to a sample size in advance, look ONCE at the end. Traditional and effective but requires waiting. <br /> - <b>Group-sequential methods</b> (O&rsquo;Brien-Fleming, Pocock): pre-specified peek schedule with adjusted α at each peek. Maintains FWER. <br /> - <b>Always-valid p-values / e-values</b>: modern methods (Howard, Ramdas, et al.) that allow arbitrary continuous monitoring while maintaining valid Type I error control. <br /> - <b>Bayesian A/B</b>: monitor P(treatment better | data). Doesn&rsquo;t have &ldquo;peeking&rdquo; problem in the same way. <br /><br /> Modern experimentation platforms (Netflix, Meta, LinkedIn) increasingly use variants of these approaches. Naive dashboards with continuous p-value monitoring and stop-on-significance rules can produce many false-positive shipping decisions.</>,
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "The p-value is:",
+      choices: [
+        { text: "The probability that H₀ is true" },
+        { text: "The probability of observing data at least as extreme as ours, if H₀ is true", correct: true },
+        { text: "The probability that H₁ is true given the data" },
+        { text: "The observed effect size" },
+      ],
+      explanation: <>p is a probability of the <em>data</em> conditional on the null, NOT a probability about the hypothesis. Confusing these two is the single most common error in interpreting hypothesis tests.</>,
+    },
+    {
+      q: "Under the null hypothesis, p-values are distributed as:",
+      choices: [
+        { text: "Uniform(0, 1)", correct: true },
+        { text: "Standard normal 𝒩(0, 1)" },
+        { text: "Exponential(1)" },
+        { text: "Concentrated near 0" },
+      ],
+      explanation: <>This is the defining property of a valid p-value: under H₀, p ~ Uniform(0, 1), so rejecting at α gives exactly α false-positive rate. Under H₁, p-values are stochastically smaller (concentrated near 0), which is what gives the test power to detect real effects.</>,
+    },
+    {
+      q: "You run 40 independent A/B tests at α = 0.05 without correction, and 3 come up significant. If no treatments actually work, how many false positives do you expect?",
+      choices: [
+        { text: "0" },
+        { text: "2 (40 · 0.05)", correct: true },
+        { text: "3 (all of them)" },
+        { text: "40 (all of them)" },
+      ],
+      explanation: <>Expected false positives = k · α = 40 · 0.05 = 2. Under all-nulls, half the time you&rsquo;d see 3 or more &ldquo;significant&rdquo; tests by pure chance. Multiple comparison correction (Bonferroni: α_eff = 0.00125, or BH-FDR) is needed to draw defensible conclusions when running many tests.</>,
+    },
+    {
+      q: "A permutation test is preferred over a t-test when:",
+      choices: [
+        { text: "You have a lot of data" },
+        { text: "The data is heavily non-Gaussian and n is small, or the statistic has no closed-form null distribution", correct: true },
+        { text: "The p-value is close to 0.05" },
+        { text: "You want a faster computation" },
+      ],
+      explanation: <>Permutation tests make no distributional assumptions — they&rsquo;re exact under the H₀ of exchangeability. They&rsquo;re essential when CLT-based tests are questionable (small n, heavy tails) or when your statistic is complicated (median difference, correlation, custom loss). They&rsquo;re slower than parametric tests, so use them where they&rsquo;re needed rather than always.</>,
+    },
+    {
+      q: "In an A/B test with sample sizes n = 1,000,000, you find a lift of 0.02% with p = 0.001. Should you ship?",
+      choices: [
+        { text: "Yes — p is much less than 0.05, so the effect is real" },
+        { text: "It depends: statistical significance was easy at this n, but the effect size is tiny; check if 0.02% is practically meaningful", correct: true },
+        { text: "No — p &lt; 0.05 means the null is very unlikely, but you should never ship on p alone" },
+        { text: "Yes — with a million users, you have to trust the numbers" },
+      ],
+      explanation: <>With very large samples, even tiny effects reach significance. p answers &ldquo;is this pattern noise-explainable?&rdquo; but not &ldquo;is it worth acting on?&rdquo; You need to check whether the 0.02% lift crosses your business threshold for a shippable change (which is often much larger). This is the &ldquo;statistical significance vs practical significance&rdquo; distinction that mature ML deployment shops navigate constantly.</>,
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/statistics/hypothesis-testing" title="Hypothesis testing done honestly" />

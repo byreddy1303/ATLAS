@@ -451,22 +451,6 @@ body {
   }
 }
 
-/* cursor halo — visible in both dark and light mode */
-.cursor-halo {
-  background: radial-gradient(closest-side, var(--lime) 0%, transparent 70%);
-  filter: blur(30px);
-  opacity: 0.55;
-  mix-blend-mode: screen;
-}
-.light .cursor-halo {
-  /* on paper, screen blend erases the glow — switch to a soft overlay
-     with a deeper hue so the halo still tints the page. */
-  background: radial-gradient(closest-side, oklch(58% 0.22 118) 0%, transparent 70%);
-  mix-blend-mode: multiply;
-  opacity: 0.35;
-  filter: blur(38px);
-}
-
 /* star field — 44 dots, all animated on the compositor */
 .atlas-star {
   position: absolute;

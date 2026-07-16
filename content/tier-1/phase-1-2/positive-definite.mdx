@@ -1,0 +1,406 @@
+---
+title: Symmetric & positive-definite matrices
+tier: 1
+phase: "1.2"
+---
+
+export const symmetricCode = `import numpy as np
+
+# Symmetric matrix: A = A.T
+A = np.array([[2.0, 1.0, 0.0],
+              [1.0, 3.0, 4.0],
+              [0.0, 4.0, 5.0]])
+
+print("A == A.T?", np.allclose(A, A.T))
+
+# Symmetric matrices have REAL eigenvalues and ORTHOGONAL eigenvectors
+eigvals, eigvecs = np.linalg.eigh(A)      # eigh is for symmetric/Hermitian
+print("eigenvalues (all real):", eigvals)
+print("eigenvectors (columns) — orthogonal:")
+print(eigvecs)
+print("Q.T @ Q =")
+print(np.round(eigvecs.T @ eigvecs, 8))   # identity — eigenvectors are orthonormal
+
+# Spectral theorem: A = Q Lambda Q.T
+reconstruction = eigvecs @ np.diag(eigvals) @ eigvecs.T
+print("A reconstructed from spectral decomposition:", np.allclose(A, reconstruction))
+`;
+
+export const psdTestCode = `import numpy as np
+
+# --- Three matrices; classify each ---
+A_pd = np.array([[3.0, 1.0],
+                 [1.0, 2.0]])           # symmetric, both eigenvalues > 0
+A_psd_singular = np.array([[1.0, 1.0],
+                            [1.0, 1.0]]) # rank 1 — eigenvalues 2 and 0
+A_indef = np.array([[1.0, 2.0],
+                     [2.0, 1.0]])         # eigenvalues 3 and -1
+
+def classify(name, M):
+    eigs = np.linalg.eigvalsh(M)
+    print(f"{name}:  eigenvalues = {eigs}")
+    if np.all(eigs > 1e-10):
+        print(f"   -> POSITIVE DEFINITE")
+    elif np.all(eigs >= -1e-10):
+        print(f"   -> positive SEMI-definite (has zero eigenvalue)")
+    else:
+        print(f"   -> INDEFINITE (has both positive and negative)")
+    print()
+
+classify("A_pd", A_pd)
+classify("A_psd_singular", A_psd_singular)
+classify("A_indef", A_indef)
+`;
+
+export const choleskyCode = `import numpy as np
+
+# Positive-definite matrices admit a Cholesky factorization: A = L L.T
+A = np.array([[4.0, 2.0, 0.0],
+              [2.0, 5.0, 1.0],
+              [0.0, 1.0, 3.0]])
+
+L = np.linalg.cholesky(A)
+print("L (lower-triangular):")
+print(L)
+print()
+print("L @ L.T =")
+print(L @ L.T)
+print()
+print("matches A?", np.allclose(A, L @ L.T))
+`;
+
+export const covarianceCode = `import numpy as np
+
+# Generate 3-D data with a nontrivial correlation structure
+np.random.seed(0)
+n = 500
+# Underlying factor of variation: some directions have larger spread than others
+mean = np.array([0.0, 0.0, 0.0])
+true_cov = np.array([[3.0, 1.0, 0.5],
+                     [1.0, 2.0, 0.2],
+                     [0.5, 0.2, 1.0]])
+X = np.random.multivariate_normal(mean, true_cov, size=n)     # n x 3
+
+# Sample covariance — a symmetric PSD matrix (approximately equal to true_cov)
+S = np.cov(X.T)                                                 # 3 x 3
+print("Sample covariance:")
+print(np.round(S, 3))
+
+# Eigen-decomposition tells us the principal directions & variances
+eigvals, eigvecs = np.linalg.eigh(S)
+print()
+print("eigenvalues (variances along principal axes):")
+print(np.round(eigvals, 3))
+print()
+print("Positive semi-definite? all eigenvalues >= 0 =>", np.all(eigvals >= -1e-9))
+`;
+
+export const quadraticFormCode = `import numpy as np
+import matplotlib.pyplot as plt
+import io, base64
+
+# Build the same three cases as the classify demo and plot each quadratic form's level sets
+def q(A, x, y):
+    v = np.stack([x, y])                          # 2 x N
+    return np.einsum('ij,in,jn->n', A, v, v)      # x.T A x for each column
+
+X, Y = np.meshgrid(np.linspace(-2, 2, 200), np.linspace(-2, 2, 200))
+Xf = X.ravel(); Yf = Y.ravel()
+
+cases = {
+    'positive-definite': np.array([[3.0, 1.0], [1.0, 2.0]]),        # ellipses
+    'positive semi-def': np.array([[1.0, 1.0], [1.0, 1.0]]),        # parallel lines
+    'indefinite':        np.array([[1.0, 2.0], [2.0, 1.0]]),        # hyperbolas (saddle)
+}
+
+fig, axes = plt.subplots(1, 3, figsize=(12, 4), facecolor='none')
+for ax, (name, A) in zip(axes, cases.items()):
+    Z = q(A, Xf, Yf).reshape(X.shape)
+    ax.contour(X, Y, Z, levels=15, colors='#a3ff12', linewidths=0.7)
+    ax.set_title(name, color='#e8e8ea')
+    ax.set_facecolor('none')
+    for s in ax.spines.values(): s.set_color('#8f8f96')
+    ax.tick_params(colors='#8f8f96')
+    ax.set_aspect('equal')
+
+plt.tight_layout()
+buf = io.BytesIO()
+plt.savefig(buf, format='png', transparent=True, dpi=110)
+print('__PLOT__' + base64.b64encode(buf.getvalue()).decode())
+plt.close()
+`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/matrices-transformations/eigenvectors-eigenvalues", label: "Eigenvectors & eigenvalues", blurb: "Symmetric matrices have a beautiful eigen-picture — orthogonal eigenvectors and real eigenvalues. That's the whole story here." },
+  { href: "/learn/mathematics/matrices-transformations/matrix-as-transformation", label: "Matrix as linear transformation", blurb: "Positive-definite matrices are transformations that never flip any direction backwards." },
+]} />
+
+<NewConcepts
+  concepts={[
+    { name: "Cholesky decomposition", blurb: "A = L L^T for symmetric positive-definite A. The go-to numerical tool for solving `Ax = b` when A is PD — twice as fast as generic LU." },
+    { name: "Gaussian process (GP) regression", blurb: "nonparametric Bayesian regression whose entire machinery uses PD kernel matrices. The RealWorldML case study of this chapter." },
+    { name: "SGD / Adam Hessian analyses", blurb: "modern deep-learning theory (loss landscape, sharpness, generalization) often refers to positive-definiteness of the Hessian. Referenced here as a concrete PD-matrix example." },
+    { name: "PyTorch's `torch.linalg.cholesky`", blurb: "the standard library function for the Cholesky factorization; wraps LAPACK routines under the hood." },
+  ]}
+/>
+
+<Motivation title="The 'nice' matrices — why covariance, kernels, and Hessians love them">
+
+Three of the most important matrices in ML are always symmetric and (typically) positive definite: **covariance matrices** in Gaussian models, **kernel Gram matrices** in kernel methods and Gaussian processes, and **Hessians** at local minima of well-behaved loss functions. Every time a symmetric-PSD matrix shows up, three good things become available:
+
+- **Real eigenvalues and orthogonal eigenvectors** — the *spectral theorem*, which turns the matrix into a rotation-scale-unrotate sandwich.
+- **Cholesky factorization** — the fast, stable factorization for solving linear systems (2× cheaper than LU, always numerically stable).
+- **Meaningful quadratic form** — `xᵀAx ≥ 0` for all x, with equality only at the origin (positive definite) or on a subspace (positive semi-definite). This is what makes optimization problems *convex*.
+
+Understanding when a matrix is PSD, why it matters, and how to exploit its structure is a huge chunk of what makes practical ML fast and numerically stable. This chapter builds those instincts.
+
+</Motivation>
+
+<Intuition title="Symmetric = A equals its own transpose; PD = never rotates any vector past 90°">
+
+A **symmetric** matrix satisfies A = Aᵀ — the (i, j) entry equals the (j, i) entry. Symmetric matrices show up whenever the underlying quantity is naturally *pairwise-defined*: covariance between two features doesn't care about order; distance between two points doesn't care about order; the second derivative of a smooth function with respect to variables x_i, x_j equals the mixed partial in either order (Hessian is always symmetric for C² functions).
+
+A **positive-definite (PD)** symmetric matrix additionally satisfies `xᵀAx &gt; 0` for every nonzero x. Geometrically: for every input vector x, the output A·x lands on the *same side* as x (their dot product is positive) — the transformation never rotates any vector by more than 90°. Its eigenvalues are all strictly positive. Its determinant is positive. It's invertible.
+
+**Positive semi-definite (PSD)** is the same but with ≥ instead of &gt; — allows `xᵀAx = 0` for some nonzero x. Eigenvalues are ≥ 0, potentially some zeros. This is the correct condition for covariance matrices (which can be singular if features are linearly dependent).
+
+The reason all this matters: PD matrices define *convex* quadratic bowls (unique minimum, easy to optimize), while indefinite matrices define saddles (hard to optimize). Whether your loss's Hessian is PD, indefinite, or PSD-singular is the difference between "gradient descent will converge cleanly," "gradient descent might climb a saddle," and "gradient descent has a whole valley of equally-good minima."
+
+</Intuition>
+
+<Recall term="Symmetric matrix">
+
+A square matrix A is symmetric if A = Aᵀ, i.e., A(i, j) = A(j, i) for all i, j. Symmetric matrices always have real eigenvalues and mutually orthogonal eigenvectors, and the spectral theorem gives A = QΛQᵀ with Q orthogonal (columns are the eigenvectors) and Λ diagonal (eigenvalues).
+
+</Recall>
+
+## Symmetric matrices — the spectral theorem
+
+The **spectral theorem** for symmetric matrices is short and load-bearing: *every real symmetric matrix A can be diagonalized as*
+
+$$
+A \;=\; Q\, \Lambda\, Q^{\top}
+$$
+
+where Q is orthogonal (Qᵀ Q = I, columns are unit-length and mutually perpendicular) and Λ is diagonal (the eigenvalues, all real). Two facts fall out immediately:
+
+- Eigenvalues of a symmetric matrix are always **real** (proof: standard, one page, using the fact that xᵀ A x is real).
+- Eigenvectors for distinct eigenvalues are always **orthogonal** (proof: from λ_i xᵀ_i x_j = xᵀ_i A x_j = λ_j xᵀ_i x_j).
+
+Geometrically A is a "rotate to the eigenvector basis, scale each axis by its eigenvalue, rotate back." Every symmetric transformation is just that — no shear, no complex-plane twists, no funny business. The three most useful matrices in ML (covariance, kernel, Hessian) all get this decomposition for free.
+
+<RunnableCode title="Spectral theorem — eigenvalues real, eigenvectors orthogonal" code={symmetricCode} packages={["numpy"]} />
+
+**In code**: for a symmetric matrix always use `np.linalg.eigh` (not `eig`). eigh exploits the symmetry to be faster and — much more importantly — guaranteed to return real eigenvalues in sorted order and truly orthonormal eigenvectors. `eig` on a symmetric matrix can return complex-valued numbers with tiny imaginary parts (rounding artifacts) and slightly non-orthogonal vectors, which will silently break any code that assumes them.
+
+## Positive definite — three equivalent definitions
+
+A symmetric matrix A is **positive definite** if any (and hence all) of:
+
+1. `xᵀ A x &gt; 0` for every nonzero x ∈ ℝⁿ. (The defining condition.)
+2. Every eigenvalue λ_i of A is strictly positive.
+3. There exists a lower-triangular L with strictly positive diagonal such that A = L·Lᵀ. (Cholesky factorization exists.)
+
+Any one implies the other two — a Rosetta stone with three faces. In practice you use whichever is easiest for the check at hand: for a small numeric matrix, compute eigenvalues; for a symbolic proof, use the quadratic form; to actually solve `Ax = b`, factor L·Lᵀ.
+
+**Positive semi-definite** is the same list with ≥ 0 instead of &gt; 0 and Cholesky-with-permutations. PSD matrices can be singular; PD matrices are strictly invertible.
+
+**Indefinite** matrices have both positive and negative eigenvalues — `xᵀ A x` is positive for some x, negative for others. Their quadratic form is a *saddle* — not a bowl.
+
+<RunnableCode title="Classify three matrices as PD, PSD-singular, or indefinite" code={psdTestCode} packages={["numpy"]} />
+
+## The quadratic form and its level sets
+
+The function `q(x) = xᵀ A x` is called a **quadratic form**. It's the natural generalization of `f(x) = a x²` to n dimensions with an n×n matrix A. Its level sets — the shapes of `q(x) = c` — reveal the character of A:
+
+- **Positive definite** ⇒ level sets are ellipsoids centered at the origin. The eigenvectors are the axes of the ellipsoid; the reciprocals of eigenvalues are the axis half-lengths (for the unit level set). This is the *convex bowl* — optimization loves this shape.
+- **Positive semi-definite (singular)** ⇒ level sets are degenerate ellipsoids: infinite cylinders in the direction of the zero-eigenvalue eigenvectors.
+- **Indefinite** ⇒ level sets are hyperboloids (saddles). No unique minimizer in ℝⁿ; the origin is a saddle point.
+
+<RunnableCode title="Level sets of x^T A x for PD / PSD-singular / indefinite" code={quadraticFormCode} packages={["numpy", "matplotlib"]} />
+
+The picture on the left (PD) is the shape gradient descent is trying to descend to the center of. Change of basis to the eigenvector coordinates turns the ellipsoid into perfect axis-aligned axes; that's what Newton's method effectively does (it multiplies gradients by H⁻¹ to precondition the geometry).
+
+## Cholesky — the fast, stable factorization for PD matrices
+
+For a positive-definite A there is a unique **Cholesky factorization** A = L·Lᵀ with L lower-triangular and positive diagonal. Once you have L, everything is easy and fast:
+
+- **Solve A·x = b**: forward-solve L·y = b, then back-solve Lᵀ·x = y. Two O(n²) back-solves — much cheaper than LU's O(n³) each time.
+- **Compute det(A)**: det(A) = det(L) · det(Lᵀ) = (product of L's diagonal)². So log-det = 2 · sum of log(L_ii). Numerically stable, no risk of overflow.
+- **Sample from a Gaussian N(0, A)**: pick z ~ N(0, I), return L·z. Then E[(Lz)(Lz)ᵀ] = L·I·Lᵀ = A. This is *the* standard way to sample from a correlated multivariate normal.
+
+Cholesky is about **2× faster than LU** for the same-size matrix (it exploits symmetry to store and compute half the entries) and is **always numerically stable** (no pivoting needed — a happy consequence of PD). If a matrix is truly PD, always factor it with Cholesky. If Cholesky *fails* with a "matrix is not positive definite" error, that's actually a useful signal: your matrix has drifted into PSD-singular or indefinite territory (usually due to numerical noise; regularize by adding `ε · I` for tiny ε).
+
+<RunnableCode title="Cholesky factorization on a 3×3 PD matrix" code={choleskyCode} packages={["numpy"]} />
+
+## Where PSD lurks in ML — the three main appearances
+
+**Covariance matrices** — for any dataset X (n samples, d features), the sample covariance `Σ = (1/(n−1)) · (X − mean)ᵀ · (X − mean)` is symmetric PSD by construction (it's a sum of outer products, and each outer product is PSD). Diagonal entries are variances; off-diagonals are covariances. In Gaussian models the covariance defines the shape of the distribution (its level sets are ellipsoids — of course they are, that's the quadratic form of Σ⁻¹).
+
+**Kernel Gram matrices** — for a positive-definite kernel k(x, y) (like Gaussian RBF or dot-product) and data points x_1, …, x_n, the n×n matrix K with K(i, j) = k(x_i, x_j) is symmetric PSD by construction. Kernel methods (SVMs, Gaussian process regression) all reduce to linear algebra with K, and PSD is what makes the underlying optimization convex.
+
+**Hessians at local minima** — the Hessian H(x) is the matrix of second partial derivatives of a scalar function. It's symmetric (Clairaut's theorem — mixed partials commute for C² functions). At a *local minimum* of a smooth function, H is PSD; at a *strict local minimum* (isolated), H is PD. This is why second-order optimization methods (Newton, natural gradient) can precondition gradients using H⁻¹ to speed convergence — but only in regions where H is PD.
+
+<RunnableCode title="Sample covariance matrix of 3-D data — always PSD" code={covarianceCode} packages={["numpy"]} />
+
+<RealWorldML title="Gaussian Process regression — where every step is PD linear algebra">
+
+A Gaussian Process (GP) is a distribution over functions defined by a kernel function k(x, x'). For regression on n training points X = (x_1, …, x_n) with outputs y = (y_1, …, y_n), the posterior mean and variance at a new point x★ are:
+
+`mean(x★) = k★ᵀ · (K + σ² I)⁻¹ · y`
+`var(x★)  = k(x★, x★) − k★ᵀ · (K + σ² I)⁻¹ · k★`
+
+where K is the n×n training-kernel matrix (K(i, j) = k(x_i, x_j)), k★ is the n-vector of kernel values between x★ and each training point, and σ² is the observation noise variance.
+
+Both formulas require solving a linear system with `(K + σ² I)` — a symmetric PD matrix (K is PSD by construction, and adding σ² I ensures strict positive-definiteness). In real GP implementations:
+
+1. **Factor once**: `L = cholesky(K + σ² I)`. O(n³) cost, done at training time.
+2. **Compute α = solve_triangular(L.T, solve_triangular(L, y))**. Once per training pass; α is the "dual coefficients." O(n²).
+3. **At prediction time**: `mean(x★) = k★.T @ α` — one dot product, O(n).
+4. **For variance**: `v = solve_triangular(L, k★)`, then `var(x★) = k(x★, x★) − v.T @ v`. One O(n²) triangular solve per prediction.
+
+Every step exploits the PD structure: Cholesky (only exists because K + σ²I is PD), triangular solves (only cheap because we have the Cholesky factor), and log-marginal-likelihood evaluation (uses log-det, computed as 2 · sum(log(diag(L))) — accurate to machine precision).
+
+If you tried the same math with `np.linalg.inv(K + σ² I)` you'd be slower by ~2x, numerically less accurate (accumulated rounding error from forming the inverse), and you'd throw away the beautiful triangular structure of L. This is why every serious GP library (GPy, GPflow, GPyTorch, sklearn's GaussianProcessRegressor) is built around Cholesky, and why "the kernel is symmetric PSD" is a non-negotiable structural requirement.
+
+The same story plays out in Bayesian linear regression (posterior covariance is PSD, factor with Cholesky), kernel ridge regression, Kalman filtering (state covariance is PSD, updated with joseph form for numerical stability), and many other ML methods. Once you see "symmetric PSD" as the license to use Cholesky (and everything cheap that follows from it), you'll recognize the pattern in every algorithm that reasons about correlations or second-order structure.
+
+</RealWorldML>
+
+<StudyDepth
+  intro={<>Symmetric-PSD is the "nice matrix" pattern that appears in most ML algorithms involving correlations, kernels, or curvature. Master its spectral theorem + Cholesky and half the numerical tricks in the field become obvious.</>}
+  drill={[
+    <>Symmetric = A equals A.T; guaranteed real eigenvalues + orthogonal eigenvectors (spectral theorem: A = QΛQᵀ)</>,
+    <>Positive definite: xᵀAx is positive for every nonzero x ⇔ all eigenvalues positive ⇔ Cholesky A = LLᵀ exists</>,
+    <>PSD is the same with ≥ (allows zero eigenvalues); covariance matrices are always PSD by construction</>,
+    <>Quadratic form xᵀAx: PD gives an ellipsoid bowl, indefinite gives a saddle, PSD-singular gives a degenerate cylinder</>,
+    <>Cholesky is ~2× faster than LU and always numerically stable — use it whenever a matrix is PD</>,
+    <>In code: `np.linalg.eigh` for symmetric matrices (never `eig`); `np.linalg.cholesky` for PD; regularize `K + εI` if Cholesky fails</>,
+    <>ML appearances: covariance (features), kernel Gram matrices (GP/SVM), Hessians at local minima — each of these gets the PSD treatment</>,
+  ]}
+  skim={[
+    <>Sylvester's criterion (leading principal minors positive ⇔ PD) — mostly a proof tool; use eigenvalues in code</>,
+    <>Full spectral theorem proofs (real eigenvalues, orthogonal eigenvectors) — the facts matter, the derivations are for a real-analysis or linear-algebra course</>,
+    <>LDLᵀ decomposition (Cholesky variant for symmetric non-PD) — nice for numerical linear algebra, rarely load-bearing in typical ML</>,
+  ]}
+/>
+
+<CodeItYourself title="Three drills to internalize PSD and Cholesky">
+
+1. **Cook a covariance matrix and factor it.** Generate X of shape (100, 5) as `np.random.randn(100, 5)`. Compute S = np.cov(X.T) (a 5×5 PSD matrix). Verify: (a) S is symmetric (`np.allclose(S, S.T)`); (b) all eigenvalues are ≥ 0 (`np.linalg.eigvalsh(S)`); (c) Cholesky succeeds (`np.linalg.cholesky(S + 1e-8*np.eye(5))`). Reconstruct S from L @ L.T and confirm agreement.
+
+2. **Draw an ellipse from a PD matrix.** Take A = [[2, 1], [1, 3]]. Compute its eigenvalues and eigenvectors with `eigh`. Plot the level set `xᵀ A x = 1` (an ellipse) using matplotlib. Overlay arrows for the two eigenvectors, scaled by 1/sqrt(eigenvalue) — these should be the semi-axes of your ellipse. Verify visually that eigenvectors are perpendicular.
+
+3. **Sample from a multivariate Gaussian using Cholesky.** For target covariance `Σ = [[3, 1], [1, 2]]`, generate 500 samples with `z = np.random.randn(2, 500)` and `x = L @ z` where L is the Cholesky factor of Σ. Compute the sample covariance of x and confirm it's close to Σ. Scatter-plot the samples and observe the elliptical shape aligned with Σ's eigenvectors.
+
+</CodeItYourself>
+
+<Summary>
+
+- **Symmetric matrix**: A = Aᵀ. Always has real eigenvalues and orthogonal eigenvectors. Spectral theorem: A = Q·Λ·Qᵀ with Q orthogonal, Λ diagonal.
+- **Positive definite (PD)**: symmetric AND `xᵀAx &gt; 0` for every nonzero x ⇔ every eigenvalue positive ⇔ Cholesky A = L·Lᵀ exists. Three equivalent characterizations, use whichever is easiest.
+- **Positive semi-definite (PSD)**: same with ≥ 0. Eigenvalues can be zero (singular case). Covariance matrices are always PSD by construction.
+- **Quadratic form xᵀAx**: PD gives an ellipsoidal bowl (convex, unique minimum), indefinite gives a saddle, PSD-singular gives a degenerate cylinder.
+- **Cholesky**: A = L·Lᵀ with L lower-triangular and positive diagonal. Only exists for PD matrices. ~2× faster than LU and always numerically stable. Use for solving Ax = b, computing log-det, and sampling from Gaussians.
+- In code: `np.linalg.eigh` (not eig) for symmetric matrices; `np.linalg.cholesky` for PD; if Cholesky fails, add `εI` for a tiny ε to regularize.
+- ML appearances: **covariance matrices** in Gaussian models, **kernel Gram matrices** in kernel methods and Gaussian processes, **Hessians** at local minima of smooth losses — each gets Cholesky-powered fast paths.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>Is A = [[2, 3], [3, 5]] symmetric? Is it positive definite?</>,
+      hint: <>Symmetric ⇔ A equals A.T. PD ⇔ both eigenvalues positive (or use the leading-minor test for 2×2: a &gt; 0 and det &gt; 0).</>,
+      answer: <>Symmetric: A(1,2) = 3 = A(2,1), so <b>yes, symmetric</b>. <br /> Positive definite: leading principal minors are det[2] = 2 (positive) and det(A) = 2·5 − 3·3 = 10 − 9 = 1 (positive). By Sylvester's criterion, <b>yes, positive definite</b>. <br /> You can verify with eigenvalues: they are (7 ± √13)/2 ≈ 5.30 and 1.70, both positive.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>Is B = [[1, 2], [2, 1]] positive definite?</>,
+      hint: <>Check eigenvalues or the quadratic form on a specific vector.</>,
+      answer: <>Eigenvalues of B: characteristic polynomial (1 − λ)² − 4 = 0 gives (1 − λ) = ±2, so λ = 3 or λ = −1. One positive, one negative ⇒ <b>indefinite</b>. <br /> Or check the quadratic form on x = (1, −1): xᵀBx = 1 − 4 + 1 = −2 &lt; 0, so B is not even PSD. B corresponds to a saddle surface, not a bowl.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Prove: for any matrix M (any shape m × n), the matrix A = MᵀM is symmetric and positive semi-definite.</>,
+      hint: <>Symmetry: transpose the product and see what happens. PSD: compute xᵀAx and simplify.</>,
+      answer: <><b>Symmetric:</b> Aᵀ = (MᵀM)ᵀ = MᵀMᵀᵀ = MᵀM = A. ✓ <br /><br /><b>PSD:</b> for any x, xᵀAx = xᵀ(MᵀM)x = (Mx)ᵀ(Mx) = ‖Mx‖² ≥ 0. Equals zero iff Mx = 0 (i.e., x is in the nullspace of M). So it's PSD, and it's *strictly* PD iff M has trivial nullspace (i.e., M is injective / has full column rank). <br /><br /> This is the fundamental fact behind: covariance matrices (Σ = XᵀX/(n−1) − outer products), normal equations of least squares (AᵀA is PSD; PD if A has full column rank), and the "Gram matrix" of any set of vectors. Whenever you see MᵀM in a formula, you can immediately conclude "symmetric PSD" and start using the tools of this chapter.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>For A = [[4, 2], [2, 3]], compute the Cholesky factorization A = L Lᵀ by hand.</>,
+      hint: <>L is lower-triangular with positive diagonal: L = [[a, 0], [b, c]]. Equate entries of L Lᵀ to A.</>,
+      answer: <>Write L = [[a, 0], [b, c]] with a, c &gt; 0. Then L Lᵀ = [[a², a·b], [a·b, b² + c²]]. Matching entries with A: <br /> a² = 4 ⇒ a = 2 (positive root). <br /> a·b = 2 ⇒ b = 2/a = 1. <br /> b² + c² = 3 ⇒ 1 + c² = 3 ⇒ c = √2. <br /> So <b>L = [[2, 0], [1, √2]]</b>. <br /> Verify: L Lᵀ = [[4, 2], [2, 1 + 2]] = [[4, 2], [2, 3]] = A. ✓ This procedure (Cholesky–Banachiewicz) generalizes to any n×n PD matrix — sequentially solve for each entry of L row by row.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>You compute the sample covariance of your data and want to use it in a GP regression. Cholesky fails with a "not positive definite" error. What is happening, and what is the standard fix?</>,
+      hint: <>Sample covariances are PSD by construction — can they be singular? And what's the effect of adding εI?</>,
+      answer: <><b>Diagnosis:</b> Sample covariance is always PSD, but it can be singular (have zero eigenvalues) whenever the number of samples n ≤ d (the number of features), or whenever some features are perfectly correlated. Even when it's *technically* PD, floating-point rounding can make some tiny eigenvalues slightly negative (e.g., λ_min ≈ −1e-16), and Cholesky demands strictly positive diagonal so it fails. <br /><br /><b>Standard fix — "jitter":</b> Replace K with K + ε·I for a small ε (typically 1e-6 to 1e-4). This lifts every eigenvalue by ε, guaranteeing strict positive-definiteness. The intuition: it's equivalent to assuming a small extra observation noise, which is almost always physically justified (measurements are never exact anyway). <br /><br /> The practical trick: start with ε = 1e-6, catch the LinAlgError from Cholesky, and try again with ε = 1e-5, then 1e-4, etc. — a common GPML pattern known as "cholesky with adaptive jitter." The bigger the ε you need, the more your kernel is telling you something is ill-conditioned (features too similar, kernel bandwidth too small, etc.), and you should investigate rather than just crank ε up. <br /><br /> In Bayesian linear regression the same phenomenon leads to *Ridge regularization* (`(XᵀX + λI)⁻¹`), which is literally the same jitter trick with a probabilistic interpretation (Gaussian prior on the weights).</>
+    },
+    {
+      difficulty: "hard",
+      q: <>The Hessian of a smooth function at a critical point classifies whether it's a min, max, or saddle. Use the eigenvalue characterization of PD/PSD/indefinite to state exactly what the classification is.</>,
+      hint: <>Think about the second-order Taylor expansion at the critical point.</>,
+      answer: <>At a critical point x★ of f, ∇f(x★) = 0. The second-order Taylor expansion gives: <br /> f(x★ + h) ≈ f(x★) + (1/2) · hᵀ H h  (where H = Hessian at x★). <br /><br /> The behavior of f near x★ is determined by the quadratic form hᵀ H h: <br /><br /> <b>H PD (all eigenvalues positive)</b> ⇒ hᵀ H h &gt; 0 for every nonzero h ⇒ f increases in every direction ⇒ <b>strict local minimum</b>. <br /><br /> <b>H negative definite (all eigenvalues negative)</b> ⇒ f decreases in every direction ⇒ <b>strict local maximum</b>. <br /><br /> <b>H indefinite (both positive and negative eigenvalues)</b> ⇒ f increases in some directions and decreases in others ⇒ <b>saddle point</b>. <br /><br /> <b>H PSD but singular (some zero eigenvalues, no negatives)</b> ⇒ f is flat along the eigenvectors with zero eigenvalue ⇒ <b>degenerate critical point</b> (could be a minimum along a subspace, need higher-order analysis to fully classify). <br /><br /> This is the *second-derivative test* in n dimensions. In ML training, saddle points are a huge deal — in high dimensions they vastly outnumber local minima, and gradient-only optimizers can get stuck near them (though SGD's noise usually helps escape). Second-order methods (Newton) can also fail near saddles because H⁻¹ blows up in the negative-eigenvalue direction — modern trust-region methods and cubic regularization handle this correctly.</>
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "A real symmetric matrix always has:",
+      choices: [
+        { text: "Complex eigenvalues" },
+        { text: "Real eigenvalues and orthogonal eigenvectors (spectral theorem)", correct: true },
+        { text: "Positive determinant" },
+        { text: "Diagonal entries all equal" },
+      ],
+      explanation: <>Spectral theorem for symmetric matrices: A = Q·Λ·Qᵀ where Q is orthogonal (columns are orthonormal eigenvectors) and Λ is diagonal (real eigenvalues). This is guaranteed for any real symmetric matrix, no additional assumptions needed. Use `np.linalg.eigh` in code — it exploits and enforces this structure.</>
+    },
+    {
+      q: "A matrix A is positive definite if:",
+      choices: [
+        { text: "Every entry of A is positive" },
+        { text: "A is symmetric AND every eigenvalue is strictly positive (equivalently, xᵀAx is positive for every nonzero x, equivalently Cholesky exists)", correct: true },
+        { text: "det(A) is positive" },
+        { text: "The trace of A is positive" },
+      ],
+      explanation: <>Three equivalent characterizations of PD: (1) `xᵀAx &gt; 0` for every nonzero x, (2) every eigenvalue is positive, (3) Cholesky factorization A = LLᵀ exists with L having positive diagonal. Positive entries are neither necessary nor sufficient (a matrix with all positive entries can still be indefinite); positive det/trace is necessary but not sufficient.</>
+    },
+    {
+      q: "The Cholesky factorization A = L·Lᵀ:",
+      choices: [
+        { text: "Exists for any square matrix" },
+        { text: "Exists uniquely for any symmetric positive-definite matrix, and is faster and more stable than LU", correct: true },
+        { text: "Requires A to be diagonal" },
+        { text: "Requires A to have integer entries" },
+      ],
+      explanation: <>Cholesky exists (uniquely, with L lower-triangular and positive diagonal) iff A is symmetric positive definite. It's about 2× faster than LU (exploits symmetry to compute half the entries) and always numerically stable (no pivoting needed). Use it whenever a matrix is PD — solving, log-det, and Gaussian sampling all get much cheaper.</>
+    },
+    {
+      q: "The sample covariance matrix Σ = (1/(n-1)) XᵀX (with X centered) is:",
+      choices: [
+        { text: "Always positive definite (never singular)" },
+        { text: "Always symmetric positive semi-definite (can be singular if n ≤ d or features are perfectly correlated)", correct: true },
+        { text: "Sometimes indefinite" },
+        { text: "Always the identity matrix" },
+      ],
+      explanation: <>By the general fact MᵀM is symmetric PSD, sample covariance is symmetric PSD. It's strictly PD iff X has full column rank (i.e., features are linearly independent and we have enough samples). When n ≤ d or features are collinear, it's singular — the reason ridge regression / Cholesky-with-jitter exist.</>
+    },
+    {
+      q: "In numerical code, for a symmetric matrix you should use:",
+      choices: [
+        { text: "np.linalg.eig (the general eigendecomposition)" },
+        { text: "np.linalg.eigh (the specialized routine for symmetric/Hermitian matrices)", correct: true },
+        { text: "np.linalg.svd" },
+        { text: "np.linalg.inv" },
+      ],
+      explanation: <>`eigh` exploits symmetry to be faster and — critically — guaranteed to return real eigenvalues in sorted order and truly orthonormal eigenvectors. `eig` on a symmetric matrix can return tiny imaginary parts (rounding artifacts) and slightly non-orthogonal vectors, silently breaking any downstream code that assumes them. Same for `eigvalsh` vs `eigvals`. Use the h-suffixed routines whenever the input is symmetric.</>
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/matrices-transformations/positive-definite" title="Symmetric & positive-definite matrices" />

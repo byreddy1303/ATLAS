@@ -1,0 +1,500 @@
+---
+title: Regression metrics & residuals
+tier: 2
+phase: "2.1"
+---
+
+export const coreMetricsCode = `# The four core regression metrics side-by-side on a common dataset.
+import numpy as np
+
+np.random.seed(0)
+N = 500
+y_true = 10 + 2 * np.random.randn(N)              # true values around 10 +/- 2
+y_pred = y_true + 0.5 * np.random.randn(N)        # predictions with small noise
+
+def mse(y, p):    return np.mean((p - y) ** 2)
+def rmse(y, p):   return np.sqrt(np.mean((p - y) ** 2))
+def mae(y, p):    return np.mean(np.abs(p - y))
+def mape(y, p):   return np.mean(np.abs((p - y) / y)) * 100         # percentage
+def r2(y, p):
+    rss = np.sum((y - p) ** 2)
+    tss = np.sum((y - y.mean()) ** 2)
+    return 1 - rss / tss
+
+print(f"MSE   = {mse(y_true, y_pred):.4f}      (squared units of y)")
+print(f"RMSE  = {rmse(y_true, y_pred):.4f}     (same units as y)")
+print(f"MAE   = {mae(y_true, y_pred):.4f}      (robust to outliers)")
+print(f"MAPE  = {mape(y_true, y_pred):.4f}%    (percentage error)")
+print(f"R^2   = {r2(y_true, y_pred):.4f}       (fraction of variance explained; 1 = perfect)")
+print()
+print("Rule of thumb: report both RMSE and MAE — big gap between them = outliers dragging RMSE up.")`;
+
+export const outlierRobustnessCode = `# MSE vs MAE robustness: add an outlier and watch the metrics.
+import numpy as np, matplotlib.pyplot as plt
+
+np.random.seed(0)
+N = 100
+y_true = np.linspace(0, 10, N)
+y_clean = y_true + 0.5 * np.random.randn(N)                    # small Gaussian noise
+
+# Add a single outlier
+y_outlier = y_clean.copy()
+y_outlier[50] = 50                                              # ONE huge outlier
+
+# Fit constant baselines (median vs mean) to see which each loss produces
+mean_fit   = np.full_like(y_true, y_outlier.mean())
+median_fit = np.full_like(y_true, np.median(y_outlier))
+
+# Both minimize their respective losses (MSE / MAE) with a constant predictor
+mse_mean   = np.mean((mean_fit - y_outlier) ** 2)
+mse_median = np.mean((median_fit - y_outlier) ** 2)
+mae_mean   = np.mean(np.abs(mean_fit - y_outlier))
+mae_median = np.mean(np.abs(median_fit - y_outlier))
+
+print(f"Data: 99 rows y ~= x with small noise, 1 outlier y[50] = 50")
+print()
+print(f"Mean predictor (minimizes MSE):   value = {y_outlier.mean():.2f}")
+print(f"  MSE = {mse_mean:.4f}      MAE = {mae_mean:.4f}")
+print()
+print(f"Median predictor (minimizes MAE): value = {np.median(y_outlier):.2f}")
+print(f"  MSE = {mse_median:.4f}      MAE = {mae_median:.4f}")
+print()
+print("The outlier drags the MEAN toward 50; the MEDIAN is unaffected.")
+print("So: MAE is ROBUST to outliers; MSE is not.")
+print("Rule: report MAE alongside MSE when your data might contain outliers.")
+
+# Visualize
+fig, ax = plt.subplots(figsize=(9, 4))
+ax.plot(np.arange(N), y_outlier, "o", color="royalblue", markersize=4, alpha=0.5, label="data (with outlier)")
+ax.axhline(y_outlier.mean(),   color="crimson", linestyle="--", lw=2, label=f"mean = {y_outlier.mean():.2f}")
+ax.axhline(np.median(y_outlier), color="teal",  linestyle="--", lw=2, label=f"median = {np.median(y_outlier):.2f}")
+ax.plot([50], [50], "*", color="gold", markersize=15, label="outlier")
+ax.set_xlabel("index"); ax.set_ylabel("y")
+ax.set_title("Mean vs median predictor with one huge outlier")
+ax.legend(); ax.grid(alpha=0.3)
+plt.tight_layout()`;
+
+export const residualPatternsCode = `# Residual plots diagnose model misspecification.
+import numpy as np, matplotlib.pyplot as plt
+
+np.random.seed(0)
+x = np.linspace(-3, 3, 200)
+
+# Three residual patterns
+y_good     = 2 * x + 1 + 0.5 * np.random.randn(200)          # linear + iid Gaussian noise
+y_curved   = 2 * x + 0.6 * x**2 + 0.4 * np.random.randn(200) # true nonlinearity
+y_heteroscedastic = 2 * x + 1 + (0.2 + 0.4 * np.abs(x)) * np.random.randn(200)  # variance depends on x
+
+# Fit LINEAR to each and inspect residuals
+def fit_linear(x, y):
+    X = np.column_stack([x, np.ones_like(x)])
+    w, *_ = np.linalg.lstsq(X, y, rcond=None)
+    return X @ w, y - X @ w
+
+fig, axes = plt.subplots(2, 3, figsize=(13, 6))
+for col, (title, y) in enumerate([
+    ("GOOD: assumptions hold", y_good),
+    ("BAD 1: nonlinearity",    y_curved),
+    ("BAD 2: heteroscedasticity", y_heteroscedastic),
+]):
+    y_hat, resid = fit_linear(x, y)
+    axes[0, col].plot(x, y,     "o", color="royalblue", markersize=4, alpha=0.6, label="data")
+    axes[0, col].plot(x, y_hat, "-", color="crimson",   lw=2, label="fit")
+    axes[0, col].set_title(title); axes[0, col].grid(alpha=0.3); axes[0, col].legend(fontsize=8)
+    axes[1, col].plot(x, resid, "o", color="crimson", markersize=4, alpha=0.6)
+    axes[1, col].axhline(0, color="k", lw=0.7)
+    axes[1, col].set_title(f"residuals (mean = {resid.mean():.2f}, std = {resid.std():.2f})")
+    axes[1, col].grid(alpha=0.3)
+    axes[1, col].set_xlabel("x"); axes[1, col].set_ylabel("y - y_hat")
+plt.tight_layout()
+
+print("Residuals diagnose:")
+print("  GOOD:  scattered around 0 with no structure -> linear model is appropriate")
+print("  BAD 1: U-shape -> nonlinearity in the data. Try polynomial features or a nonlinear model")
+print("  BAD 2: fan-out (wider spread at extremes) -> heteroscedastic noise. Use weighted least squares")
+print("         or transform y (e.g. log) so the residual variance is constant.")`;
+
+export const quantileCode = `# Quantile regression: predict the P-th percentile instead of the mean.
+# Useful when you need PREDICTION INTERVALS or the mean is misleading.
+import numpy as np
+from sklearn.linear_model import QuantileRegressor
+
+np.random.seed(0)
+N = 400
+x = np.random.uniform(0, 10, N)
+# Heteroscedastic noise: spread grows with x
+y = 2 * x + 1 + (0.5 + 0.5 * x) * np.random.randn(N)
+
+# Fit different quantiles
+X = x.reshape(-1, 1)
+quantiles = [0.05, 0.5, 0.95]
+predictions = {}
+for q in quantiles:
+    model = QuantileRegressor(quantile=q, alpha=0)
+    model.fit(X, y)
+    predictions[q] = model.predict(X)
+
+# Plot the three quantile predictions
+import matplotlib.pyplot as plt
+order = np.argsort(x)
+fig, ax = plt.subplots(figsize=(8, 4))
+ax.plot(x, y, "o", color="royalblue", markersize=4, alpha=0.5, label="data")
+colors = ["teal", "crimson", "teal"]
+labels = ["5th percentile", "median (50th)", "95th percentile"]
+for q, color, label in zip(quantiles, colors, labels):
+    ax.plot(x[order], predictions[q][order], "-", color=color, lw=2, label=label)
+ax.set_xlabel("x"); ax.set_ylabel("y")
+ax.set_title("Quantile regression — predicting 5th, 50th, 95th percentiles")
+ax.legend(); ax.grid(alpha=0.3)
+plt.tight_layout()
+
+# What fraction of true y are below each predicted quantile?
+for q in quantiles:
+    below = (y < predictions[q]).mean()
+    print(f"Predicted the {int(q*100)}th percentile; actual fraction below prediction = {below*100:.1f}%")
+print()
+print("The 90% prediction interval is [5th percentile, 95th percentile]:")
+below_upper = (y < predictions[0.95]).mean()
+above_lower = (y > predictions[0.05]).mean()
+coverage = below_upper - (y < predictions[0.05]).mean()
+print(f"Coverage: {coverage*100:.1f}% of true y are inside (should be ~90%)")`;
+
+<Prerequisites items={[
+  { href: "/learn/core-ml/supervised-basics/linear-regression", label: "Linear regression — closed form and gradient", blurb: "MSE-based regression is the canvas for all the metrics discussed here." },
+  { href: "/learn/mathematics/probability/expectation-variance", label: "Expectation, variance & moments", blurb: "R² = 1 - RSS/TSS uses the definition of total variance around the mean — expectation & variance are the machinery." },
+]} />
+
+<NewConcepts
+  concepts={[
+    { name: "MAPE (Mean Absolute Percentage Error)", blurb: "mean of |(y - ŷ) / y| · 100%. Scale-free — useful when comparing predictors across problems with different y scales. Traps: undefined when y = 0, asymmetric (over- and under-prediction penalized differently)." },
+    { name: "Huber loss", blurb: "quadratic near zero, linear far away. Combines MSE's differentiability with MAE's outlier robustness. Standard for regression with mild outliers; parameter δ controls the transition." },
+    { name: "Quantile regression", blurb: "instead of predicting the mean, predict a specific PERCENTILE. Fit by minimizing the 'pinball loss' — asymmetric absolute error. Useful for prediction intervals and asymmetric costs." },
+    { name: "Adjusted R²", blurb: "R² penalized by the number of features: adj_R² = 1 - (1 - R²) · (N - 1) / (N - D - 1). Prevents R² from artificially rising as you add irrelevant features." },
+    { name: "Symmetric MAPE (sMAPE)", blurb: "|y - ŷ| / ((|y| + |ŷ|)/2). Symmetric version of MAPE — avoids the 'infinity when y = 0' issue and is symmetric in over- and under-prediction. Standard in forecasting competitions." },
+  ]}
+/>
+
+<Motivation title="Different metrics reward different behaviors — pick the metric that matches your cost">
+
+A regression model predicts a continuous value. But "how good is the prediction" doesn't have a single answer. Consider:
+
+- **You're forecasting inventory demand.** Missing 20 units when you predicted 100 (20% off) is worse than missing 5 units when you predicted 200 (2.5% off) — same absolute error, very different business impact. You want **percentage-based** metrics.
+- **You're pricing risk.** A single outlier of ±$1M matters much more than 100 small mistakes of ±$100. You want **squared-error** metrics that magnify big mistakes.
+- **You're predicting delivery time.** Being 2 hours late is much worse than being 2 hours early (customer complains vs happily surprised). You want **asymmetric** metrics.
+- **You're building a warehouse restocking system.** You need a 95th-percentile prediction ("worst-case demand this week"), not the average. You want **quantile** regression.
+
+For a GenAI engineer, choosing the right metric matters in several places:
+
+1. **LLM eval benchmarks** (BLEU, ROUGE, BERTScore, LLM-as-judge) are all regression-like scores on a continuous quality scale.
+2. **Reward-model training** for RLHF fits scalar rewards from preference labels. The loss you choose (MSE vs. Bradley-Terry log-loss vs. cross-entropy on preference pairs) shapes the reward's calibration.
+3. **Latency prediction / capacity planning.** Quantile regression for "how long will this request take at the 99th percentile?" is a common ML-ops question.
+4. **Perplexity for language models** is exp(mean cross-entropy per token) — a specific transformation of a regression-like loss over token probabilities.
+
+This chapter builds the core regression metrics (MSE, RMSE, MAE, MAPE, R²), the outlier-robust alternatives (Huber, quantile), and the residual-plot diagnostics that reveal when to switch.
+
+</Motivation>
+
+<Intuition title="Different losses penalize errors differently; the model minimizes what you optimize">
+
+The two most-basic regression losses:
+
+- **MSE (Mean Squared Error):** `(1/N) · Σ (ŷ − y)²`. Squares each error. Punishes big errors much more than small ones. The estimator that minimizes MSE with a constant predictor is the **MEAN** of y.
+- **MAE (Mean Absolute Error):** `(1/N) · Σ |ŷ − y|`. Uses absolute value. Punishes each error linearly, so outliers matter less. The estimator that minimizes MAE with a constant predictor is the **MEDIAN** of y.
+
+Same data, different losses, different optimal predictions. The METRIC you optimize shapes what the model becomes.
+
+**Rule of thumb by loss shape:**
+
+- **MSE / RMSE:** you care about big errors more (they're squared). Sensitive to outliers.
+- **MAE:** all errors matter equally per unit. Robust to outliers.
+- **Huber:** MSE for small errors, MAE for large — best of both when you have some outliers you don't want to fully ignore.
+- **MAPE:** scale-free (compares fractional error, not absolute). Good when scale varies wildly (predicting revenue from $10 startups to $10B companies).
+- **Quantile loss (pinball):** targets a specific percentile. Good for asymmetric costs and prediction intervals.
+
+</Intuition>
+
+<Recall term="MSE (Mean Squared Error)">
+
+MSE(y, ŷ) = (1/N) · Σᵢ (ŷᵢ − yᵢ)². Same units-squared as y (multiply units by 2 — e.g., "dollars²"). RMSE = √MSE puts it back into the units of y. Convex, differentiable everywhere, matches the maximum-likelihood estimator under Gaussian noise. The default regression loss.
+
+</Recall>
+
+## The four core metrics
+
+**MSE (Mean Squared Error):**
+
+$$
+\mathrm{MSE} = \frac{1}{N} \sum_i (\hat{y}_i - y_i)^2
+$$
+
+Units: y-squared (usually not directly interpretable — see RMSE). Punishes big errors quadratically. Best statistic when errors are Gaussian.
+
+**RMSE (Root Mean Squared Error):**
+
+$$
+\mathrm{RMSE} = \sqrt{\mathrm{MSE}}
+$$
+
+Same units as y. Directly interpretable ("on average, off by X y-units"). Standard for reporting.
+
+**MAE (Mean Absolute Error):**
+
+$$
+\mathrm{MAE} = \frac{1}{N} \sum_i |\hat{y}_i - y_i|
+$$
+
+Robust to outliers (each error contributes linearly, not squared). Also in units of y.
+
+**MAPE (Mean Absolute Percentage Error):**
+
+$$
+\mathrm{MAPE} = \frac{1}{N} \sum_i \left| \frac{\hat{y}_i - y_i}{y_i} \right| \cdot 100\%
+$$
+
+Scale-free. Compare model performance across problems with different y scales. Watch for the y_i = 0 trap.
+
+<RunnableCode title="Core regression metrics side-by-side" code={coreMetricsCode} packages={["numpy"]} />
+
+**RMSE vs MAE comparison rule:** if RMSE >> MAE, you have outliers. If RMSE ≈ MAE, errors are roughly uniform. Report both.
+
+## R² and adjusted R²
+
+**R² (coefficient of determination):**
+
+$$
+R^2 = 1 - \frac{\mathrm{RSS}}{\mathrm{TSS}} = 1 - \frac{\sum_i (y_i - \hat{y}_i)^2}{\sum_i (y_i - \bar{y})^2}
+$$
+
+Interpretation: fraction of the target's variance explained by the model. Ranges from 1 (perfect) down to 0 (baseline = predicting the mean) and can go NEGATIVE (worse than predicting the mean).
+
+**R² for regression is like accuracy for classification** — a single number that summarizes model quality. But like accuracy, it hides details:
+
+- Ignores the SCALE of errors (a model with R² = 0.9 could be off by 10% or 100% on average, depending on target variance).
+- Sensitive to outliers (RSS is squared).
+- Only makes sense on datasets with meaningful target variance.
+
+**Adjusted R²** penalizes R² for the number of features (prevents it from artificially rising with irrelevant features):
+
+$$
+\text{adj\_}R^2 = 1 - (1 - R^2) \cdot \frac{N - 1}{N - D - 1}
+$$
+
+where D is the number of features. Standard for model comparison — the model with the higher adjusted R² is preferred over one with more features but similar R².
+
+## Robust regression — Huber loss
+
+When your data has outliers, MSE penalizes them harshly (squared) — the model spends most of its capacity fitting the outliers instead of the bulk of the data. MAE is more robust but has issues at zero (non-differentiable, so gradient methods use subgradients).
+
+**Huber loss** combines the two:
+
+$$
+L_\delta(r) = \begin{cases} \frac{1}{2} r^2 & \text{if } |r| \le \delta \\ \delta \cdot (|r| - \frac{\delta}{2}) & \text{if } |r| > \delta \end{cases}
+$$
+
+where r = ŷ − y is the residual. Quadratic near zero (differentiable, well-behaved), linear far away (outliers don't blow up gradients). Parameter δ (typically 1.35 for near-Gaussian noise) controls where the transition happens.
+
+**In sklearn:** `HuberRegressor` fits with Huber loss. Robust to ~5-10% outliers without needing to remove them.
+
+<RunnableCode title="MSE vs MAE robustness — a single outlier" code={outlierRobustnessCode} packages={["numpy", "matplotlib"]} captureFig={true} />
+
+## Quantile regression
+
+Standard regression predicts the CONDITIONAL MEAN E[y | x]. Sometimes you want a specific quantile — e.g., "the 95th percentile of delivery time given features x" for capacity planning.
+
+**Quantile regression** fits models to predict the q-th percentile. The loss is the **pinball loss** (asymmetric absolute error):
+
+$$
+L_q(r) = \begin{cases} q \cdot r & \text{if } r \ge 0 \\ (q - 1) \cdot r & \text{if } r < 0 \end{cases}
+$$
+
+For q = 0.5, this reduces to MAE (median regression). For q = 0.95, over-predictions are penalized 19× more than under-predictions — the model learns to sit above 95% of the data.
+
+**Uses:**
+
+- **Prediction intervals.** Fit two quantiles (say 5% and 95%); the interval [q_0.05, q_0.95] contains 90% of the actual y values.
+- **Asymmetric costs.** Under-stocking (miss = lost sale) vs over-stocking (miss = waste). Different quantiles for each side.
+- **Value at risk in finance.** 99% VaR = "what's the 1% worst-case loss?" is a quantile regression problem.
+
+<RunnableCode title="Quantile regression — 3 quantiles + coverage check" code={quantileCode} packages={["numpy", "sklearn", "matplotlib"]} captureFig={true} />
+
+## Residual analysis
+
+Once you've fit a model, PLOT the residuals `y - ŷ` against various things:
+
+- **vs. predicted values ŷ:** should show scatter around zero with no pattern.
+  - **U-shape:** nonlinearity in the true relationship.
+  - **Fan-out (wider at extremes):** heteroscedastic noise.
+- **vs. each feature x_i:** should show scatter around zero with no pattern.
+  - **Linear pattern:** you're missing a term in x_i.
+  - **Curve:** you need polynomial or nonlinear features of x_i.
+- **Q-Q plot of residuals vs Gaussian:** should be a straight line if residuals are Gaussian.
+  - **S-shape at ends:** heavy tails (outliers matter more than Gaussian assumes).
+  - **Systematic curve:** residual distribution isn't Gaussian.
+
+<RunnableCode title="Residual plots reveal 3 model states" code={residualPatternsCode} packages={["numpy", "matplotlib"]} captureFig={true} />
+
+**Diagnostic algorithm:** always plot residuals after fitting. If they show structure, your model is misspecified. Fix by adding polynomial features (for nonlinearity), using WLS (for heteroscedasticity), or switching to a nonlinear model.
+
+<RealWorldML title="Regression metrics in LLM evaluation">
+
+LLM systems have several regression-flavored eval metrics:
+
+**Perplexity (perp).** For a language model, `perp = exp(mean CE per token)`. Lower is better. It IS a regression metric — the model outputs a probability, cross-entropy compares to the one-hot label, exp makes the number more interpretable as "effective vocabulary size the model is uncertain over." A model with perplexity 2.7 says "on average, I'm uncertain over 2.7 tokens per position" — much sharper than a random model with perplexity = vocab_size.
+
+**BLEU / ROUGE for translation and summarization.** N-gram overlap between generated and reference text. BLEU counts precision; ROUGE counts recall. Not a "true" regression — they're bounded in [0, 1] — but function similarly (higher = better). All modern LLM evals report these alongside human evaluations.
+
+**BERTScore.** Uses BERT embeddings to measure semantic similarity between generated and reference. Continuous score, effectively a regression metric. More robust than BLEU/ROUGE for tasks where multiple valid outputs exist.
+
+**LLM-as-judge grades.** GPT-4 rates outputs on a 1-10 scale. This is a regression score. Standard practice: report BOTH mean and standard deviation (some outputs are consistently rated, others high variance).
+
+**Reward models for RLHF.** Reward is a scalar. Metrics: how well the reward model's outputs correlate with human preference. Kendall tau or Spearman correlation on preference pairs.
+
+**Latency prediction for capacity planning.** "Given features (prompt length, model, complexity), predict median vs 99th percentile latency." Straight quantile regression.
+
+**Cost prediction.** "For a workload, predict expected API cost." Standard regression, likely with MAPE as the primary metric (percentage errors matter for budgeting).
+
+**Retrieval scores.** RAG retrieval sometimes reports "cosine similarity of retrieved chunks with query" as a diagnostic — that's a regression metric on the [-1, 1] scale.
+
+</RealWorldML>
+
+<StudyDepth
+  drill={[
+    "MSE = mean squared error; RMSE = sqrt(MSE); same units as y.",
+    "MAE = mean absolute error; robust to outliers; less sensitive to big misses.",
+    "R² = 1 - RSS/TSS; fraction of variance explained; can be negative.",
+    "MAPE = mean absolute percentage error; scale-free but undefined when y = 0.",
+    "Huber loss = MSE for small errors, MAE for large; robust to outliers with smooth gradient.",
+    "Quantile regression uses pinball loss to target a specific percentile — good for prediction intervals and asymmetric costs.",
+    "Residual plots diagnose model misspecification: U-shape = nonlinearity, fan-out = heteroscedasticity.",
+    "Always report BOTH RMSE and MAE — big gap indicates outliers dragging RMSE.",
+  ]}
+  skim={[
+    "Adjusted R² and its use in feature-count-corrected comparison.",
+    "sMAPE and its symmetry properties for forecasting competitions.",
+    "The pinball loss's asymmetric slopes and how they map to quantiles.",
+    "Weighted least squares for heteroscedastic noise.",
+    "Cook's distance & leverage for outlier detection in regression.",
+  ]}
+/>
+
+<CodeItYourself title="Three drills — RMSE/MAE gap, quantile-based intervals, residual detective">
+
+1. **Detect outliers via RMSE/MAE gap.** Generate 1000 clean predictions with small noise, then inject 5 outliers (predictions off by 100×). Compute RMSE and MAE. The RMSE should be much larger; that's the outlier signal.
+
+2. **Build a 90% prediction interval.** Fit two quantile regressions (q = 0.05 and q = 0.95) on your data. On a held-out set, verify that ~90% of the true y values fall within [q_0.05, q_0.95]. This is the empirical coverage of your interval.
+
+3. **Residual detective.** Fit a linear regression to `y = 2·x + 0.5·x² + noise`. Plot residuals vs x. Identify the U-shape (nonlinearity). Add a quadratic feature, refit. Verify residuals are now flat.
+
+</CodeItYourself>
+
+<Summary>
+
+- **MSE / RMSE:** squared error; standard for Gaussian noise; sensitive to outliers.
+- **MAE:** absolute error; robust to outliers; less "smooth" for optimization.
+- **MAPE:** percentage error; scale-free; watch for y = 0.
+- **R²:** fraction of variance explained; use adjusted R² when comparing models with different numbers of features.
+- **Huber loss:** MSE + MAE hybrid; robust to outliers while remaining differentiable.
+- **Quantile regression:** predict a specific percentile via pinball loss; great for intervals and asymmetric costs.
+- **Residual plots** diagnose misspecification: U-shape = missing nonlinearity; fan-out = heteroscedasticity.
+- **Always report both RMSE and MAE**; big gap = outliers.
+- **LLM eval metrics** (perplexity, BLEU, BERTScore) all inherit from regression metric thinking.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>You have RMSE = 3.5 and MAE = 1.2 on a regression task. What does this tell you?</>,
+      hint: <>Compare the two.</>,
+      answer: <>RMSE (3.5) is MUCH larger than MAE (1.2) — a factor of 3. This is a strong signal that there are <b>OUTLIERS</b> in your predictions (or in the data). RMSE squares errors, so a few big misses inflate it dramatically. MAE treats each error linearly, so it stays representative of typical error size. <br /><br /> Investigate: (1) plot residuals to see if outliers are real vs. rare or systematic; (2) consider Huber loss (robust to outliers); (3) if outliers reflect a distinct sub-population, consider a different model for them. Rule: gap of ~1.5x is normal (RMSE ≥ MAE always by Jensen); gap of 3x+ demands investigation.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>Why does MAE give the MEDIAN as the optimal constant predictor, while MSE gives the MEAN?</>,
+      hint: <>Take the derivative of each loss with respect to a constant prediction c and set to zero.</>,
+      answer: <>For MSE(c) = (1/N) Σ (c - y_i)². Derivative: (2/N) Σ (c - y_i) = 0 → c = (1/N) Σ y_i = <b>mean</b>. <br /><br /> For MAE(c) = (1/N) Σ |c - y_i|. Derivative (subgradient): (1/N) · [(# of y_i &lt; c) - (# of y_i &gt; c)] = 0 → number of y below c equals number above → c = <b>median</b>. <br /><br /> This is why MEAN is sensitive to outliers (one big outlier drags it) and MEDIAN is robust (adding one big value doesn't change which value is in the middle). The choice of loss shapes what the model becomes — pick MSE if you want the model to "chase" the average behavior; MAE if you want it to focus on typical values.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Under what conditions does R² go NEGATIVE?</>,
+      hint: <>R² = 1 - RSS/TSS. When can RSS exceed TSS?</>,
+      answer: <>R² = 1 - RSS/TSS. It's negative iff RSS &gt; TSS — the residuals from your model are LARGER than the residuals from predicting the constant mean. <br /><br /> This happens when: <br /> (1) You fit a bad model — an over-regularized or over-simplified model that missed the trend entirely. <br /> (2) You evaluate on a different distribution than you trained on — the "mean of test y" is not what your training model predicts. <br /> (3) There's serious model misspecification — e.g., linear regression on truly nonlinear data with heteroscedastic noise. <br /><br /> Negative R² is a strong signal to reconsider the model. On the TRAINING set, unregularized LR can't produce negative R² (because it will at least match the mean). On the VALIDATION set, negative R² means you're overfitting badly or the distributions differ.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>What's the trap with MAPE (Mean Absolute Percentage Error) that you need to watch for?</>,
+      hint: <>What happens when a y value is close to zero?</>,
+      answer: <>MAPE = mean |y - ŷ| / |y| · 100%. It's UNDEFINED when y = 0 (division by zero) and EXPLODES when y is small. If any y_i is near zero, the individual MAPE contribution can dominate the whole score. <br /><br /> Also, MAPE is asymmetric between over- and under-prediction: predicting 200 when truth is 100 gives 100% error; predicting 50 when truth is 100 gives 50% error. Systematic under-prediction gets a lower MAPE. <br /><br /> Fixes: <br /> (1) Use <b>sMAPE</b> (symmetric MAPE): |y - ŷ| / ((|y| + |ŷ|)/2). Bounded in [0, 200%] and symmetric. <br /> (2) Use MAE if your y values are near zero. <br /> (3) Use MASE (Mean Absolute Scaled Error) for forecasting — normalized by naive-forecast MAE. <br /><br /> Don't use MAPE for series that pass through zero. Use it for strictly positive quantities like revenue, physical measurements, latency.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Explain why Huber loss is superior to MSE for regression with 5-10% outliers, and derive the update rule for a linear regression trained with Huber loss.</>,
+      hint: <>Show that the gradient of Huber loss is bounded, unlike MSE.</>,
+      answer: <>Huber loss: L_δ(r) = ½ r² if |r| ≤ δ else δ(|r| - δ/2). <br /><br /> Derivative w.r.t. r: r if |r| ≤ δ else δ · sign(r). Key property: <b>gradient is bounded by δ</b>. Any outlier (|r| large) gets gradient of magnitude at most δ — it can't drag the model as much as MSE would. <br /><br /> For MSE: gradient w.r.t. r is r. An outlier with r = 100 contributes gradient of 100 — 100× more influence than a typical point with r = 1. Huber caps this at δ = 1.35 (typical). <br /><br /> <b>Update rule for linear regression with Huber loss on w:</b> <br /> ∂L/∂w = X.T @ [Huber-derivative(y - Xw)] where Huber-derivative(r) = r if |r| ≤ δ else δ · sign(r). <br /><br /> In code (per-example clip): <br /> ```python <br /> r = y - X @ w <br /> clip_grad = np.clip(r, -delta, delta)      # bound each error's gradient contribution <br /> gradient = -X.T @ clip_grad / N <br /> w = w - lr * gradient <br /> ``` <br /><br /> With this, outliers still influence w (through the clipped gradient) but no more than a moderate-error point would. 5-10% outliers stop dominating the fit; the bulk of the data drives the parameters. That's why sklearn's HuberRegressor is a great default when you suspect outliers.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>You want to build a 90% prediction interval for delivery times. Design the training procedure using quantile regression, and explain what "coverage" means for this interval.</>,
+      hint: <>Think about which two quantiles bound a 90% interval.</>,
+      answer: <>The 90% interval is [5th percentile, 95th percentile] — 90% of the mass is between them (with 5% below and 5% above). <br /><br /> <b>Training procedure:</b> <br /> 1. Split data into training and validation. <br /> 2. Train quantile regressor at q = 0.05: fit weights to minimize the pinball loss L_0.05(r), which penalizes over-prediction 19x more than under. Predictions are the estimated 5th percentile. <br /> 3. Train ANOTHER quantile regressor at q = 0.95: pinball loss L_0.95(r) penalizes under-prediction 19x more than over. Predictions are the 95th percentile. <br /> 4. For any new x, prediction interval is [q_0.05(x), q_0.95(x)]. <br /><br /> <b>Coverage</b> = the fraction of true y values that fall inside the predicted interval. For a well-calibrated 90% interval, coverage on held-out data should be ~90%. Under-coverage (say 75%) means the intervals are too tight; over-coverage (say 98%) means they're too wide. <br /><br /> <b>Practical:</b> if training coverage is 90% but validation is 75%, your quantiles are overfitting — try regularization on the quantile regressor (sklearn's QuantileRegressor has an `alpha` param). If both are 75%, you may need different features or a more flexible model class. Report empirical coverage on a held-out set as part of any interval-prediction task.</>
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "RMSE = √MSE puts the metric in:",
+      choices: [
+        { text: "The same units as y", correct: true },
+        { text: "Squared units of y" },
+        { text: "Percentage units" },
+        { text: "Log units" },
+      ],
+      explanation: <>MSE has units of y-squared. Taking the square root gives back units of y — much more interpretable ("on average, off by X y-units") than "average squared error of X²." Standard reporting practice: RMSE and MAE together. When they differ substantially, it flags outliers.</>
+    },
+    {
+      q: "The estimator that minimizes MAE with a constant predictor is:",
+      choices: [
+        { text: "The MEAN of y" },
+        { text: "The MEDIAN of y", correct: true },
+        { text: "The MODE of y" },
+        { text: "The MAX of y" },
+      ],
+      explanation: <>MSE + constant predictor → mean (derivative is symmetric around the mean). MAE + constant predictor → median (subgradient of |c - y_i| is +1 above, -1 below, so optimal c balances the counts). This is why MSE-based models chase averages; MAE-based models chase typical values and ignore outliers. Same reasoning: L_p regression minimizes different quantiles / robust estimators as p varies.</>
+    },
+    {
+      q: "R² = 0.85 means:",
+      choices: [
+        { text: "The model is 85% accurate." },
+        { text: "The model explains 85% of the target's variance (RSS is 15% of TSS).", correct: true },
+        { text: "The model is off by 15% on average." },
+        { text: "The MSE is 0.15." },
+      ],
+      explanation: <>R² = 1 - RSS/TSS. R² = 0.85 means residual sum of squares is 15% of total sum of squares — the model captures 85% of the y's variance around its mean. Unitless, on scale [-∞, 1]. Not related to "accuracy" (that's a classification metric). For imbalanced or high-noise data, high R² can be misleading — always look at residuals too.</>
+    },
+    {
+      q: "For a dataset with 5% outliers, you should prefer:",
+      choices: [
+        { text: "Pure MSE, because it's smooth." },
+        { text: "Huber loss — quadratic near zero (smooth), linear far away (robust to outliers).", correct: true },
+        { text: "MAPE, because it's scale-free." },
+        { text: "R², because it's normalized." },
+      ],
+      explanation: <>Huber loss is designed exactly for this case. Near zero (|r| ≤ δ), it's quadratic — differentiable, well-behaved for optimization. Beyond δ, it's linear — outliers can't drag the model as they would with pure MSE. Typical δ = 1.35 (works well for Gaussian noise with some contamination). sklearn's `HuberRegressor` is the drop-in. Robust regression is standard when you don't trust your data to be free of outliers.</>
+    },
+    {
+      q: "Quantile regression is used when you want to:",
+      choices: [
+        { text: "Predict the mean of y." },
+        { text: "Predict a specific PERCENTILE of y — e.g., 95th for capacity planning, or two quantiles for a prediction interval.", correct: true },
+        { text: "Reduce the number of features." },
+        { text: "Regularize the model." },
+      ],
+      explanation: <>Standard regression predicts E[y | x] (the mean). Quantile regression, using the pinball loss, predicts the q-th percentile Q_q(y | x). Fit two quantile regressors (say q = 0.05 and q = 0.95) to construct a 90% prediction interval. Very useful for capacity planning, financial risk (Value at Risk), and any situation where asymmetric under/over-prediction costs matter (e.g., under-stocking costs vs over-stocking costs).</>
+    },
+  ]}
+/>
+
+<MarkDone slug="core-ml/supervised-basics/metrics-regression" title="Regression metrics & residuals" />

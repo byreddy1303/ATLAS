@@ -80,6 +80,13 @@ for word, v in emb.items():
   { href: "/learn/mathematics/vectors-space/scalars-vectors-notation", label: "Scalars, vectors, and notation", blurb: "The three faces of a vector and the (n,) shape discipline this chapter builds on." },
 ]} />
 
+<NewConcepts
+  concepts={[
+    { name: "GPT / transformer architectures", blurb: "large language models that stack many linear (matrix-multiplication) layers. Full deep-dive in Tier 4." },
+    { name: "attention mechanism", blurb: "the transformer building block; each attention output is a weighted sum of value vectors — a canonical vector-addition-and-scaling operation." },
+  ]}
+/>
+
 <Motivation title="The two moves every model is made of">
 
 Strip any neural network down to its atoms and you find exactly two vector operations: **add** and **scale**. Every layer computes weighted sums — scaled vectors added together. Every residual connection in a transformer is literally `x + f(x)`: vector addition, applied billions of times per forward pass. And the most famous demo in NLP — *king − man + woman ≈ queen* — is nothing but addition and subtraction of embedding vectors.

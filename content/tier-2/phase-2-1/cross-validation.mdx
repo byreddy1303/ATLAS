@@ -1,0 +1,527 @@
+---
+title: Cross-validation & data splitting
+tier: 2
+phase: "2.1"
+---
+
+export const kfoldCode = `# K-fold CV from scratch on a simple regression problem.
+# The API of sklearn.KFold, but explicit so you see what's happening.
+import numpy as np
+from sklearn.linear_model import Ridge
+
+np.random.seed(0)
+N = 200
+X = np.random.randn(N, 10)
+y = X[:, 0] + 0.5 * X[:, 1] + 0.3 * np.random.randn(N)
+
+def kfold_indices(N, K, seed=0):
+    "Return list of (train_idx, val_idx) for K folds."
+    rng = np.random.default_rng(seed)
+    idx = rng.permutation(N)
+    folds = np.array_split(idx, K)
+    splits = []
+    for k in range(K):
+        val_idx = folds[k]
+        train_idx = np.concatenate([f for i, f in enumerate(folds) if i != k])
+        splits.append((train_idx, val_idx))
+    return splits
+
+def kfold_ridge_score(X, y, alpha, K=5):
+    scores = []
+    for train_idx, val_idx in kfold_indices(len(y), K):
+        model = Ridge(alpha=alpha).fit(X[train_idx], y[train_idx])
+        scores.append(np.mean((model.predict(X[val_idx]) - y[val_idx]) ** 2))
+    return np.mean(scores), np.std(scores)
+
+# Sweep alpha (ridge parameter)
+alphas = [0.001, 0.01, 0.1, 1.0, 10.0, 100.0]
+print(f"{'alpha':>8}  {'CV MSE':>10}  {'std':>8}")
+print("-" * 30)
+best_alpha, best_mse = None, np.inf
+for a in alphas:
+    mse, sd = kfold_ridge_score(X, y, a)
+    if mse < best_mse:
+        best_alpha, best_mse = a, mse
+    print(f"{a:>8.3f}  {mse:>10.4f}  {sd:>8.4f}")
+
+print(f"\\nBest alpha by CV: {best_alpha}   with CV MSE {best_mse:.4f}")
+print()
+print("Compare to a 'no-CV' approach: pick alpha by minimizing TRAINING MSE.")
+train_alpha, train_mse = None, np.inf
+for a in alphas:
+    m = Ridge(alpha=a).fit(X, y)
+    mse = np.mean((m.predict(X) - y) ** 2)
+    if mse < train_mse:
+        train_alpha, train_mse = a, mse
+print(f"Training-loss-picked alpha: {train_alpha}   (always picks smallest alpha -- OVERFITS)")`;
+
+export const leakageCode = `# The subtle-but-common data leakage bug: scale WITHIN a fold, not on the full data.
+# Same trick applies to imputation, feature selection, any data-dependent preprocessing.
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import Ridge
+from sklearn.model_selection import KFold
+
+np.random.seed(0)
+N = 200
+X = np.random.randn(N, 20)
+# Add a "leaky" feature: mean of y over the whole dataset (should NOT be usable at prediction time)
+y = X[:, 0] + 0.5 * X[:, 1] + 0.3 * np.random.randn(N)
+
+# WRONG: scale on the whole dataset BEFORE splitting.
+X_wrong = StandardScaler().fit_transform(X)      # uses ALL rows' mean & std
+kf = KFold(n_splits=5, shuffle=True, random_state=0)
+wrong_mses = []
+for train_idx, val_idx in kf.split(X_wrong):
+    m = Ridge(alpha=1.0).fit(X_wrong[train_idx], y[train_idx])
+    wrong_mses.append(np.mean((m.predict(X_wrong[val_idx]) - y[val_idx]) ** 2))
+print(f"WRONG (scale before split):   CV MSE = {np.mean(wrong_mses):.4f}   <- data leakage!")
+
+# RIGHT: scale INSIDE each fold, using only training stats.
+right_mses = []
+for train_idx, val_idx in kf.split(X):
+    scaler = StandardScaler().fit(X[train_idx])           # uses only training rows' mean & std
+    X_tr_scaled  = scaler.transform(X[train_idx])
+    X_val_scaled = scaler.transform(X[val_idx])
+    m = Ridge(alpha=1.0).fit(X_tr_scaled, y[train_idx])
+    right_mses.append(np.mean((m.predict(X_val_scaled) - y[val_idx]) ** 2))
+print(f"RIGHT (scale inside each fold): CV MSE = {np.mean(right_mses):.4f}   <- honest estimate")
+
+print()
+print("The gap is small here because scaling doesn't leak much info.")
+print("But for feature selection, imputation, or PCA: doing them on the WHOLE data before")
+print("splitting can inflate 'CV performance' by 5-30 percentage points on real problems.")
+print("Always: preprocess inside each fold. Or wrap it in a sklearn Pipeline (does this for you).")`;
+
+export const timeSeriesCVCode = `# Time-series CV: never use future data to predict the past.
+# Standard k-fold shuffles randomly -- WRONG for time series.
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.linear_model import Ridge
+from sklearn.model_selection import TimeSeriesSplit, KFold
+
+np.random.seed(0)
+T = 500
+# Synthetic time series with drift + noise (values depend on time)
+t = np.arange(T)
+X = np.column_stack([np.sin(t / 50), np.cos(t / 20), t / 500])
+y = 3 * X[:, 0] + 2 * X[:, 1] - 5 * X[:, 2] + 0.3 * np.random.randn(T)
+
+# WRONG: standard k-fold shuffles rows, so future rows leak into training folds
+kf = KFold(n_splits=5, shuffle=True, random_state=0)
+wrong_mses = []
+for train_idx, val_idx in kf.split(X):
+    m = Ridge(alpha=1.0).fit(X[train_idx], y[train_idx])
+    wrong_mses.append(np.mean((m.predict(X[val_idx]) - y[val_idx]) ** 2))
+print(f"WRONG (random k-fold on time series):  CV MSE = {np.mean(wrong_mses):.4f}   (leaks future)")
+
+# RIGHT: expanding-window time-series CV
+tscv = TimeSeriesSplit(n_splits=5)
+right_mses = []
+splits_shown = []
+for train_idx, val_idx in tscv.split(X):
+    splits_shown.append((train_idx, val_idx))
+    m = Ridge(alpha=1.0).fit(X[train_idx], y[train_idx])
+    right_mses.append(np.mean((m.predict(X[val_idx]) - y[val_idx]) ** 2))
+print(f"RIGHT (TimeSeriesSplit, expanding-window): CV MSE = {np.mean(right_mses):.4f}   (honest)")
+
+# Visualize the split
+fig, ax = plt.subplots(figsize=(9, 3.6))
+for i, (tr, va) in enumerate(splits_shown):
+    ax.scatter(tr, np.full_like(tr, i), s=6, color="royalblue", label="train" if i == 0 else "")
+    ax.scatter(va, np.full_like(va, i), s=6, color="crimson", label="val" if i == 0 else "")
+ax.set_xlabel("time index"); ax.set_ylabel("fold")
+ax.set_yticks(range(5))
+ax.set_title("TimeSeriesSplit — training grows, validation is always in the future")
+ax.legend(); ax.grid(alpha=0.3)
+plt.tight_layout()`;
+
+export const nestedCvCode = `# Nested cross-validation: choose hyperparameters WITHIN an inner CV,
+# report generalization performance on OUTER CV.
+# Non-nested CV overestimates performance because you saw val loss for every alpha.
+import numpy as np
+from sklearn.linear_model import Ridge
+from sklearn.model_selection import KFold
+
+np.random.seed(0)
+N = 300
+X = np.random.randn(N, 30)
+y = X[:, 0] + 0.5 * X[:, 1] + 0.3 * np.random.randn(N)
+
+def outer_score(X, y, alpha_grid, K_outer=5, K_inner=5):
+    "Nested CV: inner CV picks alpha, outer CV estimates true performance."
+    outer_kf = KFold(n_splits=K_outer, shuffle=True, random_state=0)
+    outer_scores = []
+    picked_alphas = []
+    for outer_train, outer_val in outer_kf.split(X):
+        # Inner CV on outer_train -- pick best alpha
+        inner_kf = KFold(n_splits=K_inner, shuffle=True, random_state=1)
+        best_alpha, best_mse = None, np.inf
+        for a in alpha_grid:
+            fold_mses = []
+            for inner_train, inner_val in inner_kf.split(X[outer_train]):
+                m = Ridge(alpha=a).fit(X[outer_train][inner_train], y[outer_train][inner_train])
+                pred = m.predict(X[outer_train][inner_val])
+                fold_mses.append(np.mean((pred - y[outer_train][inner_val]) ** 2))
+            if np.mean(fold_mses) < best_mse:
+                best_alpha, best_mse = a, np.mean(fold_mses)
+        picked_alphas.append(best_alpha)
+        # Retrain on full outer_train with best alpha, evaluate on outer_val
+        m = Ridge(alpha=best_alpha).fit(X[outer_train], y[outer_train])
+        outer_scores.append(np.mean((m.predict(X[outer_val]) - y[outer_val]) ** 2))
+    return np.mean(outer_scores), np.std(outer_scores), picked_alphas
+
+alpha_grid = [0.01, 0.1, 1.0, 10.0, 100.0]
+outer_mse, outer_sd, picked = outer_score(X, y, alpha_grid)
+print(f"NESTED CV (honest generalization estimate):")
+print(f"  outer MSE = {outer_mse:.4f} +/- {outer_sd:.4f}")
+print(f"  inner CV picked alphas: {picked}")
+print()
+
+# Non-nested: pick alpha by CV, report the CV score
+def naive_cv(X, y, alpha_grid, K=5):
+    kf = KFold(n_splits=K, shuffle=True, random_state=0)
+    best_alpha, best_mse = None, np.inf
+    for a in alpha_grid:
+        fold_mses = []
+        for train_idx, val_idx in kf.split(X):
+            m = Ridge(alpha=a).fit(X[train_idx], y[train_idx])
+            fold_mses.append(np.mean((m.predict(X[val_idx]) - y[val_idx]) ** 2))
+        if np.mean(fold_mses) < best_mse:
+            best_alpha, best_mse = a, np.mean(fold_mses)
+    return best_alpha, best_mse
+
+naive_alpha, naive_mse = naive_cv(X, y, alpha_grid)
+print(f"NAIVE CV (biased-optimistic):")
+print(f"  best CV MSE = {naive_mse:.4f}  (picking best-of-{len(alpha_grid)} alphas biases downward)")
+print(f"  best alpha = {naive_alpha}")
+print()
+print("Naive CV: takes the min over 5 alphas, so it's biased optimistic by ~sqrt(K)/N.")
+print("Nested CV: never lets the outer test set influence hyperparameter choice.")
+print("For an HONEST estimate of test performance, use nested CV.")`;
+
+<Prerequisites items={[
+  { href: "/learn/core-ml/supervised-basics/bias-variance-tradeoff", label: "Bias–variance trade-off", blurb: "CV is the mechanism for empirically estimating test error — the thing bias-variance decomposes." },
+  { href: "/learn/core-ml/supervised-basics/regularization", label: "Regularization (L1, L2, elastic net)", blurb: "Choosing λ is the most common use of CV — this chapter shows the honest way to do it." },
+  { href: "/learn/foundations/scientific-stack/sklearn-shape-of-ml", label: "Sklearn — the shape of ML", blurb: "KFold, Pipeline, and cross_val_score are the sklearn tools for the recipes in this chapter." },
+]} />
+
+<NewConcepts
+  concepts={[
+    { name: "Data leakage", blurb: "any information from the test/validation set that seeps into training. The #1 source of 'my model was 95% accurate in dev but 60% in production' failures." },
+    { name: "Stratified k-fold", blurb: "K-fold splitting that preserves the class-label distribution in each fold. Essential for classification with class imbalance." },
+    { name: "Group k-fold", blurb: "K-fold splitting that keeps all examples from the same 'group' (e.g., same patient, same user) in the SAME fold — prevents leakage when your rows aren't truly iid." },
+    { name: "Time-series (temporal) split", blurb: "training folds always precede validation folds in time — never use the future to predict the past. Expanding-window is standard for time-series CV." },
+    { name: "Nested cross-validation", blurb: "an outer CV loop for honest performance estimation, an inner CV loop for hyperparameter search. Prevents overfitting to a specific validation set." },
+    { name: "Data snooping / p-hacking on the test set", blurb: "iteratively adjusting your model based on test-set performance — turns the 'test set' into another validation set, and your reported number is optimistic. See MMLU/benchmark contamination as the LLM-era version." },
+  ]}
+/>
+
+<Motivation title="Honest evaluation is the whole game — a nice number that comes from cheating is worse than a lower one that's true">
+
+Every ML pipeline produces a **reported test performance** — the number you show your manager, put in a paper, or use to decide whether to ship. If that number is 5-10 percentage points higher than what will actually happen in production, you've spent months building a lie.
+
+The main way this happens is **data leakage** and **improper cross-validation**. The techniques in this chapter are the discipline that prevents it.
+
+For a GenAI engineer, this matters in specific ways:
+
+1. **Benchmark contamination.** Modern LLM benchmarks (MMLU, GSM8K, HumanEval, etc.) have their questions and sometimes their answers scraped into the pretraining data of every LLM. When a new model claims "94% on MMLU," the honest question is: how much of that is because the benchmark leaked into training? Understanding leakage/CV helps you evaluate these claims critically.
+2. **LLM-as-judge validation.** Using an LLM to judge outputs of another LLM introduces circularity: the judge's opinions are shaped by the same training data as the models it's evaluating. Standard CV logic doesn't strictly apply, but the "keep your training and evaluation strictly separated" principle does.
+3. **Fine-tuning dataset construction.** Prompt-tuning, SFT, DPO — all rely on labeled data. If your validation set has the same underlying task as your training set (same customers, same product SKUs), your CV score won't predict production performance. Group k-fold is the fix.
+4. **RLHF reward-model overfitting.** The reward model itself can overfit to preference data, then RLHF chases that overfit reward — a phenomenon called "reward hacking." Careful CV of the reward model is one of the guards against this.
+
+This chapter covers the mechanics: k-fold, stratified splits, group splits, time-series splits, nested CV, and the most common ways data leakage sneaks in.
+
+</Motivation>
+
+<Intuition title="Hold out a slice of your data — pretend it's the future test set — never let training see it">
+
+The setup: you have a labeled dataset. You want to know how well your model will do on **future, unseen data**. But you only have this one dataset — you can't fast-forward to the future.
+
+**The trick:** split your data into a **training set** and a **held-out set**. Train on the training set. Evaluate on the held-out set. As long as you honestly kept the held-out set separate throughout training AND hyperparameter selection, its performance is an unbiased estimate of how you'd do on truly new data.
+
+**K-fold cross-validation** does this K times: split into K equal chunks, use each chunk as the held-out set once. Average the K performance numbers. This gives you a more stable estimate (K-fold averages beat single train/test split at N/K reduction in variance) at K× more compute.
+
+**The three splits people talk about:**
+
+- **Training set:** the data your model actually fits on.
+- **Validation set (or "dev set"):** used to pick hyperparameters (λ, learning rate, model architecture). Different from test — you're allowed to make decisions based on validation performance.
+- **Test set:** the final "how did we actually do" number. Used ONCE, at the end. Any time you look at test-set performance and change something, the test set has been contaminated and now serves as another validation set.
+
+**The one commandment:** **anything the model or its hyperparameters depend on must not have been influenced by the validation/test data.** Preprocessing (scaling, imputation, feature selection) is often the sneakiest leak — fit those on training only, then apply the fitted transforms to validation.
+
+</Intuition>
+
+<Recall term="Overfitting">
+
+Overfitting is when a model fits noise in the training set that doesn't generalize to new data. Manifests as low training loss and high validation/test loss. The whole point of cross-validation is to give an honest estimate of generalization performance — so you can detect overfitting and pick the model / regularization that generalizes best. Overfit training predictions can be arbitrarily good; overfit validation predictions are the actual measure.
+
+</Recall>
+
+## Train / val / test hygiene
+
+**The classical three-way split:**
+
+- **Training (60-80%):** the model learns from this.
+- **Validation (10-20%):** used to pick hyperparameters, decide when to stop training, choose model architecture. You look at this MANY times during development.
+- **Test (10-20%):** used ONCE at the end. If you look at it and change something, you've turned it into a validation set — and you no longer have an honest generalization estimate.
+
+**In practice for small datasets**, one splits is too noisy — hence **k-fold** CV. For larger datasets a single split often suffices for speed.
+
+**Rules of hygiene:**
+
+1. **Never fit ANYTHING on the validation set.** Not the model, not the scaler, not the imputer, not the feature-selector.
+2. **Do all preprocessing inside the CV loop.** Preprocessing that depends on the data (mean/std for scaling, top-k feature selection, PCA) must be fit on training-only and applied to validation.
+3. **Look at test set exactly once.** Every look creates a subtle "which experiment do I keep?" bias. Report performance once and move on.
+4. **The test set is not for iteration.** If you find surprises on the test set, note them for the next study — don't tweak this model and re-report.
+
+## K-fold cross-validation
+
+**Standard K-fold**: shuffle the dataset, split into K equal-size chunks. For each fold k = 1..K:
+
+1. Set aside fold k as the validation set.
+2. Train the model on the other K-1 folds.
+3. Evaluate on fold k, record the score.
+
+Average the K scores → your CV estimate of test performance.
+
+**Typical K values:**
+
+- **K = 5:** the most common choice. 80/20 train/val ratio per fold, low variance in the estimate.
+- **K = 10:** more stable estimate, 90/10 ratio. Slower but slightly more accurate.
+- **K = N (leave-one-out):** each fold has 1 val example. Highest variance in individual scores but the estimate is unbiased. Expensive for large N.
+
+<RunnableCode title="K-fold CV to select ridge alpha" code={kfoldCode} packages={["numpy", "sklearn"]} />
+
+## The 3 sneakiest data-leakage bugs
+
+**1. Scaling before splitting.** Compute mean and std over the ENTIRE dataset, subtract mean and divide by std, THEN split. Now the training data has been affected by test-set statistics — small effect, but real.
+
+**Fix:** compute the scaler's parameters (`mean_`, `scale_`) using ONLY the training data, then apply to validation.
+
+**2. Feature selection before splitting.** Pick the top 100 features by correlation with y on the full dataset, then train models. The selected features "know" about the test set. In practice this can inflate CV performance by 5-30% depending on how many features you're selecting from.
+
+**Fix:** do feature selection inside each fold on training-only.
+
+**3. Class-imbalance handling that touches all data.** Oversample the minority class to balance the training set — but if you oversampled BEFORE splitting, your training and test set share duplicated minority examples.
+
+**Fix:** balance inside each fold on the training portion only.
+
+<RunnableCode title="The 'scale first, split later' leakage bug" code={leakageCode} packages={["numpy", "sklearn"]} />
+
+**The general rule:** any data-dependent transformation (imputation, PCA, feature selection, class-balancing, sampling weights) must be fit inside the CV loop on training only. Wrap it in a `sklearn.Pipeline` and use that as your estimator — Pipeline does the right thing automatically.
+
+## Stratified k-fold — for classification with imbalance
+
+If your data is **10% positive, 90% negative** and you use plain KFold, you'll get folds with varying class ratios. Some folds might be **7% positive** and others **13%**, purely by chance — that adds noise to your CV scores and can lead to bad splits (a training fold with almost no positives can't fit).
+
+**StratifiedKFold** preserves the class distribution: each fold has the same 10/90 ratio as the whole dataset. Standard for classification. In sklearn, `cross_val_score(model, X, y)` uses stratified splits automatically when the estimator is a classifier.
+
+## Group k-fold — when rows are not iid
+
+Standard k-fold assumes each row is an independent sample. Reality:
+
+- Multiple medical records from the **same patient** — they're not independent.
+- Multiple purchases by the **same customer** — same.
+- Multiple frames from the **same video** — same.
+- Multiple sentences from the **same document** — same.
+
+If you naively shuffle rows and put them in different folds, the training set might contain other examples from the same patient/customer/video/document, giving the model a **cheat sheet** for the validation set.
+
+**GroupKFold** partitions the data so that all rows sharing a group ID land in the SAME fold. sklearn: `GroupKFold(n_splits=K).split(X, y, groups=patient_ids)`. Standard for any medical, longitudinal, or nested data.
+
+## Time-series splits — future must not leak into past
+
+For any temporal data (time series, log data, sensor readings), standard shuffled k-fold is WRONG: it randomly puts future rows in training folds and past rows in validation folds. Your model learns "the future" and predicts "the past" — no real-world scenario looks like this.
+
+**TimeSeriesSplit** uses expanding-window or rolling-window splits: training data always comes BEFORE validation data in time. Each fold's training set is a prefix; each fold's validation is a short window immediately after that prefix.
+
+<RunnableCode title="Random k-fold vs time-series split — different worlds" code={timeSeriesCVCode} packages={["numpy", "sklearn", "matplotlib"]} captureFig={true} />
+
+**Rule for time-series:**
+
+- **Always** use TimeSeriesSplit (or manual expanding-window split) for temporal data.
+- **Never** shuffle rows before splitting on time series.
+- Consider **gap** between train and val (some setups use `TimeSeriesSplit(gap=100)`) if there's short-term autocorrelation you don't want to leak.
+
+## Nested cross-validation — for honest hyperparameter tuning
+
+If you use k-fold CV to pick alpha, and then REPORT the CV score at the best alpha, that number is **biased optimistic** — you took the min over many alphas, so the noise in the CV scores helps you. On a new test set, performance will be worse than the reported CV score.
+
+**Nested CV** fixes this: two nested loops.
+
+- **Outer loop (K_outer folds):** for each fold, hold out a "test" chunk.
+- **Inner loop (K_inner folds on the outer training set):** for each candidate hyperparameter, run K_inner CV, pick the best.
+- Retrain with best hyperparameters on the FULL outer training set, evaluate on the outer test chunk.
+- Average the outer test scores → your honest generalization estimate.
+
+Total cost: K_outer × K_inner × N_hyperparams model fits. Standard for research papers and cases where "how well does this actually work" is the critical question.
+
+<RunnableCode title="Nested CV vs naive CV — the honest estimate is lower" code={nestedCvCode} packages={["numpy", "sklearn"]} />
+
+<RealWorldML title="Benchmark contamination in modern LLM evaluation">
+
+The LLM-era version of data leakage is **benchmark contamination**: the test sets of popular benchmarks (MMLU, HellaSwag, HumanEval, GSM8K) get scraped into the pretraining data of every new LLM. When GPT-4 reports 86% on MMLU, part of that is genuine capability — and part might be from having seen the questions during pretraining.
+
+**How does this happen?**
+
+1. Benchmarks are published on the web (papers, HuggingFace, GitHub).
+2. LLM pretraining pipelines crawl the web indiscriminately.
+3. Even with dedup filters, near-duplicate variants (translated, paraphrased, quiz-style repackaging) slip through.
+4. During evaluation, the model sees a question it "remembers" from training and answers correctly.
+
+**Mitigations:**
+
+- **Held-out benchmarks (e.g., MMLU-Pro, Big-Bench Hard):** curated recently, less contamination.
+- **Contamination detection:** measure the LLM's log-likelihood of the exact benchmark string vs. paraphrased versions. If the exact string is much higher, likely contamination.
+- **Private test sets:** OpenAI's "hidden" MMLU, or organization-internal evaluation datasets that never leave your infra.
+- **Live task creation:** ask domain experts to write new questions AFTER the model's training cutoff. GPQA-diamond, ARC-AGI use variants of this.
+
+**The CV analog:** you CANNOT trust benchmark performance on any test set that was in a plausible crawl of the internet before your model's training cutoff. Just as you can't trust CV performance if you scaled your data before splitting.
+
+**LLM-as-judge caveats:** using GPT-4 to judge GPT-3.5 outputs is like using the training-set-influenced model to grade another model — the judge's biases are the same. Fine for rough dev signal, bad for scientific claims.
+
+**Group-k-fold applies to fine-tuning too.** If your fine-tuning data comes from a few specific customers/products, and your test set is from the same customers/products, your CV score will overestimate generalization to new customers. Group by customer_id, then k-fold.
+
+</RealWorldML>
+
+<StudyDepth
+  drill={[
+    "K-fold CV: split into K chunks, hold out one at a time, average validation scores.",
+    "Preprocessing (scale, PCA, feature-select) must happen INSIDE each fold on training-only.",
+    "Stratified k-fold for classification with imbalance (preserves class ratios).",
+    "GroupKFold for non-iid data (same patient, customer, video, document).",
+    "TimeSeriesSplit for temporal data (train always precedes val in time).",
+    "Nested CV = outer CV for honest generalization + inner CV for hyperparameter picking.",
+    "The test set is used ONCE. Every look creates bias.",
+    "sklearn's Pipeline handles the 'preprocess inside CV' rule automatically — always wrap your preprocessing in one.",
+  ]}
+  skim={[
+    "Leave-one-out CV theoretical properties (unbiased, high-variance estimate).",
+    "K-fold CV as an approximation to the LOO estimator.",
+    "Blocked CV, purged CV for financial / high-autocorrelation time series.",
+    "Repeated k-fold (multiple seeds) for variance reduction.",
+    "MMLU / benchmark contamination detection techniques.",
+  ]}
+/>
+
+<CodeItYourself title="Three drills — implement k-fold, spot the leakage, nested CV">
+
+1. **Roll your own k-fold.** Given N and K, write a function that returns list of (train_idx, val_idx) tuples. Test on N = 100, K = 5: verify each fold has size 20, no index appears in both train and val, every index appears exactly once across all val sets.
+
+2. **Detect leakage.** For a regression problem, fit a StandardScaler on the whole dataset before splitting. Then repeat, fitting scaler inside each fold. Compare CV scores — you should see the "leaked" one is slightly optimistic.
+
+3. **Nested CV from scratch.** Write nested CV: outer 5-fold, inner 5-fold. For each outer fold, use inner CV to pick alpha from [0.01, 0.1, 1, 10, 100]. Report outer CV MSE. Compare to non-nested CV (which minimizes CV MSE over alpha directly — biased optimistic).
+
+</CodeItYourself>
+
+<Summary>
+
+- **Three splits:** training (fit model), validation (pick hyperparameters), test (single-use, unbiased estimate).
+- **K-fold CV:** average of K held-out scores; K = 5 or 10 is standard.
+- **Preprocessing must be inside the fold** — otherwise data leakage from validation into training.
+- **Stratified k-fold** for classification, **GroupKFold** for non-iid data, **TimeSeriesSplit** for temporal data.
+- **Nested CV** = outer loop for honest generalization + inner loop for hyperparameter search. Prevents optimistic bias.
+- **The test set is used exactly once.** Every look is a leak.
+- **sklearn Pipeline** automates the "preprocess inside CV" rule; use it.
+- **Modern LLM analog: benchmark contamination.** Trust benchmarks only when the questions weren't in the pretraining crawl.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>Why do we split data into training, validation, and test sets instead of just training and test?</>,
+      hint: <>Consider what happens to the test set every time you compare hyperparameter choices.</>,
+      answer: <>The <b>validation set</b> is where hyperparameters are chosen (you look at it many times). The <b>test set</b> is looked at once, at the very end, to give an honest generalization estimate. Without a separate validation set, you'd use test performance to pick hyperparameters — and by the time you shipped, your "test" performance would be biased optimistic (you selected the model that happened to do well on that specific test set). Test set exists to give the number nobody's optimized against.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>You scale your features (StandardScaler) BEFORE splitting into train/test. What's the bug?</>,
+      hint: <>What does the scaler learn from the whole dataset?</>,
+      answer: <>The scaler's `mean_` and `scale_` are computed from ALL rows including the test set. So the training data has been implicitly shifted using information from test rows — a form of <b>data leakage</b>. Even though the effect is small (scaling stats are stable under sampling), it's the mental model that matters: any data-dependent transformation must be fit on training only. The fix: use a sklearn Pipeline where StandardScaler + estimator are fit together on the training fold and applied to the validation fold. That's what sklearn's cross_val_score does correctly under the hood.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>You have medical records for 500 patients, and for each patient there are on average 10 measurements over time. Total 5000 rows. If you use standard KFold(5) shuffled, what goes wrong?</>,
+      hint: <>Are the 10 rows from patient X independent?</>,
+      answer: <>The 10 rows from the same patient are NOT independent — they share underlying features (age, genetics, chronic conditions). If you shuffle and put some rows from patient X in the training fold and others in the validation fold, the model can effectively "look up" patient X's other measurements to predict a held-out one. CV performance will overestimate generalization to NEW patients (which is usually what matters). <br /><br /> Fix: use <b>GroupKFold(n_splits=5).split(X, y, groups=patient_ids)</b>. All rows for the same patient go to the SAME fold. Now the validation set contains only unseen patients — a realistic evaluation of generalization.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>You have a time series of daily stock prices from 2015 to 2025 and want to test a prediction model. Why is standard shuffled k-fold wrong?</>,
+      hint: <>What does shuffled k-fold do to the temporal order?</>,
+      answer: <>Shuffled k-fold randomly assigns days to folds. So your training set might contain days from 2020 and 2024, and your validation set might contain days from 2016 and 2022 — the model "sees the future" during training. This produces optimistic CV estimates because real prediction always operates on future data given past. <br /><br /> Fix: <b>TimeSeriesSplit</b> (expanding window): train on days 1..T, validate on days T+1..T+H, then train on days 1..2T, validate on days 2T+1..2T+H, etc. Training always precedes validation in time. For strongly autocorrelated series, also add a <b>gap</b> so the immediate few days before val are NOT in train (prevents leakage via short-term autocorrelation).</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Why does non-nested CV (pick alpha by CV, report that CV score) overestimate test performance? Give a numerical example.</>,
+      hint: <>Consider taking the minimum of many noisy scores.</>,
+      answer: <>Suppose the true test MSE at each alpha is 1.0 (they're all equally good), but the K-fold CV score for each alpha has noise: CV_MSE(alpha_i) = 1.0 + ε_i where ε_i ~ N(0, σ²). <br /><br /> When you pick the alpha with the smallest CV score, you're taking min over M noisy values. E[min of M i.i.d. N(0, σ²)] scales as -σ · sqrt(2 log M) — negative, growing with M. <br /><br /> Numerical example: with M = 10 alphas, σ = 0.1 (CV noise stdev), min-bias is about -0.1 · sqrt(2 log 10) ≈ -0.15. So the "best CV MSE" you report is ~0.85 while the true test performance is 1.0. You've reported optimistic-by-15% performance. <br /><br /> Nested CV avoids this: the outer CV loop's test folds are NEVER used to pick alpha, so the min-over-alpha bias doesn't contaminate them. Nested CV gives ~1.0 as the estimate — matches truth. <br /><br /> This is why serious ML papers use nested CV for the reported metric, especially when trying many models or hyperparameters. Every additional configuration you try further biases naive CV downward.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Modern LLMs are evaluated on benchmarks like MMLU. Why is "benchmark contamination" the LLM analog of data leakage, and what can we do about it?</>,
+      hint: <>Think about where the benchmarks came from and where LLM pretraining data comes from.</>,
+      answer: <><b>Contamination story:</b> MMLU (and similar) were published to the web (papers, HuggingFace, GitHub). LLM pretraining crawls the web at scale. Even with dedup filters, near-duplicate variants of benchmark questions/answers slip into pretraining. During eval, the model "remembers" the question and answers correctly for reasons that don't reflect generalization ability. <br /><br /> <b>Why it's data leakage:</b> the "test set" was implicitly available to the "training process" (pretraining). Reported performance is optimistic. Just like fitting StandardScaler on the whole dataset before k-fold, but at massive scale. <br /><br /> <b>Mitigations:</b> <br /> 1. <b>Held-out or newly-curated benchmarks:</b> MMLU-Pro, GPQA-diamond, ARC-AGI-2 — created after major LLMs' training cutoffs, so contamination is unlikely. <br /> 2. <b>Contamination detection:</b> measure log P(exact benchmark string) vs. log P(paraphrased string). Huge gap = likely memorized. <br /> 3. <b>Private test sets:</b> internal evaluation datasets, never published. Any lab claiming state-of-the-art on public benchmarks should also report on private ones. <br /> 4. <b>Live eval:</b> ask experts to write new questions after cutoff. Expensive but the only truly clean signal. <br /><br /> <b>Rule of thumb:</b> trust benchmarks that were released AFTER your model's training cutoff. Distrust benchmarks that were public for years before. Public benchmarks are like tests where the exam questions and answers were on the internet — perfect scores don't necessarily mean the student learned.</>
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "K-fold cross-validation with K = 5 means:",
+      choices: [
+        { text: "You train the model 5 times, once on each of 5 disjoint folds, and average the 5 validation scores.", correct: true },
+        { text: "You train the model 5 times with different hyperparameters." },
+        { text: "You use exactly 5 features." },
+        { text: "You train for exactly 5 epochs." },
+      ],
+      explanation: <>K-fold: split data into K equal chunks; for each fold k, hold it out as validation, train on the other K-1, record score; average K scores. K = 5 is the standard choice. K = 10 gives a slightly more stable estimate at 2× cost; K = N (leave-one-out) is unbiased but noisy and expensive for large N.</>
+    },
+    {
+      q: "You're doing k-fold CV. You should fit your StandardScaler:",
+      choices: [
+        { text: "On the entire dataset before splitting into folds." },
+        { text: "Once inside each fold, using only the training portion.", correct: true },
+        { text: "On the validation set." },
+        { text: "You should never use StandardScaler." },
+      ],
+      explanation: <>Fitting on the whole dataset before splitting leaks validation-set statistics into training. Fitting inside each fold on training-only is the honest approach. Wrap StandardScaler + estimator in a sklearn Pipeline and pass the Pipeline to cross_val_score — Pipeline automatically does the right thing (fit_transform on training, transform on validation).</>
+    },
+    {
+      q: "Which cross-validation scheme is appropriate for time-series data?",
+      choices: [
+        { text: "Standard KFold with shuffle=True." },
+        { text: "TimeSeriesSplit or manual expanding-window: training precedes validation in time.", correct: true },
+        { text: "Random 80/20 split." },
+        { text: "Leave-one-out with random selection." },
+      ],
+      explanation: <>Time-series requires temporal integrity: validation data must always come AFTER training data. TimeSeriesSplit (sklearn) gives an expanding-window CV that respects this. Shuffled KFold would leak future data into training folds, giving optimistic CV estimates that don't match production performance. For strongly-autocorrelated series, use a "gap" (TimeSeriesSplit(gap=k)) to prevent short-term autocorrelation leakage.</>
+    },
+    {
+      q: "You have medical data with multiple visits per patient. To evaluate generalization to NEW patients, use:",
+      choices: [
+        { text: "Standard KFold shuffled by row." },
+        { text: "GroupKFold with groups=patient_id.", correct: true },
+        { text: "TimeSeriesSplit." },
+        { text: "Leave-one-out CV." },
+      ],
+      explanation: <>Rows from the same patient are correlated — sharing them across train/val leaks per-patient information. GroupKFold guarantees all rows from any single patient stay in ONE fold, so validation only contains patients the model has never seen. This gives an honest estimate of generalization to new patients, which is usually the practical goal.</>
+    },
+    {
+      q: "Nested cross-validation (outer + inner) is used because:",
+      choices: [
+        { text: "It's more accurate than any other method for training." },
+        { text: "It gives an honest estimate of generalization when hyperparameters are selected by CV — non-nested CV is biased optimistic.", correct: true },
+        { text: "It's required by sklearn." },
+        { text: "It uses less compute than standard CV." },
+      ],
+      explanation: <>If you pick alpha by CV and then report that CV score, you've biased the number optimistic because picking the min of M noisy CV scores has downward bias ~sqrt(log M)/N. Nested CV runs an inner CV to pick hyperparameters (never touches the outer test fold) and an outer CV to estimate generalization. The outer test folds are NEVER used to pick anything, so their averaged score is an honest generalization estimate. Costlier (K_outer × K_inner × N_hyperparams fits) but essential for papers or high-stakes deployments.</>
+    },
+  ]}
+/>
+
+<MarkDone slug="core-ml/supervised-basics/cross-validation" title="Cross-validation & data splitting" />

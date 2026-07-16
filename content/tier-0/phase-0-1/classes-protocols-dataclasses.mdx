@@ -206,6 +206,13 @@ print(bench)
   { href: "/learn/foundations/python-craft/control-flow-data-model", label: "Control flow & the data model", blurb: "The dunder protocols (`__eq__`, `__len__`, `__iter__`, `__hash__`) — this chapter is where you implement them." },
 ]} />
 
+<NewConcepts
+  concepts={[
+    { name: "PyTorch nn.Module", blurb: "the base class every neural network layer inherits from. A canonical use of Python&rsquo;s OOP + protocol system. Full deep-dive in Tier 3." },
+    { name: "Adam / SGD optimizer", blurb: "in PyTorch, optimizers are classes with `step()` and `zero_grad()` methods. This chapter&rsquo;s OOP grammar is the language they speak. Deep-dive in Phase 1.6." },
+  ]}
+/>
+
 <Motivation title="Modern Python OOP is 3 tools, not 30">
 
 Java-style OOP means inheritance hierarchies, abstract base classes, mixins, and a taxonomy diagram. Do that in Python and your code becomes a maze in six months. The Python community has quietly converged on a much smaller kit:

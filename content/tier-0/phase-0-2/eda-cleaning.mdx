@@ -206,6 +206,16 @@ print("X:", X_mat.shape, "| churn rate:", y.mean().round(2))`;
   { href: "/learn/foundations/scientific-stack/matplotlib-figures", label: "Matplotlib · figures", blurb: "A histogram is the fastest outlier detector you own — you'll eyeball distributions constantly here." },
 ]} />
 
+<NewConcepts
+  concepts={[
+    { name: "MCAR / MAR / MNAR", blurb: "the standard missing-data taxonomy (Rubin 1976). Introduced inline below; skim it now if unfamiliar so the imputation choices later feel principled instead of arbitrary." },
+    { name: "IQR (interquartile range)", blurb: "Q3 − Q1. Used as a robust outlier fence: anything below Q1 − 1.5·IQR or above Q3 + 1.5·IQR is flagged. Robust because quartiles ignore the extreme tails." },
+    { name: "One-hot vs. target vs. frequency encoding", blurb: "three families of categorical-variable encodings you'll pick between here. Full coverage is a Volume II (classical ML) topic; this chapter uses them as tools." },
+    { name: "Winsorization", blurb: "cap extreme values at chosen percentiles (e.g., 1st/99th) instead of dropping them. Preserves row count while blunting outlier influence." },
+    { name: "KNN imputation", blurb: "fill missing values from the k nearest complete rows. Referenced as an alternative to group-median imputation; not a beginner's default." },
+  ]}
+/>
+
 <Motivation title="The model learns whatever the data says — including the lies">
 
 A model is a mirror of its training table. Feed it ages of −999 and it learns that some customers are a thousand years young; leave user 4 duplicated and that user votes twice in every statistic; let `"Pro"`, `"pro "` and `"PRO"` stay three separate plans and the model splits one signal across three columns. **No error will be raised at any point.** The model trains, the metrics print, the numbers are just quietly wrong — and you ship a system that confidently encodes the dirt.

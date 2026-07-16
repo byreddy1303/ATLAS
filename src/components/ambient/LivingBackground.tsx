@@ -65,52 +65,6 @@ export function LivingBackground({
   );
 }
 
-/** Cursor-following halo. GPU compositor, throttled rAF, sleeps when idle. */
-export function CursorHalo() {
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    const el = document.getElementById("cursor-halo");
-    if (!el) return;
-    let x = window.innerWidth / 2;
-    let y = window.innerHeight / 2;
-    let tx = x;
-    let ty = y;
-    let raf: number | null = null;
-    const step = () => {
-      x += (tx - x) * 0.18;
-      y += (ty - y) * 0.18;
-      el.style.transform = `translate3d(${x - 160}px, ${y - 160}px, 0)`;
-      if (Math.abs(tx - x) > 0.3 || Math.abs(ty - y) > 0.3) {
-        raf = requestAnimationFrame(step);
-      } else {
-        raf = null;
-      }
-    };
-    const onMove = (e: PointerEvent) => {
-      tx = e.clientX;
-      ty = e.clientY;
-      if (raf === null) raf = requestAnimationFrame(step);
-    };
-    window.addEventListener("pointermove", onMove, { passive: true });
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      if (raf !== null) cancelAnimationFrame(raf);
-    };
-  }, []);
-  return (
-    <div
-      id="cursor-halo"
-      aria-hidden
-      className="cursor-halo pointer-events-none fixed left-0 top-0 z-[1] h-[320px] w-[320px] rounded-full"
-      style={{
-        willChange: "transform",
-        transform: "translate3d(-9999px, -9999px, 0)",
-      }}
-    />
-  );
-}
-
 /** Odometer-style animated counter. Runs once on mount, then idle. */
 export function TickCount({
   value,

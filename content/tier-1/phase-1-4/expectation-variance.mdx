@@ -1,0 +1,405 @@
+---
+title: Expectation, variance & moments
+tier: 1
+phase: "1.4"
+---
+
+export const expectationCode = `# Expectation = weighted average of outcomes by their probabilities.
+import numpy as np
+
+# Roll a fair 6-sided die: outcomes 1..6, each with probability 1/6
+outcomes = np.array([1, 2, 3, 4, 5, 6])
+probs = np.ones(6) / 6
+
+# E[X] = sum outcome * probability
+expected = np.sum(outcomes * probs)
+print(f"E[X] for fair d6 = {expected}   (arithmetic mean since uniform)")
+
+# Empirical check: sample and average
+np.random.seed(0)
+samples = np.random.choice(outcomes, size=10000, p=probs)
+print(f"Sample mean over 10000 rolls: {samples.mean():.4f}")
+
+# Non-uniform: loaded die favoring 6 (prob 1/2), other outcomes equally likely
+loaded = np.array([0.1, 0.1, 0.1, 0.1, 0.1, 0.5])
+expected_loaded = np.sum(outcomes * loaded)
+print(f"\\nE[X] for loaded die (P(6) = 0.5) = {expected_loaded}")
+print(f"Sanity: 6*0.5 + 3*(1+2+3+4+5) = 3 + 1.5 = 4.5")`;
+
+export const varianceCode = `# Variance = E[(X - E[X])^2] = "average squared distance from the mean"
+import numpy as np
+
+# Two distributions with the SAME mean but different spreads
+mean = 5.0
+concentrated = np.array([4, 5, 5, 5, 6])      # tight around 5
+spread       = np.array([1, 3, 5, 7, 9])      # wider
+
+for name, arr in [("concentrated", concentrated), ("spread", spread)]:
+    mu = arr.mean()
+    var = ((arr - mu) ** 2).mean()
+    std = np.sqrt(var)
+    print(f"{name:>13}: mean={mu}, variance={var:.2f}, std={std:.3f}")
+
+# The identity: Var(X) = E[X^2] - E[X]^2 (short-cut form)
+X = spread
+short_cut = (X ** 2).mean() - X.mean() ** 2
+print(f"\\nVar(spread) via short-cut identity: {short_cut}")
+print(f"Compare to direct  E[(X-mu)^2]     : {((X - X.mean()) ** 2).mean()}")
+
+# NumPy's np.var uses N in the denominator by default (population variance)
+# Sample variance uses N-1 (Bessel's correction) — unbiased estimator
+print(f"\\nnp.var(X) [population]: {np.var(X)}")
+print(f"np.var(X, ddof=1) [sample]: {np.var(X, ddof=1)}")`;
+
+export const linearityCode = `# Linearity of expectation: E[aX + bY + c] = a*E[X] + b*E[Y] + c
+# Works even when X, Y are NOT independent — a powerful shortcut.
+import numpy as np
+
+# Coupled example: X, Y are correlated (both share a hidden Z)
+np.random.seed(0)
+Z = np.random.normal(0, 1, size=10_000)
+X = 2 * Z + np.random.normal(0, 0.5, size=10_000)      # depends on Z
+Y = -3 * Z + np.random.normal(0, 0.5, size=10_000)     # also depends on Z (correlated with X!)
+
+corr = np.corrcoef(X, Y)[0, 1]
+print(f"Correlation between X and Y: {corr:.3f}   (they're strongly ANTI-correlated)")
+
+# Still, E[X + Y] = E[X] + E[Y] — no independence needed
+Sum = X + Y
+print(f"E[X]     ≈ {X.mean():+.4f}")
+print(f"E[Y]     ≈ {Y.mean():+.4f}")
+print(f"E[X + Y] ≈ {Sum.mean():+.4f}   (matches E[X] + E[Y] up to sampling noise)")
+
+# VARIANCE does NOT have this clean linearity — it needs a covariance term
+var_sum   = np.var(Sum)
+var_X_plus_var_Y = np.var(X) + np.var(Y)
+cov_XY    = ((X - X.mean()) * (Y - Y.mean())).mean()
+
+print(f"\\nVar(X + Y)                = {var_sum:.4f}")
+print(f"Var(X) + Var(Y)           = {var_X_plus_var_Y:.4f}")
+print(f"Var(X) + Var(Y) + 2*Cov(X,Y) = {var_X_plus_var_Y + 2*cov_XY:.4f}   <- matches!")`;
+
+export const covarianceCode = `# Covariance and correlation — how two variables move together.
+# Cov(X, Y) = E[(X - E[X])(Y - E[Y])].  Positive if both above/below mean together.
+# Correlation = Cov / (std_X * std_Y)  — dimensionless, in [-1, +1].
+import numpy as np
+
+np.random.seed(0)
+# Three pairs: positively correlated, uncorrelated, negatively correlated
+n = 5000
+X = np.random.normal(0, 1, size=n)
+Y_pos = X + np.random.normal(0, 0.5, size=n)      # follows X
+Y_neg = -X + np.random.normal(0, 0.5, size=n)     # opposes X
+Y_ind = np.random.normal(0, 1, size=n)             # independent of X
+
+for name, Y in [("Y_pos", Y_pos), ("Y_neg", Y_neg), ("Y_ind", Y_ind)]:
+    cov = np.cov(X, Y)[0, 1]                       # sample covariance
+    corr = np.corrcoef(X, Y)[0, 1]                 # sample correlation
+    print(f"{name:>8}: Cov(X, {name}) = {cov:+.3f},  Corr = {corr:+.3f}")
+
+# Key fact: independent -> uncorrelated (Cov = 0), but NOT vice versa!
+# Counterexample: Y = X^2 is uncorrelated with X but definitely NOT independent.
+X_sym = np.random.normal(0, 1, size=n)
+Y_dep = X_sym ** 2                                  # perfectly determined by X!
+corr = np.corrcoef(X_sym, Y_dep)[0, 1]
+print(f"\\nX_sym ~ N(0,1), Y = X_sym^2: Corr = {corr:+.4f}")
+print("Zero correlation despite Y being a DETERMINISTIC function of X.")
+print("Correlation only measures LINEAR dependence; nonlinear deps can hide.")`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/probability/information-entropy", label: "Information, entropy & KL divergence", blurb: "Expectation is the machinery that turns a distribution into a summary number; entropy is E[-log p], KL is E[log(p/q)] — both live in the expectation framework." },
+]} />
+
+<NewConcepts
+  concepts={[
+    { name: "Bessel's correction", blurb: "the (N−1) denominator that turns the biased sample variance into an unbiased estimator. The code shows both; the intuition is 'we spent one degree of freedom estimating the mean.'" },
+    { name: "Jensen's inequality", blurb: "for convex f, E[f(X)] ≥ f(E[X]). It's why KL divergence is ≥ 0 and why the log-sum-exp trick works — appears many times downstream." },
+    { name: "Characteristic function", blurb: "E[e^{itX}], the Fourier transform of a distribution. The clean tool for proving CLT and manipulating sums of independent RVs — safely skippable at first read." },
+  ]}
+/>
+
+<Motivation title="Expectation is the summary; variance is the honesty">
+
+Every quantity in ML that "averages" over something is an expectation: the mean squared error loss averages squared residuals, the log-likelihood averages log probabilities, the entropy averages -log p, the KL divergence averages log(p/q). Every "sample many, take the mean" trick relies on this machinery.
+
+But knowing the mean is only half the story — you also need to know **how much things vary**. A model whose mean prediction is right but whose predictions swing wildly is far worse than one whose predictions cluster tightly around the truth. **Variance** captures this spread. Together, expectation and variance are the minimum vocabulary for reasoning about any probabilistic quantity: the model's outputs, the loss over batches, the gradient estimates in SGD, the sample averages used in evaluation.
+
+For a GenAI engineer, this chapter unlocks:
+
+- **Loss decomposition**: MSE = variance + squared bias (the bias-variance tradeoff of classical ML).
+- **Gradient noise reasoning**: SGD's noise variance depends on batch size — smaller batches, noisier gradients, more regularization from the noise.
+- **Sample complexity**: how many samples you need to estimate a mean depends on the variance of what you're estimating (standard error = std / sqrt(N)).
+- **Linearity tricks**: expectation is linear even without independence, so you can decompose complicated averages into simpler ones.
+
+The formulas are trivial — one sum. The mental model is what pays off.
+
+</Motivation>
+
+<Intuition title="Expectation is the balance point; variance is the moment of inertia">
+
+Imagine the outcomes of a distribution as weights placed on a number line, with each weight proportional to the probability of that outcome. **The expectation E[X] is the balance point** — the location where the number line would balance if you put a fulcrum there. For symmetric distributions, this is the center; for skewed distributions, it's pulled toward the heavier side.
+
+**The variance Var(X) is the "moment of inertia"** — how hard it would be to rotate the distribution around its balance point. Concentrated distributions have low variance (weights close to center, easy to spin). Spread distributions have high variance (weights far from center, hard to spin). **The standard deviation σ = √Var** is variance in the original units, easier to interpret ("outputs are 5 ± 2" makes intuitive sense; "5 with variance 4" less so).
+
+Both are single-number summaries of a distribution. Two distributions with the same mean but different variances are qualitatively different: one is predictable, the other is a wild ride. Reporting a mean without a variance (or standard deviation) is often misleading.
+
+</Intuition>
+
+<Recall term="Random variable">
+
+A random variable X is a function from the sample space to numbers — for each outcome, it assigns a numerical value. Its distribution is fully described by either the PMF (probability mass function, discrete case) or PDF (probability density function, continuous case). Expectation, variance, and all other "moments" are summaries computed from that distribution.
+
+</Recall>
+
+## Expectation — the weighted average
+
+For a discrete random variable X taking values x_1, x_2, ..., x_K with probabilities p_1, p_2, ..., p_K:
+
+$$
+E[X] \;=\; \sum_{i=1}^{K} p_i \cdot x_i
+$$
+
+For a continuous random variable with density f(x):
+
+$$
+E[X] \;=\; \int x \cdot f(x) \, dx
+$$
+
+Both are "value weighted by probability, summed" — the continuous version just uses integration. E[X] is the number you'd get on average from infinitely many independent samples of X (the law of large numbers).
+
+**Key property**: for a function g of X, E[g(X)] = Σ p_i · g(x_i). "Take g of the outcome, weight by probability, sum." This is how variance is defined (g(x) = (x − μ)²), how entropy is defined (g(x) = -log p(x)), and so on.
+
+<RunnableCode title="Expectation of a fair die and a loaded die" code={expectationCode} packages={["numpy"]} />
+
+## Variance — the average squared distance from the mean
+
+The **variance** of X is the expected value of the squared deviation from the mean:
+
+$$
+\mathrm{Var}(X) \;=\; E\big[(X - E[X])^2\big] \;=\; E[X^2] - E[X]^2
+$$
+
+The second form (E[X²] − E[X]²) is the "short-cut" computational form, useful when you can compute both E[X²] and E[X] easily. Prove it by expanding (X − μ)² = X² − 2μX + μ² and taking expectation, using linearity.
+
+**Standard deviation** σ = √Var is variance in the original units. For a Gaussian distribution N(μ, σ²), about 68% of samples fall within one σ of the mean, 95% within 2σ, 99.7% within 3σ. This "68-95-99.7 rule" is why standard deviation is so widely used — it's the natural scale for "typical spread."
+
+<RunnableCode title="Variance and the short-cut identity" code={varianceCode} packages={["numpy"]} />
+
+## Linearity of expectation — the theorem that pays for itself constantly
+
+**Linearity of expectation** is a deeply useful property:
+
+$$
+E[aX + bY + c] \;=\; a \cdot E[X] + b \cdot E[Y] + c
+$$
+
+for any constants a, b, c and any random variables X, Y — **including when X and Y are NOT independent**. This is the identity that lets you compute expectations of complicated sums by breaking them into simple pieces.
+
+Contrast with variance, which is **not** linear (even for independent variables):
+
+$$
+\mathrm{Var}(aX + bY) \;=\; a^2 \mathrm{Var}(X) + b^2 \mathrm{Var}(Y) + 2ab \cdot \mathrm{Cov}(X, Y)
+$$
+
+The covariance term is what breaks linearity. For **independent** X and Y, Cov(X, Y) = 0, so Var(X + Y) = Var(X) + Var(Y) — variance is *additive for independent variables* but not in general.
+
+<RunnableCode title="Linearity of expectation works even without independence" code={linearityCode} packages={["numpy"]} />
+
+## Covariance and correlation
+
+**Covariance** measures how much two random variables vary together:
+
+$$
+\mathrm{Cov}(X, Y) \;=\; E[(X - E[X])(Y - E[Y])] \;=\; E[XY] - E[X] E[Y]
+$$
+
+- Positive covariance: X and Y tend to be above/below their means together.
+- Negative covariance: X and Y tend to be on opposite sides of their means.
+- Zero covariance: X and Y are "uncorrelated" (no linear relationship).
+
+Covariance's magnitude depends on the units of X and Y — hard to interpret directly. **Correlation** is the dimensionless version:
+
+$$
+\rho_{XY} \;=\; \frac{\mathrm{Cov}(X, Y)}{\sigma_X \cdot \sigma_Y} \;\in\; [-1, +1]
+$$
+
+Correlation ranges from −1 (perfectly anti-linear) to +1 (perfectly linear), with 0 meaning "no linear relationship." This is what `np.corrcoef` and `pandas.DataFrame.corr` compute.
+
+<RunnableCode title="Covariance, correlation, and the linear-vs-nonlinear trap" code={covarianceCode} packages={["numpy"]} />
+
+**The trap**: uncorrelated does NOT mean independent. Correlation only measures *linear* dependence. Two variables can be perfectly deterministically related (e.g., Y = X² for X centered at 0) and still have correlation 0. This limitation is why we sometimes need mutual information (from the entropy chapter) instead — it captures non-linear dependence too.
+
+## The traps that matter
+
+**E[g(X)] ≠ g(E[X]) in general** (Jensen's inequality gives one direction: E[g(X)] ≥ g(E[X]) for convex g). This is why we can't just plug the mean into a loss function and expect the right answer — we have to average the loss over samples. "The expected loss of the mean prediction" is different from "the mean of the per-sample losses."
+
+**Variance is not linear.** Var(X + Y) ≠ Var(X) + Var(Y) in general. You need the covariance correction. For independent X and Y (or even just uncorrelated), it simplifies — but assumptions of independence are often violated in ML data.
+
+**Sample variance uses N-1, not N** (Bessel's correction). The sample mean uses one degree of freedom, so the residuals sum to zero — this means only N-1 residuals are "free." Dividing by N-1 gives an unbiased estimator of the true variance. `np.var(x, ddof=1)` uses N-1; `np.var(x)` uses N. For large N the difference vanishes; for small N it matters.
+
+**Uncorrelated ≠ independent.** The classic counterexample: X ~ Uniform(-1, 1) and Y = X². Corr(X, Y) = 0 (by symmetry), but Y is a deterministic function of X — they're maximally dependent. Correlation only sees the linear part of the relationship. For fully nonlinear dependence, use mutual information.
+
+**Central moments beyond variance exist**: the third central moment is skewness (asymmetry), the fourth is kurtosis (heavy-tailedness). Rarely used in ML directly, but they appear in some financial / risk contexts.
+
+**Expectation of a random function is a Bayes posterior mean.** If f is a random function (say, a Bayesian neural network) and you want a "best" prediction, E[f(x)] over the distribution of f is often that prediction. This connects expectation to model averaging and Bayesian inference.
+
+<RealWorldML title="Mean squared error decomposes into bias-squared plus variance">
+
+The bias-variance decomposition is one of the most useful theorems in ML. For any predictor f(x) trying to predict a true value y:
+
+$$
+E[(f(x) - y)^2] \;=\; \big(E[f(x)] - y\big)^2 + \mathrm{Var}[f(x)]
+$$
+
+**MSE = Bias² + Variance**. Where the randomness is over: dataset draws (if f is trained on random data), stochastic training, or ensemble members.
+
+- **Bias** (E[f(x)] − y): how far, on average, the predictor's mean prediction is from the true value. Systematic error.
+- **Variance** (Var[f(x)]): how much the predictor's output would vary if we retrained on different random data or added noise. Random error.
+
+**The tradeoff**: complex models (deep nets, high-degree polynomials) can achieve low bias (they fit the training data closely) but often have high variance (small changes in the data lead to big changes in the model). Simple models (linear regression, decision stumps) have low variance (predictions are stable) but often high bias (they can't fit complex patterns).
+
+In modern deep learning, the situation is subtler — big models with lots of data can achieve both low bias AND low variance (the "double descent" phenomenon), which is why we can train billion-parameter models without catastrophic overfitting.
+
+**Practical use**: when your test error is high, ask "is it because of bias (model too simple) or variance (model too complex, overfitting)?" Diagnostic: if training error is also high → bias problem (need bigger model or better features). If training error is low but test error is high → variance problem (need more data, more regularization, or a simpler model).
+
+This chapter provides the mathematical scaffolding: MSE decomposes as (E[error])² + Var(error), and each term is measurable, tunable, and diagnostic.
+
+</RealWorldML>
+
+<StudyDepth
+  intro={<>Expectation and variance are the two most useful summary statistics in probability. Every ML metric and every training-loss-averaging trick uses them. Master these and derived concepts (covariance, bias-variance) become straightforward.</>}
+  drill={[
+    <>Expectation E[X] = Σ p_i x_i (discrete) or ∫ x f(x) dx (continuous) — weighted average</>,
+    <>Expectation is linear: E[aX + bY + c] = a E[X] + b E[Y] + c, EVEN WITHOUT INDEPENDENCE</>,
+    <>Variance Var(X) = E[(X − μ)²] = E[X²] − E[X]²; standard deviation σ = √Var</>,
+    <>Var(X + Y) = Var(X) + Var(Y) + 2 Cov(X, Y); simplifies to sum for independent variables</>,
+    <>Covariance Cov(X, Y) = E[XY] − E[X] E[Y]; correlation = Cov / (σ_X σ_Y) ∈ [-1, +1]</>,
+    <>Uncorrelated ≠ independent (X ~ N(0, 1), Y = X² is a classic counterexample)</>,
+    <>MSE = Bias² + Variance (bias-variance decomposition); guides model complexity choices</>,
+  ]}
+  skim={[
+    <>Higher-order moments (skewness, kurtosis) — appears in finance, rare in ML</>,
+    <>Moment-generating functions and characteristic functions — for probability theorists</>,
+    <>Bessel's correction (N-1 in sample variance) — know the reason, use ddof=1 when N is small</>,
+  ]}
+/>
+
+<CodeItYourself title="Three drills — mean/variance, linearity, sample-size effects">
+
+1. **Sample vs population variance.** Draw N samples from N(0, 1) for N = 5, 30, 300. For each, compute variance both ways (with N and N-1 in denominator) and compare to true variance (1.0). Which is closer? For small N, the N-1 version is unbiased (correct on average); the N version underestimates.
+
+2. **Verify linearity of expectation.** Generate two dependent random variables (e.g., X ~ N(0, 1) and Y = X + N(0, 0.5)). Sample 10,000 times. Verify that sample_mean(X + Y) ≈ sample_mean(X) + sample_mean(Y), even though X and Y are correlated. Then verify that Var(X + Y) ≠ Var(X) + Var(Y) — you need the 2·Cov(X, Y) correction.
+
+3. **Standard error of the mean.** Estimate the mean of a distribution by averaging N samples. Plot the standard deviation of the sample mean as N ranges from 10 to 10,000 (log scale). It should scale as 1/√N — a fundamental relationship that tells you how many samples you need to reduce estimation error by a target factor.
+
+</CodeItYourself>
+
+<Summary>
+
+- **Expectation** E[X] = Σ pᵢ xᵢ = weighted average of outcomes by their probabilities. The "balance point" of the distribution.
+- **Variance** Var(X) = E[(X − μ)²] = average squared distance from the mean. Standard deviation σ = √Var is variance in the original units.
+- **Linearity of expectation**: E[aX + bY + c] = a E[X] + b E[Y] + c — holds without independence.
+- **Variance is NOT linear** in general: Var(X + Y) = Var(X) + Var(Y) + 2 Cov(X, Y). Simplifies to a sum for independent variables.
+- **Covariance and correlation** measure linear co-movement of two random variables. Correlation ρ ∈ [-1, +1] is dimensionless.
+- **Uncorrelated ≠ independent**: correlation only sees linear relationships; nonlinear dependencies (like Y = X²) can hide.
+- **Bias-variance decomposition**: MSE = Bias² + Variance. The core diagnostic for choosing model complexity.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>Compute E[X] and Var(X) for a random variable X that is 1 with probability 0.3, 5 with probability 0.5, 10 with probability 0.2.</>,
+      hint: <>Weighted sums.</>,
+      answer: <>E[X] = 1·0.3 + 5·0.5 + 10·0.2 = 0.3 + 2.5 + 2 = <b>4.8</b>. <br /> E[X²] = 1·0.3 + 25·0.5 + 100·0.2 = 0.3 + 12.5 + 20 = 32.8. <br /> Var(X) = E[X²] − E[X]² = 32.8 − 4.8² = 32.8 − 23.04 = <b>9.76</b>. <br /> σ = √9.76 ≈ <b>3.12</b>.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>Given independent X, Y with Var(X) = 4 and Var(Y) = 9, what is Var(X + Y)? Var(3X + 2Y)?</>,
+      hint: <>Independence means Cov = 0. Constants pull out as squares in variance.</>,
+      answer: <>Var(X + Y) = Var(X) + Var(Y) + 2 Cov(X, Y) = 4 + 9 + 0 = <b>13</b> (independent → Cov = 0). <br /> Var(3X + 2Y) = 3² Var(X) + 2² Var(Y) + 2·3·2·Cov(X, Y) = 9·4 + 4·9 + 0 = <b>72</b>. <br /> Note: constants come out as their SQUARES in variance (because variance is a squared quantity). This is different from expectation, where constants come out linearly.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Prove Var(X) = E[X²] − E[X]² starting from the definition Var(X) = E[(X − E[X])²].</>,
+      hint: <>Expand the square and use linearity of expectation.</>,
+      answer: <>Let μ = E[X] (constant). Then: <br /> Var(X) = E[(X − μ)²] = E[X² − 2μX + μ²] <br /> By linearity of expectation: <br /> = E[X²] − 2μ E[X] + E[μ²] <br /> = E[X²] − 2μ · μ + μ² (using E[X] = μ and E[constant] = constant) <br /> = E[X²] − 2μ² + μ² <br /> = <b>E[X²] − μ²</b> = E[X²] − E[X]². ∎ <br /><br /> This "short-cut" form is computationally more convenient — one sum for E[X²], one sum for E[X], subtract. Especially useful in streaming settings where you can maintain running sums.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Show that for the sample mean X̄ = (X₁ + X₂ + ... + Xₙ) / N of N iid samples with Var(Xᵢ) = σ², we have Var(X̄) = σ² / N. Interpret this "1/√N law" for standard error.</>,
+      hint: <>Use Var(cX) = c² Var(X) and Var(sum) = sum of Var (for independent variables).</>,
+      answer: <>X̄ = (1/N) Σ Xᵢ. Then: <br /> Var(X̄) = Var((1/N) Σ Xᵢ) = (1/N)² Var(Σ Xᵢ) (constant pulls out squared) <br /> = (1/N²) Σ Var(Xᵢ) (independence: variance of sum = sum of variances) <br /> = (1/N²) · N · σ² <br /> = <b>σ² / N</b>. <br /><br /> Standard error of the mean = √Var(X̄) = <b>σ / √N</b>. <br /><br /><b>Interpretation</b>: to halve your estimation error, you need 4× more samples. To achieve 10× better precision, you need 100× more samples. This 1/√N scaling governs sample complexity throughout statistics and ML — from A/B test sample sizes to Monte Carlo integration accuracy to the noise floor of SGD gradient estimates.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Derive the bias-variance decomposition: for a random predictor f(x) and true value y, show E[(f(x) − y)²] = (E[f(x)] − y)² + Var(f(x)).</>,
+      hint: <>Let μ = E[f(x)]. Expand (f(x) − y)² and split into a term involving f(x) − μ (variance-related) and a term involving μ − y (bias-related).</>,
+      answer: <>Let μ = E[f(x)]. Then: <br /> f(x) − y = (f(x) − μ) + (μ − y). <br /> Square: <br /> (f(x) − y)² = (f(x) − μ)² + 2(f(x) − μ)(μ − y) + (μ − y)². <br /><br /> Take expectation (with y and μ constants w.r.t. the randomness of f): <br /> E[(f(x) − y)²] = E[(f(x) − μ)²] + 2(μ − y) E[f(x) − μ] + (μ − y)². <br /><br /> Now: E[(f(x) − μ)²] = Var(f(x)) by definition. E[f(x) − μ] = 0 (since μ = E[f]). So the middle term vanishes. Result: <br /><br /> <b>E[(f(x) − y)²] = Var(f(x)) + (μ − y)² = Variance + Bias²</b>. ∎ <br /><br /><b>Interpretation</b>: expected MSE decomposes as bias² (how far the average prediction is from truth) + variance (how much the prediction varies across randomness). The two contribute independently. High-capacity models can achieve low bias but often at the cost of high variance; regularization trades some bias for less variance. Modern DL sometimes escapes this tradeoff via scale + implicit regularization.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Given a random variable X ~ Uniform(-1, +1) (so E[X] = 0) and Y = X², compute Cov(X, Y). Then explain why "Cov(X, Y) = 0 does not imply independence."</>,
+      hint: <>Cov(X, Y) = E[XY] - E[X] E[Y]. Use symmetry of X around 0.</>,
+      answer: <>E[X] = 0 (symmetric). E[Y] = E[X²] = Var(X) = 1/3 (uniform on [-1, 1] has variance 1/3). <br /><br /> E[XY] = E[X · X²] = E[X³] = 0 (odd moment of a symmetric distribution around 0). <br /><br /> Cov(X, Y) = E[XY] − E[X] E[Y] = 0 − 0 · (1/3) = <b>0</b>. So correlation is 0. <br /><br /> BUT X and Y are absolutely not independent — Y is a *deterministic function* of X. Knowing X tells you Y exactly. <br /><br /> The mismatch: correlation only measures LINEAR dependence. If Y = a·X + b for constants a, b, correlation captures it perfectly (|ρ| = 1). But for nonlinear Y = f(X), correlation can be zero even when the dependence is total. <br /><br /><b>Practical takeaway</b>: don't use zero correlation to conclude independence. Feature-selection algorithms that drop "uncorrelated" features can lose real signal if the relationship is nonlinear. If you need to detect general dependence, use mutual information (from the information-entropy chapter) — it captures all forms of dependence, linear and nonlinear.</>
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "The expectation of a discrete random variable X taking values xᵢ with probabilities pᵢ is:",
+      choices: [
+        { text: "max over i of xᵢ" },
+        { text: "Σ pᵢ · xᵢ — the weighted average", correct: true },
+        { text: "(1/N) Σ xᵢ — the arithmetic mean" },
+        { text: "The value with highest probability" },
+      ],
+      explanation: <>Expectation = each outcome weighted by its probability, summed. For continuous variables, replace the sum with an integral: E[X] = ∫ x f(x) dx. This is the "balance point" of the distribution. Arithmetic mean is the special case where all outcomes are equally likely.</>
+    },
+    {
+      q: "Var(X) equals:",
+      choices: [
+        { text: "E[X] − E[X²]" },
+        { text: "E[X²] − E[X]² (the short-cut form)", correct: true },
+        { text: "E[X] · E[X²]" },
+        { text: "E[X + X²]" },
+      ],
+      explanation: <>Var(X) = E[(X − μ)²] = E[X²] − E[X]². The short-cut form is often more convenient computationally. Verify: expand (X − μ)² = X² − 2μX + μ², take expectation with linearity, use E[X] = μ, get E[X²] − μ².</>
+    },
+    {
+      q: "Linearity of expectation E[aX + bY] = a E[X] + b E[Y] holds:",
+      choices: [
+        { text: "Only when X and Y are independent" },
+        { text: "For ANY random variables X and Y, independent or not", correct: true },
+        { text: "Only when a = b" },
+        { text: "Only for discrete distributions" },
+      ],
+      explanation: <>Linearity of expectation is one of the most useful theorems in probability precisely because it holds without independence assumptions. This lets you decompose complicated expectations (like the expected number of events in a dependent process) into simple sums of per-event expectations. Contrast with variance, which needs a Cov term when variables are dependent.</>
+    },
+    {
+      q: "Var(X + Y) equals:",
+      choices: [
+        { text: "Var(X) + Var(Y), always" },
+        { text: "Var(X) + Var(Y) + 2 Cov(X, Y); simplifies to Var(X) + Var(Y) for independent variables", correct: true },
+        { text: "Var(X) · Var(Y)" },
+        { text: "Var(X) − Var(Y)" },
+      ],
+      explanation: <>The Cov term is what breaks linearity of variance. For independent X, Y: Cov(X, Y) = 0 and it simplifies. For positively correlated variables, variance of the sum is LARGER than sum of variances; for negatively correlated, it's SMALLER. This is used in portfolio theory (diversification via negative correlation) and in ensemble learning (variance reduction via decorrelated ensemble members).</>
+    },
+    {
+      q: "The mean squared error of a random predictor decomposes as:",
+      choices: [
+        { text: "MSE = Bias · Variance" },
+        { text: "MSE = Bias² + Variance", correct: true },
+        { text: "MSE = Bias + Variance" },
+        { text: "MSE = Bias² − Variance" },
+      ],
+      explanation: <>Bias-variance decomposition: expected squared error = (systematic error)² + (random error variance). Guides model complexity choices — bigger models reduce bias but often increase variance; regularization trades some bias for less variance. Modern deep learning sometimes escapes this classical tradeoff via scale + implicit regularization from SGD.</>
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/probability/expectation-variance" title="Expectation, variance & moments" />

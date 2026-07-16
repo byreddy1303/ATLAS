@@ -154,6 +154,16 @@ print("That factor of a million is why every deep-learning framework uses revers
   { href: "/learn/mathematics/calculus/multivariable-partials", label: "Partial derivatives & the gradient", blurb: "The output of backprop is one number per parameter — a gradient vector living in the parameter space." },
 ]} />
 
+<NewConcepts
+  concepts={[
+    { name: "PyTorch / autograd", blurb: "the automatic-differentiation library that turns `loss.backward()` into a full backprop pass. TensorFlow and JAX have their equivalents." },
+    { name: "transformer / attention", blurb: "the LLM building block. Its softmax gradient is one of the more subtle backprop derivations; covered later in Tier 4." },
+    { name: "Flash Attention", blurb: "a memory-optimized attention implementation that fuses forward and backward passes. Referenced here for its exploitation of the backprop structure." },
+    { name: "gradient checkpointing", blurb: "a memory-saving trick: don&rsquo;t cache activations during the forward pass — recompute them during backward. Used for training very deep models." },
+    { name: "VAE (variational autoencoder)", blurb: "reparameterization trick + backprop through a sampling operation. Non-trivial gradient plumbing — Tier 3 deep-dive." },
+  ]}
+/>
+
 <Motivation title="loss.backward() is the chain rule, algorithmically">
 
 You call `loss.backward()` in PyTorch. In under a second, gradients appear on every one of hundreds of millions of parameters. Nothing is magic — it's the chain rule, executed as a graph algorithm called **reverse-mode automatic differentiation** (a.k.a. backpropagation).

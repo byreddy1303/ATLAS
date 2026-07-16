@@ -111,6 +111,12 @@ uv run python -m my_atlas_lab   # your code runs — no manual pip, no activate,
 None. This is chapter zero — your workstation. Bring a terminal, git installed, and one hour of patience; leave with a setup that will still make sense in three years.
 </Prerequisites>
 
+<NewConcepts
+  concepts={[
+    { name: "PyTorch", blurb: "the dominant deep-learning framework. Mentioned in passing here as an example of a &lsquo;compiled dependency&rsquo; that&rsquo;s installation-heavy — full deep-dive in Tier 3." },
+  ]}
+/>
+
 <Motivation title="The boring hour that saves the next six months">
 
 The default outcome of "just start coding" Python is a machine with four Python installs, a `site-packages` museum of conflicting numpy versions, and repos that take forty minutes of dependency Tetris before anything runs. It compounds brutally in ML: PyTorch pinned to a CUDA version, numpy pinned because 2.0 broke things, scikit-learn pinned to whatever pickled your model six months ago. One careless `pip install` bricks a working project; papers you try to reproduce won't even start.

@@ -1,0 +1,433 @@
+---
+title: Limits & continuity
+tier: 1
+phase: "1.3"
+---
+
+export const approachingLimitCode = `import numpy as np
+
+# Watch (sin(x)/x) as x approaches 0 from both sides
+# It looks like 0/0 (undefined at x=0) but the LIMIT is 1.
+def f(x): return np.sin(x) / x
+
+for h in [1.0, 0.1, 0.01, 0.001, 1e-6, 1e-9]:
+    left  = f(-h)
+    right = f(h)
+    print(f"h = {h:10.1e}:  f(-h) = {left:.10f},  f(+h) = {right:.10f}")
+
+print()
+print("Both sides approach 1 — the LIMIT of sin(x)/x as x -> 0 is 1")
+print("Even though f(0) itself is UNDEFINED (0/0)")
+`;
+
+export const oneSidedLimitCode = `import numpy as np
+
+# The Heaviside step function: 0 for x < 0, 1 for x >= 0
+def H(x): return (x >= 0).astype(float)
+
+# Limit from the left of 0
+for h in [1.0, 0.1, 0.001, 1e-6]:
+    print(f"H(-{h}) = {H(np.array(-h))}")
+
+print()
+# Limit from the right of 0
+for h in [1.0, 0.1, 0.001, 1e-6]:
+    print(f"H(+{h}) = {H(np.array(h))}")
+
+print()
+print("Left limit = 0.  Right limit = 1.  They DISAGREE.")
+print("=> The two-sided limit at 0 DOES NOT EXIST.")
+print("=> H is DISCONTINUOUS at 0.")
+`;
+
+export const infiniteLimitCode = `import numpy as np
+
+# f(x) = 1/x^2 as x -> 0 blows up to +infinity
+# f(x) = 1/x as x -> 0 behaves differently from each side
+
+print("--- 1/x^2 as x -> 0 ---")
+for h in [1.0, 0.1, 0.01, 0.001]:
+    print(f"  1/({h}^2) = {1/(h**2):.4e}")
+print("Both sides grow WITHOUT BOUND -> we say the limit is +infinity (a 'divergent' limit)")
+
+print()
+print("--- 1/x as x -> 0 ---")
+for h in [1.0, 0.1, 0.01, 0.001]:
+    print(f"  1/(-{h}) = {-1/h:+.4e}   |   1/(+{h}) = {+1/h:+.4e}")
+print("Left goes to -infinity, right goes to +infinity -> DIFFERENT signs, no limit")
+`;
+
+export const continuityCheckCode = `import numpy as np
+
+# Three functions to test at x = 1:
+# 1) f(x) = x + 1        -- continuous everywhere
+# 2) f(x) = 1 / (x - 1)  -- blows up at x = 1, discontinuous
+# 3) f(x) = { x + 2 if x != 1;  4 if x == 1 }  -- removable discontinuity
+
+def is_continuous_at(f, x0, tol=1e-8):
+    # 3-part definition of continuity:
+    #   (a) f(x0) is defined
+    #   (b) limit as x -> x0 exists (left = right)
+    #   (c) they are equal
+    try:
+        val = f(x0)
+    except Exception:
+        return f"({x0}) undefined -> NOT continuous"
+
+    left  = f(x0 - 1e-6)
+    right = f(x0 + 1e-6)
+
+    if abs(left - right) > tol:
+        return f"limit doesn't exist (left={left:.4f}, right={right:.4f}) -> NOT continuous"
+    limit = 0.5 * (left + right)
+    if abs(val - limit) > tol:
+        return f"f({x0})={val:.4f} but limit={limit:.4f} -> NOT continuous"
+    return f"f({x0})={val:.4f}, limit matches -> continuous"
+
+# 1) f(x) = x + 1
+print("f(x) = x + 1:  ", is_continuous_at(lambda x: x + 1, 1.0))
+
+# 2) f(x) = 1 / (x - 1)
+print("f(x) = 1/(x-1):", is_continuous_at(lambda x: 1 / (x - 1), 1.0))
+
+# 3) piecewise with removable discontinuity
+def f3(x): return 4.0 if abs(x - 1.0) < 1e-14 else x + 2.0
+print("f(x) = piecewise:", is_continuous_at(f3, 1.0))
+`;
+
+export const softmaxContinuityCode = `import numpy as np
+
+def softmax(logits):
+    # Numerically stable softmax: subtract the max first
+    shifted = logits - np.max(logits)
+    exps = np.exp(shifted)
+    return exps / exps.sum()
+
+# Perturb the input by TINY amounts and watch the output smoothly change.
+# Softmax is continuous (in fact smooth = differentiable everywhere)
+base = np.array([2.0, 1.0, 0.5])
+print("Base softmax:      ", np.round(softmax(base), 6))
+
+for eps in [1e-2, 1e-4, 1e-6, 1e-10]:
+    perturbed = base + np.array([eps, 0.0, 0.0])       # bump only the first logit
+    diff = softmax(perturbed) - softmax(base)
+    print(f"After eps = {eps:.0e}:  max output change = {np.max(np.abs(diff)):.2e}")
+
+print()
+print("Tiny input change -> tiny output change. Softmax is CONTINUOUS.")
+print("That's why gradient-based training works with softmax outputs.")
+print()
+
+# Compare to a DISCONTINUOUS operation: argmax
+print("argmax(base) =", np.argmax(base))
+tie = np.array([1.0, 1.0, 0.999])
+print("argmax([1.0, 1.0, 0.999]) =", np.argmax(tie))
+tie_perturbed = np.array([1.0, 1.0 + 1e-9, 0.999])     # tiny bump breaks the tie
+print("argmax([1.0, 1.0 + 1e-9, 0.999]) =", np.argmax(tie_perturbed))
+print()
+print("argmax is DISCONTINUOUS at ties -> cannot backprop through it,")
+print("which is why we use softmax during training and argmax only at inference.")
+`;
+
+<Prerequisites items={[
+  { href: "/learn/foundations/scientific-stack/numpy-arrays-vectorization", label: "NumPy fundamentals", blurb: "You'll test limits numerically with small NumPy arrays." },
+]} />
+
+<NewConcepts
+  concepts={[
+    { name: "SGD / Adam optimizers", blurb: "stochastic gradient descent and its adaptive variants (RMSProp, Adam, AdamW) — the algorithms that train every neural network. Full chapter in Phase 1.6." },
+    { name: "cross-entropy loss / softmax", blurb: "the standard classification loss and its output activation. Referenced here for the continuity properties of the softmax function." },
+    { name: "attention / transformer", blurb: "LLM building blocks that rely on differentiable softmax. Chapter in Tier 4." },
+    { name: "VAE (variational autoencoder)", blurb: "generative model whose reparameterization trick relies on continuity of the encoder&rsquo;s output. Tier 3 deep-dive." },
+  ]}
+/>
+
+<Motivation title="Why 'continuous' is the requirement gradient descent secretly assumes">
+
+Every gradient-based ML method — SGD, Adam, backprop, everything — requires the loss function to be **differentiable**, which in turn requires it to be **continuous**. When a loss (or an activation, or an operation in the network) is discontinuous, gradient descent breaks: tiny weight changes produce tiny loss changes almost everywhere, then suddenly a huge jump. The "descent direction" isn't well defined at the jump; the algorithm oscillates or gets stuck.
+
+Two examples you deal with constantly:
+
+- **Softmax vs argmax at the output.** Argmax is discontinuous — a tiny change in logits can flip which class wins — so you cannot backprop through it. Softmax is a continuous, differentiable *smoothing* of argmax; it's why we train with cross-entropy on softmax outputs and only use argmax at inference. Every classification network's output layer is a workaround for this exact fact.
+- **ReLU at zero.** ReLU is continuous, but its derivative has a jump — the "corner" at z = 0 means the derivative is 0 on the left and 1 on the right, with no defined value at 0 itself. Libraries paper over this with a "subgradient" convention.
+
+For a GenAI engineer, "limit" and "continuity" are not academic notions. They're the reason gradient-based training is possible, the reason certain hard optimization problems get "smoothed" into tractable ones, and the reason numerical issues creep in when a computation gets close to a discontinuity or a singularity. This chapter builds the vocabulary and intuition, then shows exactly how it maps to gradient-flow guarantees in ML.
+
+</Motivation>
+
+<Intuition title="A limit is 'the value f approaches, even if it never gets there'">
+
+Look at f(x) = sin(x)/x. Plug in x = 0 and you get 0/0 — undefined. But if you compute f(0.1), f(0.01), f(0.001), … you notice they all approach the value 1. The **limit** of f as x approaches 0 is 1, even though f(0) itself is undefined.
+
+More generally: `limₓ→a f(x) = L` means "as x gets arbitrarily close to a (from either side), f(x) gets arbitrarily close to L." The limit is about *approach*, not about the value at a itself. It's a statement about how the function behaves in the neighborhood of a, ignoring what happens exactly at a.
+
+**Continuity** is when the limit actually equals the value: `limₓ→a f(x) = f(a)`. In pictures: continuous means "draw the graph without lifting the pen" — no jumps, no gaps. If you can approach a point along the graph from either side and land on the actual value f(a), the function is continuous at a.
+
+**Every polynomial is continuous everywhere.** Same for sin, cos, e^x. So are their sums, products, and (where the denominator is nonzero) quotients. Compositions of continuous functions are continuous. In practice, almost every function you write down in ML is continuous *except* for a few named exceptions (argmax, indicator functions, hard-thresholded quantities) that we then have to work around.
+
+</Intuition>
+
+<Recall term="Function domain">
+
+The domain of a function f is the set of inputs where f is defined. When we talk about a limit "as x approaches a" we don't require a to be in the domain — the limit only concerns nearby points. This is why we can meaningfully ask about the limit of sin(x)/x at x = 0 even though the function isn't defined there.
+
+</Recall>
+
+## The intuitive limit — approach, not arrival
+
+`limₓ→a f(x) = L` means: **whatever tolerance you demand around L, you can find a small enough neighborhood around a (excluding a itself) where f is within that tolerance of L.**
+
+The picture: pin a target strip of width 2ε around L on the y-axis. Then you have to find a strip of width 2δ around a on the x-axis (not including a itself) such that every point in the x-strip lands inside the y-strip when you apply f. If you can do this for *any* ε (however small), the limit exists and equals L.
+
+The formal (ε–δ) definition:
+
+$$
+\lim_{x \to a} f(x) = L \iff \forall\, \varepsilon > 0,\, \exists\, \delta > 0 \text{ such that } 0 < |x - a| < \delta \implies |f(x) - L| < \varepsilon.
+$$
+
+You almost never *use* this definition in practice. But it's what makes limits precise. For an ML engineer, what matters is the intuition: "approaches L as x approaches a, without needing f(a) itself to be defined or equal to L."
+
+<RunnableCode title="Watch sin(x)/x approach 1 from both sides as x → 0" code={approachingLimitCode} packages={["numpy"]} />
+
+## One-sided limits and when the two-sided limit fails
+
+You can compute the limit as x approaches a *from below only* (`limₓ→a⁻`) or *from above only* (`limₓ→a⁺`). These are the **one-sided limits**.
+
+The **two-sided limit** at a exists ⇔ both one-sided limits exist AND they agree. If they disagree, or either fails to exist, the two-sided limit is undefined.
+
+Example: the Heaviside step H(x) = 0 for x &lt; 0, 1 for x ≥ 0. Left-limit at 0 is 0; right-limit is 1. They disagree ⇒ limₓ→0 H(x) doesn't exist. H is *discontinuous* at 0.
+
+<RunnableCode title="Heaviside step — left and right limits disagree at zero" code={oneSidedLimitCode} packages={["numpy"]} />
+
+## Infinite limits and limits at infinity
+
+Two extensions of the basic limit idea:
+
+- **Infinite limit**: `limₓ→a f(x) = ∞` means f(x) grows without bound as x approaches a. The limit doesn't exist as a real number, but we use the shorthand ∞ to indicate the divergence pattern. Example: 1/x² blows up to +∞ as x → 0.
+- **Limit at infinity**: `limₓ→∞ f(x) = L` means f(x) approaches L as x gets arbitrarily large. Example: `limₓ→∞ (1 + 1/x) = 1`. Similarly for x → −∞.
+
+Combining both is common in ML: the sigmoid function has `limₓ→+∞ σ(x) = 1` and `limₓ→−∞ σ(x) = 0`. The two horizontal asymptotes.
+
+<RunnableCode title="Divergent limits — 1/x² blows up; 1/x has different signs from each side" code={infiniteLimitCode} packages={["numpy"]} />
+
+## Continuity — the three-part definition
+
+A function f is **continuous at x = a** if all three:
+
+1. **f(a) is defined** (a is in the domain of f).
+2. **limₓ→a f(x) exists** (the two-sided limit is a finite real number).
+3. **limₓ→a f(x) = f(a)** (the limit equals the function value).
+
+If any one of these fails, f is discontinuous at a. The three types of failure:
+
+- **f(a) undefined but the limit exists** — a *removable* discontinuity. You could redefine f(a) to equal the limit and make it continuous. Example: sin(x)/x with a hole at x = 0 (fillable with the value 1).
+- **Left and right limits disagree** — a *jump* discontinuity. No single value could patch this. Example: Heaviside step at 0.
+- **f blows up or oscillates near a** — an *infinite* or *essential* discontinuity. Example: 1/x at 0 (blows up), sin(1/x) at 0 (oscillates infinitely fast).
+
+<RunnableCode title="Testing three functions for continuity at x = 1" code={continuityCheckCode} packages={["numpy"]} />
+
+## The functions that are always continuous (and the ones that aren't)
+
+**Always continuous (everywhere on their domain):**
+
+- Polynomials (constants, x, x², all sums with real coefficients).
+- Sin, cos, e^x, ln(x) (on x &gt; 0), √x (on x ≥ 0).
+- Sums, products, compositions, and quotients (where the denominator is nonzero) of continuous functions.
+- Softmax, sigmoid, tanh, GELU — every standard activation used in modern deep learning.
+
+**Not continuous somewhere:**
+
+- 1/x at x = 0 (blows up).
+- Absolute value's derivative at 0 (the function is continuous, but its derivative jumps).
+- ReLU's derivative at 0 (again continuous function, discontinuous derivative — "kink").
+- Heaviside step, sign function, indicator functions (jump discontinuities).
+- Argmax, top-k selection, hard-thresholded quantities (jumps whenever the winner changes).
+
+The last group is exactly the set of operations you *can't backprop through* directly in modern ML. The workarounds are various forms of **smoothing** — replacing a discontinuous operation with a continuous relaxation that gradient descent can traverse.
+
+## Why continuity matters for gradient descent
+
+Gradient descent adjusts parameters to reduce a loss. If the loss is continuous, small parameter changes produce small loss changes — a locally-well-behaved optimization landscape. If it has jumps, the gradient of the loss with respect to a parameter is undefined or infinite at the jump, and updates near the jump either do nothing (if the parameter change doesn't cross the jump) or explode (if it does).
+
+**Corollary**: any discrete decision inside a differentiable model breaks gradient flow. This is why the standard tricks — softmax instead of argmax, sigmoid instead of hard-threshold, straight-through estimators for quantization, Gumbel-softmax for discrete sampling — all replace a discrete choice with a smooth relaxation, do gradient descent on the relaxation, and then optionally snap back to a discrete choice at inference.
+
+<RunnableCode title="Softmax is smoothly continuous; argmax jumps at ties" code={softmaxContinuityCode} packages={["numpy"]} />
+
+## Numerical continuity issues you'll see
+
+Even for genuinely continuous functions, floating-point arithmetic can make a computation *appear* discontinuous in code:
+
+- **Subtractive cancellation**: `f(x + h) − f(x)` for tiny h loses digits when the two values are nearly equal. This is why numerical derivatives get *worse* below h ≈ 1e-8, not better.
+- **Overflow/underflow**: exp(x) for large x overflows to inf; exp(x) for very negative x underflows to 0. Cross either boundary and the function's output jumps (from a normal float to inf, or from a tiny positive number to exact 0), which then propagates through the rest of the computation.
+- **Softmax without max-subtraction**: `exp(x) / sum(exp(x))` overflows for large logits. The fix is to subtract the max first: `exp(x - max_x) / sum(exp(x - max_x))` — same math, no overflow. This "log-sum-exp trick" is a canonical example of preserving continuity in floating-point.
+
+Understanding limits and continuity is what lets you diagnose these issues: they're not really about continuity of the underlying math, but about the floating-point representation *breaking* continuity in the neighborhood of certain values.
+
+<RealWorldML title="Why softmax is the argmax you can differentiate">
+
+Consider the final layer of any classification network. You produce a vector of logits (one per class), and you want to output a probability distribution over classes. What you'd *like* to output — "the class with the highest logit is 100% probable, all others are 0%" — is exactly `argmax` returning a one-hot vector. But argmax is a **discontinuous** function of logits: at a tie between two classes, an infinitesimal change in logits flips which class wins, and the one-hot output changes discontinuously.
+
+If the output layer were argmax, backprop would fail: at the tied point, the gradient of the output with respect to logits is either 0 (nothing changed on my side of the tie) or infinite (I crossed the tie boundary). Either way, gradient descent can't compute a meaningful update.
+
+**Softmax fixes this by being a smooth version of argmax:**
+
+$$
+\mathrm{softmax}(z)_i \;=\; \frac{e^{z_i}}{\sum_{j} e^{z_j}}
+$$
+
+For each class i, output the exponentiated logit divided by the sum of all exponentiated logits. Properties:
+
+- **Values in [0, 1] that sum to 1** — a valid probability distribution.
+- **Continuous and differentiable everywhere** — no ties, no jumps. Small logit changes produce proportionally small probability changes.
+- **Recovers argmax in the "temperature → 0" limit**: if you divide logits by a temperature τ before softmax, then as τ → 0 the highest logit dominates and the output becomes essentially one-hot. So softmax with τ = 1 is a "soft" approximation to argmax that becomes exact as τ → 0.
+
+This is exactly what "argmax you can differentiate" means. Every classification network uses softmax during training (so backprop works), and either softmax or argmax during inference (softmax if you need probabilities; argmax if you just need the prediction).
+
+The same "smoothly relax a discontinuous operation" pattern shows up all over ML:
+
+- **Gumbel-softmax** — smoothly relaxes discrete categorical sampling for gradient-based training of models that sample categorical variables (VAEs with discrete latents, differentiable neural architecture search).
+- **Straight-through estimator** — used to backprop through quantization (rounding to the nearest int) by pretending the quantizer is the identity in the backward pass, keeping gradients defined.
+- **Soft attention** — replaces "pick the top-k tokens" (discontinuous) with a weighted average using softmax weights (continuous, differentiable).
+- **Relaxed transformer routing** in mixture-of-experts models — smooths the "assign token to expert" choice into a soft probability distribution during training.
+
+The rule of thumb: **whenever a model needs a discrete decision, replace it with a continuous relaxation during training, and (if needed) snap back to a discrete choice at inference**. This one pattern, powered by the continuity requirement of gradient descent, is the reason so many ML architectures look the way they do.
+
+</RealWorldML>
+
+<StudyDepth
+  intro={<>Limits and continuity are the substrate under differentiation, gradient descent, and every "smooth relaxation" trick in modern deep learning. Master the intuitive definition + three-part continuity check + the continuous-vs-discontinuous catalog.</>}
+  drill={[
+    <>Limit: `limₓ→a f(x) = L` = "f approaches L as x approaches a" — a statement about the neighborhood, not the value at a</>,
+    <>One-sided limits: two-sided limit exists ⇔ left limit and right limit agree</>,
+    <>Three-part continuity check: f(a) defined AND limit exists AND they are equal</>,
+    <>Common continuous functions: polynomials, sin/cos/exp/log (on their domain), softmax, sigmoid, tanh, GELU</>,
+    <>Common discontinuous operations: argmax, indicator, hard-threshold, quantize — all incompatible with vanilla backprop; needs smoothed relaxation</>,
+    <>Why it matters for ML: gradient descent requires continuity of the loss to work; every discrete choice inside a differentiable model needs a continuous relaxation (softmax, Gumbel, straight-through)</>,
+  ]}
+  skim={[
+    <>The formal ε–δ definition of limits — you'll use the intuition daily; the formalism is for real-analysis proofs</>,
+    <>Sequential characterization of limits (via convergent sequences) — a proof technique, not a working tool in ML</>,
+    <>Uniform continuity vs pointwise continuity — matters for analysis of function spaces (integration, Fourier), rarely comes up in practical ML</>,
+  ]}
+/>
+
+<CodeItYourself title="Three drills to internalize limits + continuity">
+
+1. **Numerically test a limit.** For f(x) = (1 - cos(x)) / x² (which has the limit 1/2 as x → 0), compute f at h = 1e-1, 1e-2, …, 1e-15. Watch the value converge to 1/2 initially, then diverge from 1/2 as h gets tiny — floating-point cancellation destroying the numerator. This is the classic "numerical limit" pitfall.
+
+2. **Classify continuity of three functions at x = 0.** For (a) f(x) = x·sin(1/x) with f(0) = 0, (b) g(x) = sin(1/x) undefined at 0, (c) h(x) = ⌊x⌋ (floor function) — plot each near 0 and reason about limits. Which are continuous at 0? Which have removable, jump, or essential discontinuities? (Answers: (a) continuous, (b) essential discontinuity — oscillates infinitely fast, (c) jump discontinuity at every integer.)
+
+3. **Build a temperature-controlled soft argmax.** Implement `soft_argmax(logits, T)` returning `softmax(logits / T)`. Compute it for logits = [2.0, 1.9, 1.5] with T = 1.0, 0.1, 0.01. Watch the output sharpen from a smooth mixture toward a one-hot approximation as T → 0. This is exactly how Gumbel-softmax and knowledge-distillation temperature work in production ML.
+
+</CodeItYourself>
+
+<Summary>
+
+- **Limit**: `limₓ→a f(x) = L` means f(x) approaches L as x approaches a. The value f(a) itself doesn't matter to the limit — only what f does *near* a.
+- **One-sided limits** (from below and above). The two-sided limit exists ⇔ both one-sided limits exist and agree.
+- **Continuity at a** requires three things: f(a) is defined, the limit at a exists, and they are equal. Failure gives removable, jump, or essential discontinuities.
+- **Continuous by default**: polynomials, sin/cos/exp/log (on their domain), softmax/sigmoid/tanh/GELU. Sums, products, compositions, and (nonzero-denominator) quotients preserve continuity.
+- **Discontinuous** (incompatible with vanilla backprop): argmax, indicator, hard-threshold, quantize, sign — all handled in ML by smooth relaxation (softmax, Gumbel, straight-through).
+- **Why ML cares**: gradient descent requires the loss to be continuous (in fact differentiable) so that tiny weight changes produce tiny loss changes. Every "smoothed" operation in a network exists to make gradient flow possible.
+- **Numerical continuity**: even genuinely continuous math can look discontinuous in floating-point — subtractive cancellation, over/underflow, and softmax without max-subtraction are all cases where you have to preserve continuity in code with a numerically-stable formulation.
+- The **next chapter** builds derivatives on this foundation — differentiability requires continuity plus a well-defined slope everywhere.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>Compute `limₓ→2 (x² − 4) / (x − 2)`.</>,
+      hint: <>Factor the numerator.</>,
+      answer: <>Numerator: x² − 4 = (x − 2)(x + 2). So (x² − 4) / (x − 2) = (x − 2)(x + 2) / (x − 2) = x + 2 for x ≠ 2. <br /> As x approaches 2, x + 2 approaches <b>4</b>. <br /> Note that the original function is undefined *at* x = 2 (division by zero), but the limit is perfectly well defined — you cancel the common factor before evaluating. This is a *removable* discontinuity: the function could be extended to be continuous at 2 by defining it to equal 4 there.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>Is f(x) = x² continuous at x = 3? Show all three parts of the continuity check.</>,
+      hint: <>f is a polynomial.</>,
+      answer: <><b>(a)</b> f(3) = 9 is defined (polynomials are defined everywhere). <br /> <b>(b)</b> limₓ→3 x² exists (both one-sided limits equal 9, by direct evaluation of the polynomial). <br /> <b>(c)</b> limₓ→3 f(x) = 9 = f(3). <br /> All three parts satisfied ⇒ <b>continuous at x = 3</b>. In fact every polynomial is continuous everywhere — the same argument applies at any x₀.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Is f(x) = 1 / (x − 5) continuous at x = 5? At x = 3? Explain.</>,
+      hint: <>Where does the denominator vanish?</>,
+      answer: <><b>At x = 5:</b> f(5) is undefined (division by zero). Part (a) of the continuity check fails ⇒ <b>NOT continuous at 5</b>. In fact the one-sided limits are ±∞ (essential/infinite discontinuity — the function blows up). <br /><br /> <b>At x = 3:</b> f(3) = 1/(3 − 5) = −1/2. The limit as x → 3 equals f(3) = −1/2 (rational functions are continuous everywhere their denominator is nonzero). <b>Continuous at 3</b>. <br /><br /> Rule: a rational function P(x)/Q(x) is continuous everywhere except where Q(x) = 0. At those points there's either a removable discontinuity (if the numerator also vanishes) or an infinite discontinuity (if only the denominator vanishes).</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Classify the discontinuity at x = 0 of the function `f(x) = sin(x) / x` (with f(0) undefined).</>,
+      hint: <>Compute the limit as x → 0.</>,
+      answer: <>limₓ→0 sin(x)/x = 1 (a famous fundamental limit). So the two-sided limit exists and equals 1. <br /><br /> But f(0) is undefined. Part (a) of the continuity check fails: <b>discontinuous at 0</b>. <br /><br /> Since the limit exists (finite), the discontinuity is <b>removable</b>: you can extend f by defining f(0) = 1, and the extension is continuous everywhere. This is what "smoothly extending across a hole" means, and it's a very common trick in Fourier analysis (where the "sinc" function is defined this way).</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Why can gradient descent NOT be applied directly to a classifier that outputs argmax(logits) as its final layer? Give the mathematical reason in terms of continuity.</>,
+      hint: <>Think about what happens to the argmax output when logits change infinitesimally.</>,
+      answer: <><b>Argmax is discontinuous.</b> Let logits = (2.0, 2.0 + ε). For ε &gt; 0, argmax = 1 (index of second logit). For ε &lt; 0, argmax = 0. As ε passes through 0, the output jumps discontinuously from 0 to 1 (or vice versa). <br /><br /> Consequence: the derivative of argmax with respect to any logit is 0 almost everywhere (because argmax is locally constant), except at the tie boundaries, where the derivative is undefined (or infinite in a distributional sense). <br /><br /> Gradient descent updates weights via `weight := weight − η · dLoss/dweight`. Backprop computes `dLoss/dweight` by the chain rule, which needs each operation to have a well-defined derivative. Argmax's derivative is 0 almost everywhere → no gradient signal reaches earlier layers → weights never update meaningfully. And exactly at ties (measure zero, but the important cases), the derivative is undefined → training breaks. <br /><br /> <b>Fix</b>: replace argmax with softmax, which is a continuous, differentiable smoothing that (a) still outputs a probability-like vector and (b) approaches argmax in the limit of low "temperature" (dividing logits by τ → 0). Train with softmax + cross-entropy; use argmax only at inference where you don't need to backprop.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Prove: the composition of two continuous functions is continuous. Formally: if g is continuous at a and f is continuous at g(a), then f ∘ g is continuous at a.</>,
+      hint: <>Use the ε–δ definition. Given ε on the outside for f, work outward to find δ for g.</>,
+      answer: <>Fix ε &gt; 0. We want to find δ &gt; 0 such that |x − a| &lt; δ ⇒ |f(g(x)) − f(g(a))| &lt; ε. <br /><br /> <b>Step 1.</b> Since f is continuous at g(a), by definition there exists η &gt; 0 such that for any y, |y − g(a)| &lt; η ⇒ |f(y) − f(g(a))| &lt; ε. <br /><br /> <b>Step 2.</b> Since g is continuous at a, using the tolerance η from step 1, there exists δ &gt; 0 such that |x − a| &lt; δ ⇒ |g(x) − g(a)| &lt; η. <br /><br /> <b>Step 3.</b> Combine: if |x − a| &lt; δ, then by step 2, |g(x) − g(a)| &lt; η. Then by step 1 (applied to y = g(x)), |f(g(x)) − f(g(a))| &lt; ε. ∎ <br /><br /> <b>Consequence in ML</b>: a neural network is a *composition* of linear layers and (continuous) activation functions. If every activation is continuous (as they are: ReLU, GELU, sigmoid, tanh, softmax), then the entire network's output is continuous in the inputs. This is why we can talk about "smooth loss landscapes" and use gradient descent on deep networks: continuity is preserved through arbitrarily many compositions of continuous pieces. Break continuity at any layer (via argmax, hard threshold, or a discrete branch) and you break the whole network's differentiability.</>
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "The statement `limₓ→a f(x) = L` means:",
+      choices: [
+        { text: "f(a) equals L" },
+        { text: "f(x) approaches L as x approaches a (without necessarily equaling L at a itself)", correct: true },
+        { text: "f is continuous at a" },
+        { text: "The derivative of f at a equals L" },
+      ],
+      explanation: <>A limit is about approach, not arrival. f(x) can approach L even if f(a) is undefined or has a different value. The classic example is sin(x)/x approaching 1 as x → 0, even though sin(0)/0 is undefined.</>
+    },
+    {
+      q: "A function f is continuous at x = a if:",
+      choices: [
+        { text: "f(a) is defined" },
+        { text: "limₓ→a f(x) exists" },
+        { text: "f(a) is defined AND limₓ→a f(x) exists AND they are equal", correct: true },
+        { text: "f is bounded near a" },
+      ],
+      explanation: <>All three conditions must hold: (1) the function value exists at a, (2) the limit exists (from both sides, and they agree), (3) the limit equals the function value. If any fails, the function is discontinuous. Different failures give different types (removable, jump, infinite).</>
+    },
+    {
+      q: "The Heaviside step function H(x) = 0 for x &lt; 0, 1 for x ≥ 0 has what type of discontinuity at x = 0?",
+      choices: [
+        { text: "Removable discontinuity" },
+        { text: "Jump discontinuity (left limit 0, right limit 1, they disagree)", correct: true },
+        { text: "Infinite discontinuity" },
+        { text: "None — it's continuous" },
+      ],
+      explanation: <>Left limit: 0. Right limit: 1. They disagree, so the two-sided limit doesn't exist — a *jump* discontinuity. No single value could patch this (unlike a removable one). This is exactly the issue with argmax and hard-threshold operations in ML — they have jumps and can't be backpropped through.</>
+    },
+    {
+      q: "Why is softmax used instead of argmax in the output layer of a classification network during training?",
+      choices: [
+        { text: "Softmax is faster to compute" },
+        { text: "Softmax is continuous and differentiable (argmax is discontinuous), so gradient descent can flow through it", correct: true },
+        { text: "Softmax uses less memory" },
+        { text: "Argmax doesn't work for more than 2 classes" },
+      ],
+      explanation: <>Argmax is discontinuous (tiny logit changes at ties flip which class wins), so its derivative is 0 almost everywhere and undefined at ties. Softmax is a continuous, differentiable smoothing that returns a probability distribution, allowing gradients to flow. At inference, you can use argmax (no gradients needed) to get the final prediction.</>
+    },
+    {
+      q: "Which of the following is TRUE?",
+      choices: [
+        { text: "Every continuous function is differentiable" },
+        { text: "Every differentiable function is continuous, but not every continuous function is differentiable", correct: true },
+        { text: "Continuity and differentiability are the same thing" },
+        { text: "Both concepts are irrelevant to ML" },
+      ],
+      explanation: <>Differentiability requires continuity plus a well-defined tangent line. |x| is a classic counterexample: continuous everywhere, but has a corner at 0 where the derivative is undefined (left slope −1, right slope +1). Same story for ReLU at z = 0 — continuous function, jump in derivative. This is why "differentiable" is a stronger condition than "continuous" and why gradient-based optimization worries about it.</>
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/calculus/limits-continuity" title="Limits & continuity" />

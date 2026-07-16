@@ -1,0 +1,486 @@
+---
+title: Classification metrics deep-dive
+tier: 2
+phase: "2.1"
+---
+
+export const confusionCode = `# Confusion matrix + all the derived metrics from one source of truth.
+import numpy as np
+
+# Toy dataset: 100 samples, 90 negatives + 10 positives.
+# Model predictions -- both classes correctly detected most of the time, some errors.
+y_true = np.array([1]*10 + [0]*90)
+y_pred = np.array([1]*7 + [0]*3 + [1]*4 + [0]*86)   # 7 TP, 3 FN, 4 FP, 86 TN
+
+def confusion(y, y_hat):
+    "Return TP, FP, TN, FN as a 2x2 matrix."
+    return np.array([
+        [((y_hat == 1) & (y == 1)).sum(),  ((y_hat == 1) & (y == 0)).sum()],  # TP, FP
+        [((y_hat == 0) & (y == 1)).sum(),  ((y_hat == 0) & (y == 0)).sum()],  # FN, TN
+    ])
+
+C = confusion(y_true, y_pred)
+TP, FP = C[0]
+FN, TN = C[1]
+print(f"Confusion matrix (rows: predicted, cols: actual):")
+print(f"                  actual+  actual-")
+print(f"  predicted+:  TP={TP:>3}   FP={FP:>3}")
+print(f"  predicted-:  FN={FN:>3}   TN={TN:>3}")
+print()
+
+# All the derived metrics
+accuracy    = (TP + TN) / (TP + FP + FN + TN)
+precision   = TP / (TP + FP) if (TP + FP) else 0
+recall      = TP / (TP + FN) if (TP + FN) else 0
+specificity = TN / (TN + FP) if (TN + FP) else 0
+f1          = 2 * precision * recall / (precision + recall) if (precision + recall) else 0
+
+print(f"accuracy    = {accuracy:.3f}   ({TP + TN}/{TP+FP+FN+TN} correct)")
+print(f"precision   = {precision:.3f}   (of what I called +, {int(precision*100)}% really were)")
+print(f"recall      = {recall:.3f}   (of the real +, I caught {int(recall*100)}%)")
+print(f"specificity = {specificity:.3f}   (of the real -, I correctly said - to {int(specificity*100)}%)")
+print(f"F1          = {f1:.3f}   (harmonic mean of precision & recall)")
+print()
+
+# Naive baseline: always predict negative -> 90% accuracy!
+print(f"Baseline 'always predict negative': accuracy = 0.90, recall = 0.00, F1 = 0.00.")
+print(f"Accuracy alone hides the fact that a 'do nothing' model beats a real model.")`;
+
+export const rocPrCode = `# ROC and PR curves come from SLIDING the decision threshold.
+# Each threshold gives a (FPR, TPR) point on the ROC or a (recall, precision) point on the PR curve.
+import numpy as np, matplotlib.pyplot as plt
+from sklearn.metrics import roc_curve, precision_recall_curve, roc_auc_score, average_precision_score
+
+np.random.seed(0)
+N = 500
+# Two-class problem: positives have higher predicted probs on average
+y_true = np.concatenate([np.ones(200), np.zeros(300)])
+scores = np.concatenate([
+    np.random.beta(6, 3, size=200),      # positives: mean ~0.67
+    np.random.beta(3, 6, size=300),      # negatives: mean ~0.33
+])
+
+# Compute curves
+fpr, tpr, thresholds_roc = roc_curve(y_true, scores)
+prec, rec, thresholds_pr = precision_recall_curve(y_true, scores)
+auc_roc = roc_auc_score(y_true, scores)
+ap      = average_precision_score(y_true, scores)
+
+fig, axes = plt.subplots(1, 2, figsize=(11, 4.4))
+axes[0].plot(fpr, tpr, "-", color="crimson", lw=2, label=f"AUC = {auc_roc:.3f}")
+axes[0].plot([0, 1], [0, 1], "--", color="gray", lw=1, label="random")
+axes[0].set_xlabel("False Positive Rate"); axes[0].set_ylabel("True Positive Rate")
+axes[0].set_title("ROC curve"); axes[0].legend(); axes[0].grid(alpha=0.3)
+
+axes[1].plot(rec, prec, "-", color="royalblue", lw=2, label=f"AP = {ap:.3f}")
+axes[1].axhline(200/500, linestyle="--", color="gray", lw=1, label=f"class base rate ({200/500:.2f})")
+axes[1].set_xlabel("Recall"); axes[1].set_ylabel("Precision")
+axes[1].set_title("Precision-Recall curve"); axes[1].legend(); axes[1].grid(alpha=0.3)
+plt.tight_layout()
+
+print(f"AUC ROC: {auc_roc:.3f}   (1 = perfect ranking, 0.5 = random)")
+print(f"Average Precision: {ap:.3f}   (integrates the PR curve, better for imbalance)")`;
+
+export const imbalanceCode = `# ROC-AUC can look inflated on IMBALANCED data.
+# PR-AUC (average precision) is a more honest metric for rare-positive classification.
+import numpy as np
+from sklearn.metrics import roc_auc_score, average_precision_score
+
+np.random.seed(0)
+
+def evaluate_at_imbalance(pos_frac, N=1000):
+    n_pos = int(N * pos_frac)
+    n_neg = N - n_pos
+    y = np.concatenate([np.ones(n_pos), np.zeros(n_neg)])
+    # A model with modest discrimination ability
+    scores = np.concatenate([
+        np.random.beta(3, 2, size=n_pos),
+        np.random.beta(2, 3, size=n_neg),
+    ])
+    return roc_auc_score(y, scores), average_precision_score(y, scores)
+
+print(f"{'positive frac':>15}  {'ROC AUC':>10}  {'PR AUC (AP)':>12}")
+print("-" * 42)
+for pos_frac in [0.5, 0.2, 0.1, 0.05, 0.01, 0.001]:
+    roc, pr = evaluate_at_imbalance(pos_frac)
+    print(f"{pos_frac:>15.3f}  {roc:>10.3f}  {pr:>12.3f}")
+
+print()
+print("ROC AUC stays roughly constant regardless of imbalance -- the SHAPE of the")
+print("distribution matters, not the base rate.")
+print("PR AUC drops with imbalance -- reflects that FEWER positives makes finding them harder.")
+print("For a spam classifier with 0.1% positives, an ROC AUC of 0.95 might mean")
+print("PR AUC of only 0.15 -- most of your 'positive' predictions would still be FP.")`;
+
+export const calibrationCode = `# Calibration: does '90% confidence' really mean '90% correct'?
+# Plot a RELIABILITY DIAGRAM to check.
+import numpy as np, matplotlib.pyplot as plt
+from sklearn.linear_model import LogisticRegression
+from sklearn.datasets import make_classification
+
+np.random.seed(0)
+X, y = make_classification(n_samples=1000, n_features=20, n_informative=15, random_state=0)
+X_train, X_test = X[:700], X[700:]
+y_train, y_test = y[:700], y[700:]
+
+# Train uncalibrated model
+model = LogisticRegression(C=100).fit(X_train, y_train)     # C=100 => weak regularization => overconfident
+scores = model.predict_proba(X_test)[:, 1]
+
+# Reliability diagram
+bins = np.linspace(0, 1, 11)
+bin_centers, actual_freqs, bin_counts = [], [], []
+for lo, hi in zip(bins[:-1], bins[1:]):
+    mask = (scores >= lo) & (scores < hi)
+    if mask.sum() > 0:
+        bin_centers.append((lo + hi) / 2)
+        actual_freqs.append(y_test[mask].mean())
+        bin_counts.append(mask.sum())
+
+fig, ax = plt.subplots(figsize=(6, 5))
+ax.plot([0, 1], [0, 1], "--", color="gray", label="perfectly calibrated")
+ax.plot(bin_centers, actual_freqs, "o-", color="crimson", markersize=8, lw=2, label="model")
+# Size markers by bin count
+for xc, y_ac, cnt in zip(bin_centers, actual_freqs, bin_counts):
+    ax.annotate(f"n={cnt}", (xc, y_ac), fontsize=8, xytext=(3, 3), textcoords="offset points")
+ax.set_xlabel("predicted probability (bin center)")
+ax.set_ylabel("actual fraction positive")
+ax.set_title("Reliability diagram — perfect calibration lies on the diagonal")
+ax.legend(); ax.grid(alpha=0.3)
+plt.tight_layout()
+
+# Expected Calibration Error (a summary of miscalibration)
+def ece(y, p, n_bins=10):
+    bins = np.linspace(0, 1, n_bins + 1)
+    err = 0.0
+    for lo, hi in zip(bins[:-1], bins[1:]):
+        mask = (p >= lo) & (p < hi)
+        if mask.sum() > 0:
+            gap = abs(p[mask].mean() - y[mask].mean())
+            err += mask.mean() * gap
+    return err
+
+print(f"Expected Calibration Error (ECE): {ece(y_test, scores):.4f}")
+print(f"(0 = perfect calibration, larger = model probabilities don't match actual frequencies)")
+print()
+print("Common finding: neural nets are OVERCONFIDENT — reported 90% is often true only 70% of the time.")
+print("Fix with Platt scaling, isotonic regression, or temperature scaling. Especially important for")
+print("cost-sensitive decision-making where you want p(positive) to reflect real probability.")`;
+
+<Prerequisites items={[
+  { href: "/learn/core-ml/supervised-basics/logistic-regression", label: "Logistic regression", blurb: "The whole classification-metric story starts with a probabilistic classifier's output — sigmoid probabilities. This is the mental model." },
+  { href: "/learn/core-ml/supervised-basics/cross-validation", label: "Cross-validation & data splitting", blurb: "Every metric must be reported honestly — CV is the framework for honest metric estimation." },
+  { href: "/learn/mathematics/probability/bayes-theorem", label: "Bayes' theorem — belief updating", blurb: "Calibration is Bayes' theorem in action — 'given the model says p, what is P(positive)?' should equal p." },
+]} />
+
+<NewConcepts
+  concepts={[
+    { name: "F_β score", blurb: "generalized F1: (1 + β²) · P · R / (β² · P + R). β = 1 weighs precision and recall equally; β = 2 favors recall; β = 0.5 favors precision. Pick β based on your cost of false-positive vs false-negative." },
+    { name: "Matthews Correlation Coefficient (MCC)", blurb: "correlation between predicted and true labels: (TP·TN − FP·FN) / sqrt((TP+FP)(TP+FN)(TN+FP)(TN+FN)). Robust to class imbalance — a good single-number summary." },
+    { name: "Brier score", blurb: "mean squared error of predicted probabilities: (1/N) Σ (p̂ - y)². Rewards calibration; used in weather forecasting and medical prediction." },
+    { name: "Average Precision (AP) / PR-AUC", blurb: "area under the precision-recall curve. Robust for imbalanced data (rare positives). Standard for information retrieval and object detection metrics (mAP)." },
+    { name: "Platt scaling / temperature scaling", blurb: "post-hoc calibration: fit a sigmoid or divide logits by a scalar T to make the model's probabilities match actual frequencies. Common for uncalibrated neural nets." },
+  ]}
+/>
+
+<Motivation title="Accuracy is almost never enough — every metric hides a story you'd rather see">
+
+Take a classifier for a rare disease with 1% base rate. A "model" that always predicts "no disease" achieves **99% accuracy** — while being completely useless. Take a fraud classifier with 0.1% base rate. Same story, 99.9% accuracy from a trivial baseline. Take LLM eval on a benchmark: a model that always answers "A" might score 25% on multiple-choice.
+
+**Accuracy hides too much.** Every ML system has cost structure: false positives cost X, false negatives cost Y, and X != Y. Every ML system has class imbalance in some direction. Every ML system provides a probability, not a hard label — and how well-calibrated that probability is matters more than which side of 0.5 it falls on.
+
+For a GenAI engineer, choosing the right metric determines what your system optimizes for:
+
+1. **Safety classifiers** (hate speech, harmful requests). Very high recall (catch all bad requests) at the cost of some precision (some false alarms) — you'd rather review a legitimate request than let a bad one through.
+2. **Spam filters** (or RLHF reward models). Balance: high precision (don't quarantine real mail) with reasonable recall (still catch obvious spam). F0.5 or F1 as headline.
+3. **Retrieval / RAG** (search-relevance ranking). Precision-at-K, MRR, NDCG — none of them use "accuracy" directly. What matters is ordering.
+4. **Preference / reward modeling for RLHF.** Accuracy on preference pairs is standard — but calibration matters even more, because the reward signal drives policy updates.
+5. **Anomaly detection** (drift, unusual usage). Very rare positives; PR-AUC over ROC-AUC.
+
+This chapter builds every classification metric from a single object — the confusion matrix — then adds ROC/PR curves, calibration, and cost-sensitive thresholding.
+
+</Motivation>
+
+<Intuition title="Everything comes from the confusion matrix — 4 numbers, 20 metrics">
+
+A binary classifier's predictions can be tabulated in a 2×2 grid:
+
+|                   | actual **positive** | actual **negative** |
+|-------------------|-------------------|-------------------|
+| predicted **positive** | **True Positive (TP)** | **False Positive (FP)** |
+| predicted **negative** | **False Negative (FN)** | **True Negative (TN)** |
+
+From these 4 numbers, every classification metric follows:
+
+- **Accuracy** = (TP + TN) / total. What fraction did we get right?
+- **Precision** = TP / (TP + FP). Of my POSITIVE predictions, how many are actually positive?
+- **Recall (sensitivity, TPR)** = TP / (TP + FN). Of the actual positives, how many did I find?
+- **Specificity (TNR)** = TN / (TN + FP). Of the actual negatives, how many did I correctly identify?
+- **False Positive Rate (FPR)** = FP / (FP + TN) = 1 − specificity.
+- **F1 score** = 2 · P · R / (P + R). Harmonic mean of precision and recall.
+
+**Which one do you care about?** It depends on the cost:
+
+- **Precision matters** when FALSE POSITIVES are costly (arresting the wrong person, quarantining legitimate emails, false rare-disease diagnosis).
+- **Recall matters** when FALSE NEGATIVES are costly (missing a real disease case, missing an actual attack, letting spam through).
+- **F1 matters** as a balanced summary.
+
+**But there's a hidden variable: the DECISION THRESHOLD.** A classifier usually outputs a probability p̂; the standard "predict positive if p̂ ≥ 0.5" threshold produces one confusion matrix. Move the threshold up (predict positive only if p̂ ≥ 0.8) and you get higher precision but lower recall. Move it down (p̂ ≥ 0.2) and vice versa. ROC and PR curves visualize the entire threshold sweep.
+
+</Intuition>
+
+<Recall term="Sigmoid probability">
+
+Logistic regression (and every neural-net classifier's last layer) outputs a probability `p̂ = σ(w·x + b) ∈ (0, 1)`. To convert to a hard label, apply a threshold — usually 0.5, but that's a modeling choice, not a mathematical necessity. All classification metrics implicitly assume you've chosen a threshold; ROC and PR curves let you visualize the full trade-off across thresholds.
+
+</Recall>
+
+## The confusion matrix and its 4 core metrics
+
+**Accuracy** measures "overall correctness":
+
+$$
+\text{Accuracy} = \frac{TP + TN}{TP + FP + FN + TN}
+$$
+
+**Precision** measures "when I predict positive, how often am I right?":
+
+$$
+\text{Precision} = \frac{TP}{TP + FP}
+$$
+
+**Recall** (aka sensitivity) measures "of the actual positives, how many did I find?":
+
+$$
+\text{Recall} = \frac{TP}{TP + FN}
+$$
+
+**F1** is the harmonic mean of precision and recall (harsher than arithmetic mean — punishes if either is low):
+
+$$
+F_1 = \frac{2 \cdot P \cdot R}{P + R} = \frac{2 TP}{2 TP + FP + FN}
+$$
+
+<RunnableCode title="Confusion matrix and derived metrics from raw counts" code={confusionCode} packages={["numpy"]} />
+
+**Beware accuracy on imbalanced classes.** For a rare-disease classifier with 1% positive base rate, "always predict negative" achieves 99% accuracy. Use precision/recall/F1/PR-AUC/MCC in imbalanced settings — accuracy is misleading.
+
+## ROC and PR curves — the threshold sweep
+
+**ROC curve:** for each possible decision threshold t ∈ [0, 1], compute (FPR, TPR). Plot TPR vs FPR. Perfect classifier goes through (0, 1); random classifier is the diagonal y = x.
+
+**ROC-AUC:** area under the ROC curve. Interpretable as: given a random positive and a random negative, what's the probability that the classifier scores the positive higher? Value in [0.5, 1] (0.5 = random, 1 = perfect).
+
+**PR curve:** for each threshold t, compute (recall, precision). Plot precision vs recall.
+
+**PR-AUC (Average Precision, AP):** area under the PR curve. Similar interpretation but ranges from base-rate (random) to 1 (perfect).
+
+<RunnableCode title="ROC and PR curves for the same classifier" code={rocPrCode} packages={["numpy", "sklearn", "matplotlib"]} captureFig={true} />
+
+**When to use each:**
+
+- **Balanced data (roughly equal positive/negative):** ROC-AUC and PR-AUC give similar signals. Use ROC by convention.
+- **Imbalanced data (rare positives):** PR-AUC is more informative. ROC-AUC can be misleadingly high because most predictions are correctly negative.
+
+<RunnableCode title="ROC-AUC stays constant across imbalance; PR-AUC drops" code={imbalanceCode} packages={["numpy", "sklearn"]} />
+
+## Calibration — do the probabilities mean what they say?
+
+A well-calibrated classifier says "70% probability" for examples that are actually positive 70% of the time. Modern deep neural nets are famously **overconfident** — they might report 95% confidence for examples that are correct only 70% of the time.
+
+**Diagnostic: reliability diagram.** Bin the predicted probabilities. For each bin, plot (bin midpoint, actual fraction of positives in that bin). A perfectly calibrated model lies on the diagonal.
+
+**Summary metric: Expected Calibration Error (ECE).** Weighted average of |predicted − actual| across bins, weighted by bin size. ECE = 0 means perfect calibration.
+
+<RunnableCode title="Reliability diagram — visualize calibration" code={calibrationCode} packages={["numpy", "sklearn", "matplotlib"]} captureFig={true} />
+
+**Fixes for miscalibration:**
+
+- **Platt scaling:** fit a logistic function `p_cal = σ(a · p_raw + b)` to a held-out set. Popular for SVMs and boosted trees.
+- **Isotonic regression:** fit a non-parametric monotonic function from raw scores to calibrated probabilities. More flexible than Platt.
+- **Temperature scaling (deep learning):** divide logits by a scalar T fit on a held-out set: `p_cal = softmax(logits / T)`. Simple, single-parameter, works well for neural nets.
+
+**Why calibration matters:**
+
+- **Cost-sensitive decisions.** If you decide based on "cost of FP vs cost of FN," the optimal threshold depends on the calibrated probability, not the raw score.
+- **Ensembling.** Combining probabilities across models only makes sense if each is calibrated.
+- **Downstream systems.** Any system that uses "confidence" from a classifier (routing, escalation, prioritization) will misbehave if confidences are wrong.
+
+## Cost-sensitive thresholding
+
+The default 0.5 threshold assumes equal cost of FP and FN. In reality:
+
+- **Fraud detection:** FN (missing fraud) costs $10,000 in losses; FP (blocking a legitimate transaction) costs $50 in customer service. Threshold should be MUCH LOWER than 0.5 (catch even weak signals).
+- **Medical screening (rare disease):** FN (missed diagnosis) is catastrophic; FP (unnecessary follow-up test) is inconvenient. Low threshold.
+- **Content moderation:** high volume, some FPs OK. Balance depends on the harm.
+
+**Cost-optimal threshold:** minimize expected cost `C(t) = cost_FN · P(FN | t) + cost_FP · P(FP | t)`. If the classifier is calibrated, this gives:
+
+$$
+t^* = \frac{\text{cost}_{FP}}{\text{cost}_{FP} + \text{cost}_{FN}}
+$$
+
+In the fraud example: t* = 50 / (50 + 10000) ≈ 0.005. Predict positive whenever calibrated probability of fraud exceeds 0.5% — very sensitive.
+
+**In practice**, pick threshold by minimizing empirical cost on a validation set. The ROC or PR curve gives you the trade-off; you pick the operating point.
+
+<RealWorldML title="Classification metrics for LLM systems — safety, RLHF, LLM-as-judge">
+
+**LLM safety classifiers.** For content-moderation classifiers (harmful/unsafe requests), the target is very high **recall** (catch essentially all harmful requests) with acceptable precision. The threshold is set aggressively (predict "unsafe" at low probabilities). Standard reports: recall @ 95%, precision @ that recall, PR-AUC.
+
+**RLHF preference modeling.** The reward model learns from labels of the form "A is preferred over B." Metric: accuracy on held-out preference pairs. But **calibration matters more** — the RLHF loss depends on the reward's absolute value, not just the sign. A well-calibrated reward avoids "reward hacking" where the policy exploits regions of the reward function that don't match human preference.
+
+**LLM-as-judge.** GPT-4 grades outputs of GPT-3.5 (or similar). Standard practice: report agreement rate with human raters, along with per-category accuracy. Beware: the judge inherits the biases of the models it's evaluating (both were trained on similar data), so this is not a fully-independent evaluation.
+
+**Retrieval metrics for RAG.**
+- **Recall@K:** fraction of relevant documents in top-K retrieved. Standard RAG headline.
+- **MRR (Mean Reciprocal Rank):** 1 / (rank of first relevant document), averaged over queries.
+- **NDCG (Normalized Discounted Cumulative Gain):** more sophisticated, weights higher-ranked hits more.
+
+**LLM evaluation on multiple-choice benchmarks (MMLU, HellaSwag).** Reported metric is accuracy. But look at the confusion matrix: is the model systematically wrong on certain subject areas? Is the accuracy driven by lucky guessing vs. genuine reasoning?
+
+**Confidence-based abstention.** Modern eval setups let LLMs say "I don't know." Metric: accuracy conditional on the model choosing to answer, plus abstention rate. A well-calibrated model would abstain when its confidence is low. This is where ECE and reliability diagrams matter for LLMs directly.
+
+</RealWorldML>
+
+<StudyDepth
+  drill={[
+    "Confusion matrix: TP, FP, TN, FN. Every metric derives from these.",
+    "Precision = TP/(TP+FP); Recall = TP/(TP+FN); F1 = harmonic mean.",
+    "Accuracy is misleading for imbalanced data — always report P, R, F1 or PR-AUC.",
+    "ROC curve: TPR vs FPR across thresholds; AUC = 'probability a random positive scores higher than a random negative.'",
+    "PR curve: precision vs recall across thresholds; PR-AUC (AP) is more informative than ROC-AUC for imbalanced data.",
+    "Calibration: does predicted p match empirical frequency? Diagnose with reliability diagram, summarize with ECE.",
+    "Neural nets are typically OVERCONFIDENT — apply temperature scaling to fix.",
+    "Cost-optimal threshold: t* = cost_FP / (cost_FP + cost_FN) for a calibrated classifier.",
+  ]}
+  skim={[
+    "F_β generalization and choice of β based on cost.",
+    "Matthews Correlation Coefficient (MCC) for balanced single-number summary.",
+    "Brier score decomposition (calibration + refinement).",
+    "Precision @ K, Recall @ K, MRR, NDCG for retrieval evaluation.",
+    "Cohen's kappa and inter-rater agreement.",
+  ]}
+/>
+
+<CodeItYourself title="Three drills — confusion matrix by hand, threshold sweep, reliability diagram">
+
+1. **Confusion matrix from raw predictions.** Given `y_true = [1, 0, 1, 1, 0, 0, 1]` and `y_pred = [1, 0, 0, 1, 1, 0, 1]`, compute TP, FP, TN, FN by hand. Verify precision = 3/4 = 0.75, recall = 3/4 = 0.75, F1 = 0.75.
+
+2. **Threshold sweep and ROC.** Given a probability model and a set of predictions, sweep the threshold from 0 to 1 in steps of 0.01, compute (FPR, TPR) at each. Plot the ROC curve, compute AUC by trapezoidal integration.
+
+3. **Reliability diagram.** For a trained model, bin its predicted probabilities into 10 bins. For each bin, compute the actual fraction of positives. Plot on a diagonal. If your model is overconfident, points fall BELOW the diagonal in the middle bins.
+
+</CodeItYourself>
+
+<Summary>
+
+- **Confusion matrix** (TP, FP, TN, FN) is the source of every classification metric.
+- **Precision** = "of what I called +, how many really are?"  **Recall** = "of the real +, how many did I catch?"
+- **F1** = harmonic mean of P and R; a balanced summary that punishes low values on either side.
+- **Accuracy is misleading for imbalanced data.** Use P/R/F1 or PR-AUC.
+- **ROC-AUC** = probability a random + scores higher than a random −. Robust to threshold.
+- **PR-AUC (AP)** = area under precision-recall curve. Better than ROC-AUC for imbalanced data.
+- **Calibration** matters when you need meaningful probabilities. Diagnose with reliability diagrams; fix with Platt/isotonic/temperature scaling.
+- **Threshold is a HYPERPARAMETER.** Pick it based on cost of FP vs FN, not the default 0.5.
+- **For RAG**, use retrieval-specific metrics: Recall@K, MRR, NDCG.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>A classifier's confusion matrix on 1000 examples: TP = 40, FP = 10, TN = 900, FN = 50. Compute precision, recall, accuracy, F1.</>,
+      hint: <>Precision = TP/(TP+FP). Recall = TP/(TP+FN). Accuracy = (TP+TN)/N.</>,
+      answer: <>Precision = 40 / (40 + 10) = <b>0.80</b>. Recall = 40 / (40 + 50) = <b>0.444</b>. Accuracy = (40 + 900) / 1000 = <b>0.94</b>. F1 = 2 · 0.80 · 0.444 / (0.80 + 0.444) = <b>0.571</b>. <br /><br /> Observation: accuracy is 94% (looks great!), but the model catches less than half of the actual positives (recall = 44%). This is why we don't rely on accuracy alone — with 90% negatives, "always predict negative" would get 90% accuracy while missing 100% of positives.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>You have a spam classifier and want to minimize customer complaints about legitimate emails being marked as spam. Which metric matters most?</>,
+      hint: <>Which error type would generate complaints?</>,
+      answer: <><b>Precision</b> matters most. If a legitimate email is marked as spam (FALSE POSITIVE), the customer complains. If a spam email gets through (FALSE NEGATIVE), it's annoying but usually less catastrophic. So you want to minimize false positives → maximize precision. <br /><br /> Practically: use a HIGH decision threshold (predict "spam" only when very confident). This lowers recall (some spam gets through) but keeps precision high (very few legitimate emails get flagged). Report F_0.5 or F_0.25 rather than F_1 to weight precision more heavily.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Why is ROC-AUC often misleading on highly imbalanced data, and what should you use instead?</>,
+      hint: <>Consider what happens to FPR when most examples are negative.</>,
+      answer: <>ROC-AUC = P(random + scores higher than random −). For imbalanced data (say 0.1% positives), correctly labeling almost all the negatives as negative gives a VERY LOW FPR by default. So the ROC curve hugs the top-left corner with modest effort — inflating AUC. A model that correctly identifies 50% of positives (recall = 0.5) and has FPR = 0.001 looks great on ROC (AUC ~ 0.999) but really: for every 100 "positive predictions" you get, only ~50 are real positives and ~50 are FPs from the huge negative pool. <br /><br /> <b>Use PR-AUC (average precision) instead.</b> It looks at precision vs recall directly. The base rate becomes the "random" baseline. A model that finds 50% of positives with 50% precision has PR-AUC ~ 0.5 — much more revealing of the actual utility. <br /><br /> Rule of thumb: PR-AUC for rare-positive problems (fraud detection, disease screening, anomaly detection). ROC-AUC for reasonably-balanced problems (spam, sentiment).</>
+    },
+    {
+      difficulty: "medium",
+      q: <>What does the F1 score's use of the HARMONIC mean (instead of arithmetic mean) accomplish?</>,
+      hint: <>Consider what happens to F1 when precision = 1 and recall = 0.01.</>,
+      answer: <>Harmonic mean punishes low values much harder than arithmetic mean. If precision = 1.0 and recall = 0.01, then: <br /> - Arithmetic mean: (1.0 + 0.01)/2 = 0.505 (looks decent!) <br /> - Harmonic mean (F1): 2 · 1 · 0.01 / (1 + 0.01) = 0.0198 (correctly signals "this is bad") <br /><br /> The harmonic mean is dominated by the SMALLER of the two values. F1 tells the truth: catching only 1% of positives is bad, regardless of high precision. A "F1 above 0.5" model is genuinely balanced; a "arithmetic mean above 0.5" model could be lopsided. <br /><br /> This is why F1 (or generalizations like F_beta) is preferred to just averaging precision and recall.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Derive the cost-optimal decision threshold for a calibrated classifier where cost of FP is c_FP and cost of FN is c_FN.</>,
+      hint: <>The expected cost at threshold t is c_FP · P(FP | t) + c_FN · P(FN | t). Find t that minimizes it.</>,
+      answer: <>Let p = model's calibrated probability of positive. At threshold t, we predict + if p ≥ t, else -. So we predict + when the true label is - (contributing to FP if the true label is negative) and predict - when the true label is +. <br /><br /> For a data point with calibrated p, the expected cost of predicting positive is c_FP · (1 - p) [only counts if truly negative]. Expected cost of predicting negative is c_FN · p [only counts if truly positive]. <br /><br /> Predict positive iff: c_FP · (1 - p) &lt; c_FN · p. Solve: c_FP - c_FP · p &lt; c_FN · p → c_FP &lt; (c_FN + c_FP) · p → <b>p &gt; c_FP / (c_FP + c_FN)</b>. <br /><br /> So the optimal threshold is: <b>t* = c_FP / (c_FP + c_FN)</b>. <br /><br /> <b>Fraud example:</b> c_FP = $50 (customer service), c_FN = $10000 (fraud loss). t* = 50/(50+10000) = 0.005. Predict fraud at 0.5% confidence — VERY aggressive, but justified because the cost of missing fraud dwarfs the cost of blocking a legitimate transaction. <br /><br /> <b>Requires the classifier to be well-calibrated</b> — if predicted probabilities don't match empirical frequencies, this formula gives the wrong threshold. Always calibrate first, then pick threshold by cost.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Modern neural networks are often overconfident. Explain WHY, and how "temperature scaling" fixes it in one parameter.</>,
+      hint: <>Consider what cross-entropy loss encourages the model to do during training.</>,
+      answer: <><b>Why NN are overconfident:</b> the cross-entropy loss is `-log p(y_correct)`. To reduce it, the model can either be right MORE OFTEN (hard) or push its probabilities MORE EXTREME (easy). Big neural nets often exploit the second option: they push logits to large values, making σ(z) essentially 0 or 1. This is technically minimizing loss but leaves the model reporting 99.9% confidence for many examples it might actually be wrong on. Combined with over-parameterization (perfect training fit is possible), the model naturally becomes overconfident. <br /><br /> <b>Temperature scaling</b>: after training, take a small held-out set (~1000 examples). For each example, compute the raw logits z. Instead of applying softmax directly, compute p = softmax(z / T) for some scalar T &gt; 0. T &gt; 1 spreads probabilities out (less confident); T &lt; 1 sharpens them (more confident). <br /><br /> Fit T by minimizing cross-entropy on the held-out set: this is a 1-parameter optimization, solved in seconds. Optimal T for a big classification model is often ~1.5-2.5. Applying `p_final = softmax(logits / T)` at inference time gives calibrated probabilities. <br /><br /> <b>Why this works:</b> temperature is a "confidence knob." Overconfident models have T &gt; 1 that better matches the empirical frequency distribution. This doesn't change the argmax (so classification accuracy is preserved), only the PROBABILITIES. It's the standard calibration fix for neural nets — a single scalar makes reliability diagrams look much better.</>
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "Precision = TP / (TP + FP) answers the question:",
+      choices: [
+        { text: "'Of the actual positives, how many did I find?'" },
+        { text: "'When I predict positive, how often am I right?'", correct: true },
+        { text: "'How accurate am I overall?'" },
+        { text: "'How well do my probabilities match empirical frequencies?'" },
+      ],
+      explanation: <>Precision = "of what I called positive, how many really were" — high precision means low false-positive rate among positive predictions. Recall (TP / (TP + FN)) is the OTHER direction: "of the actual positives, how many did I find" — high recall means low false-negative rate. The two are traded off by the decision threshold.</>
+    },
+    {
+      q: "F1 score uses the HARMONIC mean of precision and recall because:",
+      choices: [
+        { text: "It's easier to compute." },
+        { text: "Harmonic mean punishes low values in either P or R, preventing a lopsided score.", correct: true },
+        { text: "It matches the sklearn convention." },
+        { text: "It's always higher than the arithmetic mean." },
+      ],
+      explanation: <>Harmonic mean is dominated by the smaller of the two values, so F1 is only high when BOTH precision and recall are reasonable. A model with precision=1 and recall=0.01 has arithmetic mean 0.505 (misleadingly OK) but F1 = 0.0198 (correctly bad). This makes F1 a more honest single-number summary of a balanced classifier.</>
+    },
+    {
+      q: "For a very imbalanced classification problem (1% positives), which metric is most informative?",
+      choices: [
+        { text: "Accuracy (trivially high with all-negative predictions)" },
+        { text: "PR-AUC (average precision) — more sensitive to positive-class discrimination", correct: true },
+        { text: "ROC-AUC" },
+        { text: "Number of parameters" },
+      ],
+      explanation: <>Accuracy is misleading (99% via always-predict-negative). ROC-AUC can look great even for a not-so-great classifier when negatives dominate (because FPR gets huge negative pool to average over). PR-AUC directly measures precision across all recall levels — it's the standard metric for rare-positive problems (fraud, medical screening, anomaly detection). Modern DL benchmarks (object detection mAP) use PR-AUC variants.</>
+    },
+    {
+      q: "A well-calibrated classifier means:",
+      choices: [
+        { text: "It has high accuracy." },
+        { text: "When it predicts probability p for a class, that class is actually present in fraction p of such predictions.", correct: true },
+        { text: "It doesn't overfit." },
+        { text: "It uses cross-entropy loss." },
+      ],
+      explanation: <>Calibration: predicted probability p matches empirical frequency p. If you take all examples where the model predicts 0.7, calibrated means 70% of them are actually positive. Neural nets are often UNCALIBRATED (typically overconfident, reporting 95% for events that happen 70% of the time). Temperature scaling and Platt scaling are the standard post-hoc fixes. Calibration matters for cost-sensitive decisions where the ABSOLUTE probability (not just the argmax) is used.</>
+    },
+    {
+      q: "You have a fraud detector. Missing a fraud costs $10k; false alarm costs $50. What's the cost-optimal threshold?",
+      choices: [
+        { text: "0.5 (the default)" },
+        { text: "Very low, around 0.005 = $50 / ($50 + $10,000) — predict fraud at 0.5% confidence", correct: true },
+        { text: "0.95 (very high, only very confident predictions)" },
+        { text: "0.001 (basically always predict fraud)" },
+      ],
+      explanation: <>The optimal threshold for a calibrated classifier is t* = cost_FP / (cost_FP + cost_FN). Here: 50 / (50 + 10000) ≈ 0.005 = 0.5%. Very LOW threshold — predict fraud very aggressively because the cost of missing it dwarfs the cost of a false alarm. Assumes the classifier's probabilities are calibrated. Default 0.5 threshold is only optimal when FP and FN have equal cost, which is rare in practice.</>
+    },
+  ]}
+/>
+
+<MarkDone slug="core-ml/supervised-basics/metrics-classification" title="Classification metrics deep-dive" />

@@ -109,6 +109,16 @@ print(f"each 'H' multiplies the ratio P(bias)/P(fair) by 0.75/0.5 = 1.5")`;
   { href: "/learn/mathematics/probability/information-entropy", label: "Information, entropy & KL divergence", blurb: "Bayes updates redistribute probability mass; KL measures how much the posterior has shifted from the prior." },
 ]} />
 
+<NewConcepts
+  concepts={[
+    { name: "Kalman filter", blurb: "recursive Bayesian state estimation for linear-Gaussian dynamical systems (tracking, control). A sequential Bayes update run at every time step." },
+    { name: "Laplace smoothing", blurb: "add a pseudocount before normalizing so no word gets zero probability. Used in the Naive Bayes code below to survive unseen tokens." },
+    { name: "Empirical Bayes", blurb: "estimate the prior itself from data before applying Bayes' rule. Used when many parallel Bayes problems share structure." },
+    { name: "RAG (retrieval-augmented generation)", blurb: "LLM setup that fetches relevant passages before answering. Referenced here as a place where Bayesian confidence estimates matter — full deep-dive in Tier 4." },
+    { name: "Bayesian deep learning", blurb: "family of methods that put priors on neural-net weights for uncertainty estimation. Mentioned only as forward-pointing context in this chapter." },
+  ]}
+/>
+
 <Motivation title="Bayes = how any rational system updates belief">
 
 Bayes' theorem is a one-line formula: **posterior = (prior × likelihood) / evidence**. But it's a mental model much bigger than a formula. It's how any rational belief system should update when new data arrives — and it directly powers half of practical ML: Naive Bayes classifiers, spam filters, Bayesian regression, RAG confidence estimates, Kalman filters, latent-variable models, and the entire Bayesian deep-learning literature.

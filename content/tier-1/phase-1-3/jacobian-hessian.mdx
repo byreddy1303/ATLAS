@@ -145,6 +145,15 @@ print("Newton got there in ONE step. That's what curvature information buys.")`;
   { href: "/learn/mathematics/matrices-transformations/eigenvectors-eigenvalues", label: "Eigenvectors & eigenvalues", blurb: "The Hessian's eigenvalues tell you whether a critical point is a minimum, maximum, or saddle — and how fast optimizers can move in each direction." },
 ]} />
 
+<NewConcepts
+  concepts={[
+    { name: "Adam / AdamW optimizer", blurb: "adaptive-step-size optimizer that approximates the second-moment (curvature) of gradients — a diagonal Hessian approximation. Deep-dive in Phase 1.6." },
+    { name: "SGD momentum", blurb: "the technique that uses a running average of past gradients; interacts with Hessian curvature in convergence analysis." },
+    { name: "Newton's method / natural gradient", blurb: "second-order optimizers that use the actual Hessian (or its Fisher-info approximation). Impractical for LLM-scale but foundational." },
+    { name: "transformer training dynamics", blurb: "modern LLM training explicitly reasons about Hessian eigenvalues (loss-landscape sharpness). Referenced here as the motivation for curvature-aware methods." },
+  ]}
+/>
+
 <Motivation title="Curvature is why Adam works and gradients aren't enough">
 
 Vanilla gradient descent uses one number per parameter — the gradient. It ignores *how the slope is changing*. Consider a loss surface that's a stretched bowl: steep in one direction, gentle in the other. Gradient descent oscillates wildly on the steep direction (learning rate too big) and crawls on the gentle direction (learning rate too small). Any single learning rate is wrong for both directions.

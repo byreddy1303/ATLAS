@@ -125,6 +125,12 @@ print(f"mean of first 10000 y-values: {running_mean(synthetic_stream(), 10000):.
   { href: "/learn/foundations/python-craft/environment-tooling", label: "Environment · uv, Ruff", blurb: "You need a working Python 3.12 project you can run cells in." },
 ]} />
 
+<NewConcepts
+  concepts={[
+    { name: "PyTorch", blurb: "the ML framework whose `nn.Module` / `Dataset` / `DataLoader` classes lean heavily on Python&rsquo;s dunder protocols. Full deep-dive in Tier 3." },
+  ]}
+/>
+
 <Motivation title="Why 'for x in xs' is one of the deepest ideas in Python">
 
 Every deep-learning training loop you will ever write is `for batch in loader:`. Every dataset you stream from HuggingFace, every file you read line-by-line, every DataFrame you walk — the same three characters: `for`. In Python, `for x in xs` is not a statement about lists. It's an *ask*: Python asks `xs`, "do you know how to be looped over? If yes, hand me an iterator." Any object that answers — list, dict, file, generator, PyTorch `DataLoader`, your own class — is a first-class citizen of the loop.

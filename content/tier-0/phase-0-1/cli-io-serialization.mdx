@@ -209,6 +209,12 @@ print(roundtrip_parquet(df).dtypes.to_string())`;
   { href: "/learn/foundations/python-craft/classes-protocols-dataclasses", label: "Dataclasses & protocols", blurb: "The natural shape for the objects flowing across your program's boundaries — configs, records, events." },
 ]} />
 
+<NewConcepts
+  concepts={[
+    { name: "PyTorch checkpoints (`.pt` / `.pth`)", blurb: "the serialization format PyTorch uses to save trained model weights. A canonical binary-serialization use-case in ML." },
+  ]}
+/>
+
 <Motivation title="Where your program meets the outside world">
 
 Inside your program everything is orderly — objects with types, invariants you can trust. But nothing useful happens purely inside. Real programs read CSVs, take `--config` flags, write checkpoints, receive JSON from APIs. Every crossing is a **boundary**, and boundaries are where bugs actually live: the file that isn't there, the argument that's a string when you expected an int, the 60 GB CSV you tried to load into 16 GB of RAM, the encoding mismatch that turned "café" into "cafÃ©".

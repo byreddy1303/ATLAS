@@ -1,0 +1,414 @@
+---
+title: Learning rate schedules & warmup
+tier: 1
+phase: "1.6"
+---
+
+export const schedulesCode = `# The four learning-rate schedules you'll see in modern DL:
+# step, exponential, cosine, and cosine+linear warmup
+import numpy as np, matplotlib.pyplot as plt
+
+TOTAL = 10000       # total training steps
+PEAK_LR = 3e-4      # peak learning rate
+
+def step_schedule(t):
+    "Step decay: drop by 10x at 3k and 6k steps."
+    if t < 3000: return PEAK_LR
+    if t < 6000: return PEAK_LR * 0.1
+    return PEAK_LR * 0.01
+
+def exp_schedule(t, gamma=0.9995):
+    "Exponential: lr *= gamma each step."
+    return PEAK_LR * gamma ** t
+
+def cosine_schedule(t, warmup=0):
+    "Cosine annealing (no warmup): lr = peak * 0.5 * (1 + cos(pi * t / T))."
+    if t < warmup: return PEAK_LR * t / max(1, warmup)
+    progress = (t - warmup) / (TOTAL - warmup)
+    return PEAK_LR * 0.5 * (1 + np.cos(np.pi * progress))
+
+def warmup_cosine(t, warmup=1000):
+    "Linear warmup followed by cosine decay — the LLM default."
+    return cosine_schedule(t, warmup=warmup)
+
+ts = np.arange(TOTAL)
+schedules = {
+    "step":            [step_schedule(t) for t in ts],
+    "exponential":     [exp_schedule(t) for t in ts],
+    "cosine (no wm)":  [cosine_schedule(t) for t in ts],
+    "warmup + cosine": [warmup_cosine(t) for t in ts],
+}
+
+plt.figure(figsize=(9, 4))
+for name, lrs in schedules.items():
+    plt.plot(ts, lrs, lw=2, label=name)
+plt.xlabel("step"); plt.ylabel("learning rate"); plt.legend()
+plt.title("Four learning-rate schedules")
+plt.grid(alpha=0.3); plt.tight_layout()`;
+
+export const warmupWhyCode = `# Why warmup matters — simulate Adam's early-training instability without it.
+# When β2 = 0.999 (default), v estimate is poor for many steps.
+# High initial learning rate + poor v estimate = unstable early updates.
+import numpy as np
+
+def adam_step(params, grads, m, v, t, lr, b1=0.9, b2=0.999, eps=1e-8):
+    m = b1 * m + (1 - b1) * grads
+    v = b2 * v + (1 - b2) * grads ** 2
+    m_hat = m / (1 - b1 ** t); v_hat = v / (1 - b2 ** t)
+    return params - lr * m_hat / (np.sqrt(v_hat) + eps), m, v
+
+# Simulate a scenario: gradients are big and noisy in first 100 steps, then stabilize.
+np.random.seed(0)
+def synthetic_gradient(t):
+    if t < 100: return np.random.normal(0, 10, size=3)     # 10x bigger, noisy
+    return np.random.normal(0, 1, size=3)                   # normal after
+
+# Without warmup — full lr from step 1
+params = np.zeros(3); m = np.zeros(3); v = np.zeros(3)
+max_update_no_warmup = 0
+for t in range(1, 200):
+    g = synthetic_gradient(t)
+    new_params, m, v = adam_step(params, g, m, v, t, lr=3e-4)
+    update = np.abs(new_params - params).max()
+    max_update_no_warmup = max(max_update_no_warmup, update)
+    params = new_params
+print(f"NO warmup:   max update magnitude = {max_update_no_warmup:.4f}")
+
+# With linear warmup over first 100 steps
+params = np.zeros(3); m = np.zeros(3); v = np.zeros(3)
+max_update_warmup = 0
+for t in range(1, 200):
+    g = synthetic_gradient(t)
+    scale = min(1.0, t / 100)                               # linear ramp
+    new_params, m, v = adam_step(params, g, m, v, t, lr=3e-4 * scale)
+    update = np.abs(new_params - params).max()
+    max_update_warmup = max(max_update_warmup, update)
+    params = new_params
+print(f"WITH warmup: max update magnitude = {max_update_warmup:.4f}")
+print()
+print("With warmup, the largest parameter update is much smaller —")
+print("preventing early-training explosions when v hasn't converged.")`;
+
+export const oneCycleCode = `# One-cycle schedule: warmup UP, then anneal DOWN, with peak lr in the middle.
+# Popularized by Leslie Smith (fast.ai) for CNN training.
+import numpy as np, matplotlib.pyplot as plt
+
+def one_cycle(t, total_steps, peak_lr, start_lr=1e-6, end_lr=1e-8):
+    half = total_steps // 2
+    if t < half:
+        # linear ramp up
+        return start_lr + (peak_lr - start_lr) * t / half
+    else:
+        # cosine anneal down
+        progress = (t - half) / (total_steps - half)
+        return end_lr + (peak_lr - end_lr) * 0.5 * (1 + np.cos(np.pi * progress))
+
+TOTAL = 10000
+ts = np.arange(TOTAL)
+lrs = [one_cycle(t, TOTAL, peak_lr=1e-2) for t in ts]
+
+plt.figure(figsize=(7.5, 3.4))
+plt.plot(ts, lrs, color="crimson", lw=2)
+plt.xlabel("step"); plt.ylabel("learning rate")
+plt.title("One-cycle policy: ramp up, then anneal down")
+plt.grid(alpha=0.3); plt.tight_layout()
+
+print("One-cycle schedule chosen values:")
+for i in [0, 1000, 4000, 5000, 6000, 9000, TOTAL - 1]:
+    print(f"  step {i:>5}: lr = {lrs[i]:.6f}")`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/optimization/adaptive-optimizers", label: "Adam, AdamW & the adaptive family", blurb: "LR schedules work in concert with the optimizer; understanding what Adam needs is prerequisite to knowing why warmup matters." },
+  { href: "/learn/mathematics/calculus/gradient-descent-intuition", label: "Gradient descent — the intuition", blurb: "The learning rate is the step size in GD; LR schedules are just principled ways to vary that step size over the course of training." },
+]} />
+
+<NewConcepts
+  concepts={[
+    { name: "One-cycle policy (Smith 2018)", blurb: "warmup to a high LR, hold, then steep decay — all in a single cycle. Famous for 'super-convergence' on small models; mentioned as an alternative to warmup-plus-cosine." },
+    { name: "Super-convergence", blurb: "training a model in an order of magnitude fewer steps via aggressive LR schedules. Empirical phenomenon documented by Smith & Topin (2017); referenced in passing." },
+    { name: "Cyclic learning rates", blurb: "let the LR oscillate between bounds instead of monotonically decay. Precursor to one-cycle; mentioned only as historical context." },
+    { name: "SGDR (stochastic gradient descent with warm restarts)", blurb: "cosine decay that periodically restarts to the peak. Sometimes helps escape local minima; not the LLM default." },
+  ]}
+/>
+
+<Motivation title="Every LLM training run uses linear warmup + cosine decay">
+
+Every modern LLM pretraining paper reports something like: "Linear warmup for the first 2000 steps, then cosine decay to 10% of peak over the remaining 500k steps." That single sentence encodes a lot of hard-won knowledge:
+
+- **Warmup** prevents early-training instability when the optimizer state (Adam's m and v) hasn't converged yet.
+- **Cosine decay** smoothly reduces the learning rate over training, letting the model settle into a good minimum without hard "cliffs" that could destabilize.
+- **The specific values** (2000 warmup steps, 10% floor) are the result of extensive empirical tuning at scale.
+
+Why not just use a constant learning rate? Because:
+
+1. **Early training** benefits from a small learning rate to avoid destabilizing the untrained model.
+2. **Middle training** benefits from a high learning rate to make fast progress on the loss.
+3. **Late training** benefits from a small learning rate to fine-tune into a sharp minimum.
+
+A schedule captures all three phases in a single training run. This chapter shows the four schedules you'll actually see, explains why linear warmup is essential for transformer training, and gives you the vocabulary to read (and design) an LLM training config.
+
+</Motivation>
+
+<Intuition title="Learning rate is a knob you turn over time — warmup ramps it up, decay ramps it down">
+
+The learning rate η controls the size of each parameter update. Too high and updates overshoot (loss diverges); too low and training crawls (loss barely moves).
+
+**The ideal η changes over training:**
+
+- **Steps 0-1000** (warmup phase): η starts at ~0 and ramps up linearly to a peak. Reason: at initialization the model produces near-random outputs; gradients are large and often unrepresentative of the eventual "true" gradients. Adam's variance estimate v is still noisy. Small η protects against exploding early updates.
+- **Steps 1000-90% of training** (peak): η stays at its peak value. This is where most of the training happens and most of the loss decrease occurs.
+- **Last 10-50% of training** (decay): η smoothly decays toward zero (or a small floor). Reason: as the model converges, small refinements matter; large steps would overshoot the minimum.
+
+Cosine decay is the smoothest way to accomplish phases 2-3 in one continuous curve. Linear warmup handles phase 1. Together: **warmup + cosine** — the shape of every LLM training run's learning-rate curve.
+
+</Intuition>
+
+<Recall term="Learning rate">
+
+The learning rate η is the scalar in the update rule θ ← θ − η · direction. It multiplies the update magnitude, controlling how big a step to take at each iteration. Too big → divergence; too small → slow convergence; just right → fast, stable descent. The "right" value depends on the loss landscape, the optimizer, and the current stage of training — hence the need for schedules.
+
+</Recall>
+
+## The four schedules you'll see
+
+<RunnableCode title="Four learning-rate schedules on a common axis" code={schedulesCode} packages={["numpy", "matplotlib"]} captureFig={true} />
+
+**1. Step decay** — drop the LR by a fixed factor (e.g., 10×) at pre-specified milestones. Original workhorse for image classification (ResNet trained for 100 epochs with drops at 30, 60, 90). Simple, effective, but has "cliffs" that can shock the optimizer.
+
+**2. Exponential decay** — η_t = η_0 · γ^t for γ slightly less than 1 (e.g., 0.9995). Smooth, predictable, but requires tuning γ and can be too aggressive (goes to zero) or too gentle (barely decays).
+
+**3. Cosine annealing** — η_t = η_min + 0.5 · (η_max − η_min) · (1 + cos(π · progress)). Popular in vision (SGDR paper), transformers, and many other setups. Smooth, one hyperparameter (min lr, often 0 or 10% of peak).
+
+**4. Cosine + linear warmup** — start at 0, ramp linearly to peak over warmup_steps, then cosine decay from peak to floor over remaining_steps. **The default for transformer pretraining and fine-tuning.**
+
+## Why warmup — the Adam+transformer story
+
+**Warmup** is the linear ramp of learning rate from 0 to the peak over the first few hundred to few thousand steps. It's not decorative — it's essential for large-scale transformer training. Two reasons:
+
+- **Adam's variance estimate v isn't warm at initialization.** With β2 = 0.999, v needs ~1000 steps to converge. Early v estimates are unreliable, so √v is an unreliable denominator, so the effective per-parameter learning rate can be wildly wrong. Damping the actual learning rate during this warmup period gives v time to stabilize.
+- **The untrained model's gradients are large and non-representative.** At initialization, the model outputs are near-random; large loss values produce large gradients. Applying full learning rate immediately can destabilize weights before they even start converging to sensible values.
+
+Empirically, transformer training WITHOUT warmup often diverges (loss → NaN) in the first 100-500 steps. Warmup fixes this reliably.
+
+<RunnableCode title="Why warmup: simulated early-training instability with and without" code={warmupWhyCode} packages={["numpy"]} />
+
+Standard warmup lengths for transformer training:
+
+- **Small models (< 1B params)**: 500-1000 steps
+- **Medium models (1B-10B)**: 1000-2000 steps
+- **Large models (10B+)**: 2000-4000 steps
+- **Fine-tuning (LoRA, RLHF)**: 100-500 steps (already-warmed optimizer state helps)
+
+## Cosine decay — the smooth ramp-down
+
+**Cosine annealing** is the standard decay schedule after warmup. The formula:
+
+$$
+\eta_t \;=\; \eta_{\min} + \frac{1}{2}\left(\eta_{\max} - \eta_{\min}\right)\left(1 + \cos\left(\pi \cdot \frac{t - \text{warmup}}{T - \text{warmup}}\right)\right)
+$$
+
+Properties:
+
+- **Smooth**: no sudden drops (unlike step decay), so the optimizer's momentum and variance estimates don't get shocked.
+- **Zero derivative at endpoints**: dη/dt = 0 at t = warmup and t = T. Smooth entry from warmup, smooth exit at the end.
+- **Half-cycle by default**: cosine goes from 1 to −1 over π; we use half a cycle, so cos goes from 1 to −1 and (1 + cos)/2 goes from 1 to 0.
+
+**η_min (the floor)** is usually 0 for training from scratch and 10% of peak for fine-tuning. A non-zero floor prevents "learning stops entirely" at the very end and can help with stability.
+
+**Cosine with restarts (SGDR)**: instead of a single cosine over the full training, use multiple cosine cycles with warm restarts. Useful for iterative fine-tuning where you want to "shake" the model out of a local minimum periodically. Less common in LLM pretraining but appears in some vision setups.
+
+## One-cycle schedule (Smith / fast.ai)
+
+For shorter training runs (especially CNN training on datasets like CIFAR/ImageNet), **one-cycle** is a popular alternative: linear ramp up to a HIGH peak learning rate, then annealed decay back down.
+
+<RunnableCode title="One-cycle schedule: ramp up then anneal down" code={oneCycleCode} packages={["numpy", "matplotlib"]} captureFig={true} />
+
+The key insight (per Leslie Smith's papers): using a much larger peak LR than usual (e.g., 1e-2 vs 1e-3) works if you spend enough time ramping up to it and decaying from it. This can substantially reduce training time (measured in epochs) while achieving similar or better final accuracy — a phenomenon called "super-convergence."
+
+One-cycle is dominant in some vision and short-training-run recipes. Less common in LLM pretraining because pretraining runs are longer and the "ramp UP high" idea doesn't extrapolate to million-step runs. But **fine-tuning** with one-cycle is a viable alternative to warmup+cosine.
+
+## The traps that matter
+
+**Warmup steps depend on total steps, not on epochs.** A 1000-step warmup is meaningful for a 100k-step run but overwhelms a 5000-step fine-tuning run. Rule of thumb: warmup should be 1-5% of total training steps for pretraining, or a fixed 100-500 for fine-tuning.
+
+**Cosine decay expects to reach a specific end point.** If you cut training short (early stopping), the LR has only decayed partially — sometimes you're stopping at 30% of peak instead of the intended near-zero. Adjust `T` (total steps) to match your actual training length, not a wishful "if we had time" target.
+
+**"Constant learning rate after warmup" is a valid option for some setups.** Some research reports use warmup followed by constant LR (no decay). This often works fine for shorter runs; longer runs benefit from decay to squeeze out the last percent of loss reduction.
+
+**Learning rate scheduling interacts with batch size scheduling.** Larger batch sizes (per the linear scaling rule) permit larger learning rates. If you increase batch size mid-training, you may need to boost LR to match. Google's "batch scaling" recipes couple these two.
+
+**Warmup helps other optimizers too, not just Adam.** SGD with momentum on very large models also benefits from warmup, though less dramatically. If in doubt, add warmup.
+
+**LR schedule visualization is your friend.** Before starting a long training run, plot the LR schedule for the full expected training length. Confirm the peak, the warmup shape, the decay curve, and the final value all match your intentions. A schedule bug at step 0 is a wasted million-step run.
+
+<RealWorldML title="Reading an LLM training config">
+
+Here's a typical config for training a mid-size transformer (~7B params):
+
+```
+optimizer:
+  name: AdamW
+  lr: 3e-4                    # peak learning rate
+  betas: [0.9, 0.95]
+  weight_decay: 0.1
+  eps: 1e-8
+
+scheduler:
+  name: cosine
+  warmup_steps: 2000
+  total_steps: 500_000
+  min_lr_ratio: 0.1           # cosine anneals to 10% of peak, not 0
+
+grad_clip: 1.0
+```
+
+Decoding the scheduler:
+
+- **warmup_steps = 2000** out of 500,000 = **0.4% warmup**. Fits the 1-5% rule of thumb; the low end because Adam with β2 = 0.95 stabilizes faster than β2 = 0.999.
+- **cosine** decay starts after step 2000 and continues to step 500,000. LR at step 250,000 (halfway through cosine phase, so cos = 0): (min_lr + (peak_lr − min_lr) * 0.5) = peak * (0.1 + 0.9 * 0.5) = peak * 0.55 ≈ 1.65e-4.
+- **min_lr_ratio = 0.1** means the schedule anneals to 10% of peak (3e-5), not zero. This maintains a nonzero LR even at the end so the optimizer keeps making small adjustments — helps with stability at the tail.
+- **grad_clip = 1.0** rescales the gradient if its norm exceeds 1.0. Independent of the LR schedule but complementary — prevents rare huge gradient events from blowing up the model despite the LR being reasonable.
+
+Change the warmup steps to 0: the run will likely NaN in the first 500 steps. Change min_lr_ratio to 0: the run may plateau at a slightly worse loss because updates go to zero at the end. Change the schedule to constant: probably works, but you're leaving some final-loss improvement on the table.
+
+Every value here is negotiable within a range, but the *shape* — warmup + cosine + grad clip — is what the field has converged on for LLM pretraining. Fine-tuning uses the same shape but shorter (500 warmup, cosine over ~10k steps).
+
+</RealWorldML>
+
+<StudyDepth
+  intro={<>Learning-rate schedules are one of the most consequential and least discussed hyperparameter choices. Understanding what warmup + cosine do — and why — lets you diagnose "why won't my training converge" problems from first principles.</>}
+  drill={[
+    <>The four schedules: step, exponential, cosine, cosine+warmup — recognize each visually</>,
+    <>Warmup: linear ramp from 0 to peak over first ~1-5% of total steps; essential for Adam + transformers</>,
+    <>Cosine annealing formula and its "smooth from peak to floor with zero derivative at endpoints" property</>,
+    <>Why warmup: Adam's v estimate is poor at init; untrained model has extreme gradients; both need damping</>,
+    <>Standard config: warmup + cosine to 10% floor + grad clip 1.0 = every modern LLM training</>,
+    <>One-cycle for shorter runs (fine-tuning, CIFAR/ImageNet CNNs); rare for pretraining</>,
+  ]}
+  skim={[
+    <>Cyclic learning rate finder (Leslie Smith) — useful diagnostic tool, less common in production</>,
+    <>Cosine with warm restarts (SGDR) — appears in some vision papers, rare for LLMs</>,
+    <>Polynomial decay schedules — used by some Google groups, results similar to cosine</>,
+    <>Adaptive learning rate schedules (ReduceLROnPlateau) — less useful for LLMs where you can't monitor eval loss cheaply</>,
+  ]}
+/>
+
+<CodeItYourself title="Three drills — implement schedules, visualize, tune warmup">
+
+1. **Implement warmup + cosine.** Write `lr_at(step, warmup, total, peak, floor)` that returns the learning rate at a given step. Test that it returns 0 at step 0, peak at step `warmup`, floor at step `total`, and peak/2 + floor/2 at step `warmup + (total - warmup) / 2` (cosine midpoint).
+
+2. **Visualize different warmup lengths.** For a 10,000-step training run with peak LR 3e-4, plot the LR schedule for warmup = 100, 500, 1000, 2000 steps (all with cosine decay to 0 afterward). Notice how larger warmup shifts the peak later and makes the schedule "gentler" early on.
+
+3. **Simulate a training run's parameter magnitudes.** For a simple loss (e.g., f(x) = x²) with Adam optimizer, run 200 steps with and without warmup. Track the parameter magnitude over time. With warmup, magnitudes should stay small and controlled; without, watch for wild swings in the first ~20 steps. This is the effect warmup prevents at scale.
+
+</CodeItYourself>
+
+<Summary>
+
+- **Learning rate schedules** vary η over the course of training: small at start (warmup), high in the middle, decay toward end.
+- **Linear warmup** (0 → peak over first ~1-5% of steps): prevents early-training instability from unwarmed Adam variance estimate and extreme initial gradients. **Essential for transformer training.**
+- **Cosine annealing** (peak → floor via cosine curve over remaining steps): smoothest way to decay LR; standard for LLM training. Formula: `η(t) = min_lr + (peak_lr - min_lr) * 0.5 * (1 + cos(π * progress))`.
+- **Standard LLM recipe**: linear warmup + cosine decay to 10% of peak + gradient clipping at 1.0. Every serious pretraining run uses this shape.
+- **One-cycle** (ramp UP to a HIGH peak, then anneal DOWN): alternative for shorter runs and CNN training; less common in LLM pretraining.
+- **Step decay and exponential decay** are older, still used in some vision setups but largely replaced by cosine.
+- **Warmup length rule of thumb**: 1-5% of total steps for pretraining; fixed 100-500 for fine-tuning.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>For a cosine annealing schedule with peak_lr = 1e-3 and min_lr = 0 over 1000 total steps (no warmup), what is the learning rate at step 500?</>,
+      hint: <>Progress = 0.5 → cos(π · 0.5) = 0 → η = 0.5 · peak_lr.</>,
+      answer: <>Formula: η(t) = 0 + (1e-3 − 0) · 0.5 · (1 + cos(π · 500/1000)) = 1e-3 · 0.5 · (1 + cos(π/2)) = 1e-3 · 0.5 · (1 + 0) = <b>5e-4</b>. <br /> Midway through cosine decay, the learning rate is half of peak — that's the "50% cosine" landmark. This confirms cosine schedules spend a LOT of steps at high LR relative to the peak (only the last quarter is significantly damped).</>
+    },
+    {
+      difficulty: "easy",
+      q: <>Why doesn't a constant learning rate work well for the entire training of a large transformer?</>,
+      hint: <>Consider the initial gradients and the final convergence separately.</>,
+      answer: <>Two problems: <br /> <b>Early training:</b> gradients are huge, Adam's v estimate is not yet stable, and full-lr updates can be too big — the model diverges. <br /> <b>Late training:</b> the model is near a minimum; large lr updates would overshoot. Small lr would let it settle more precisely. <br /><br /> A schedule handles both: warmup for the early phase, decay for the late phase. Constant lr would either be too small in the middle (slow training) or too large at the ends (unstable early, imprecise late).</>
+    },
+    {
+      difficulty: "medium",
+      q: <>You're fine-tuning a pretrained model for 5000 steps. What warmup length would you use, and why?</>,
+      hint: <>Warmup depends on absolute number of steps AND whether optimizer state is already warm.</>,
+      answer: <>For fine-tuning, use <b>~100-500 warmup steps</b>, not 1-5% of total (which would be 50-250 steps for 5000-step run — a bit low). Reasons: <br /><br /> - The optimizer state is fresh at the start of fine-tuning (m and v reset to zero) — same Adam warmup requirement as pretraining. <br /> - The model itself is already pretrained, so gradients aren't as chaotic as at fresh-init. Short warmup suffices. <br /> - 100-500 steps is a common range in practice: SFT recipes use 100-200, RLHF typically 500-1000. <br /><br /> Rule of thumb: for shorter runs, use a fixed warmup value (100-500) rather than a percentage. Percentage-based warmup makes more sense for pretraining where total_steps is huge.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>What is "gradient clipping" and how does it complement learning rate schedules?</>,
+      hint: <>What if a single step has an anomalously large gradient?</>,
+      answer: <><b>Gradient clipping</b> rescales the gradient vector if its norm exceeds a threshold (typically 1.0): if ‖g‖ &gt; c, then g ← g · c / ‖g‖. This bounds the effective update magnitude even if some individual gradient is anomalously large. <br /><br /><b>Complements LR schedule</b>: <br /> - LR schedule controls the AVERAGE step size over training. Peak lr, decay, etc. <br /> - Grad clipping controls the WORST-CASE step in any single iteration. Even with a good schedule, a rare bad batch can produce a gradient 100x normal size; clipping bounds the damage. <br /><br /> Both are essential for transformer training. LR schedule alone can't prevent single-step blowups. Grad clipping alone can't compensate for a fundamentally bad LR (too small = slow, too big = frequent clipping = wasted signal). Together they give a stable, adaptive training procedure. Every published LLM training config includes both.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>A team reports that their transformer training diverges (NaN loss) at step ~500 with no warmup, but works fine with 2000-step warmup. What might be happening at the mechanism level?</>,
+      hint: <>Consider Adam's state (m, v) at step 500 vs step 2000.</>,
+      answer: <>Two entangled causes: <br /><br /> <b>1. Adam's v estimate isn't stable yet.</b> With default β2 = 0.999, v converges over ~1000 steps. At step 500, v is still noisy. When v underestimates the true gradient magnitude, the effective per-parameter lr (η / √v) is too large. Coupled with large initial gradients, this over-scales updates and produces NaNs. <br /> Even with β2 = 0.95 (LLM default), v takes ~50 steps to warm up — but the initial-gradient magnitude is the dominant issue in that case. <br /><br /> <b>2. Untrained model produces extreme gradients.</b> The loss at init is near log(vocab_size) — 10+ nats per token for a 50k vocab. This produces gradients ~2-10x larger than mid-training gradients. Applying full lr immediately (η · large_gradient / small_v) creates updates that push weights into pathological regions (NaN activations, dead ReLUs, etc.). <br /><br /> <b>2000-step warmup fixes both:</b> the linearly-ramping lr keeps effective updates small during the first phase, giving both v time to converge and gradients time to shrink toward reasonable values. At step 2000, both stabilize enough for full lr to be safe. <br /><br /> This is why "add warmup" is the first-line fix for transformer training instabilities. Removing warmup is nearly always a mistake at scale, no matter how much the schedule diagram simplifies.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Explain why LLM training uses cosine decay to a nonzero floor (10% of peak) instead of decaying all the way to zero.</>,
+      hint: <>Think about what happens if the LR is EXACTLY zero for the last portion of training.</>,
+      answer: <>Decaying to exactly zero means the optimizer takes NO steps in the final portion of training. This has three problems: <br /><br /> <b>1. Wasted compute.</b> If you're going to run those steps anyway (because the training budget is fixed), you might as well let the optimizer make small refinements — even a 10% lr can meaningfully polish the model's final loss. <br /><br /> <b>2. Batch-to-batch stability.</b> Zero-lr updates mean parameters are frozen for the last portion. If your batch order matters (curriculum, data augmentation), you lose the "average over recent batches" effect that a non-zero lr provides. <br /><br /> <b>3. Numerical implementation.</b> Many training frameworks have subtle bugs when lr = 0 (e.g., some skip the optimizer step entirely, some don't sync gradients across GPUs, etc.). Non-zero floor avoids these edge cases. <br /><br /> <b>4. Post-hoc fine-tuning bridge.</b> If you later resume training (e.g., continue pretraining on a new dataset or fine-tune on domain data), a non-zero floor means the optimizer state (m, v) is meaningfully updated at the end — a smoother transition. <br /><br /> The 10% floor is a practical compromise: low enough that the model has meaningfully converged, high enough that the optimizer keeps working. Some recipes use 5% or 1%; the exact value matters less than the fact that it's non-zero.</>
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "Linear warmup for transformer training is essential because:",
+      choices: [
+        { text: "The training data needs to be shuffled at start" },
+        { text: "Adam's variance estimate v is not yet stable, and untrained-model gradients are large — a low initial lr prevents divergence", correct: true },
+        { text: "It's a legal requirement for reproducibility" },
+        { text: "It doubles training speed" },
+      ],
+      explanation: <>Warmup addresses two coupled issues: (1) Adam's second-moment EMA v takes hundreds of steps to converge, and unwarmed v produces incorrect per-parameter effective learning rates; (2) an untrained model produces large gradients that can blow up parameters if the full lr is applied immediately. Linear ramp from 0 to peak over ~1-5% of steps solves both. Without warmup, large transformer training reliably diverges in the first few hundred steps.</>
+    },
+    {
+      q: "Cosine annealing has this smooth curve because:",
+      choices: [
+        { text: "It's the mathematical function with the smallest computational cost" },
+        { text: "It has zero derivative at both endpoints (smooth entry from warmup, smooth exit at end)", correct: true },
+        { text: "It matches human intuition about learning" },
+        { text: "It was the first schedule discovered" },
+      ],
+      explanation: <>Cosine schedule: (1 + cos(π · progress)) / 2 has derivative -π/2 · sin(π · progress) / 2, which is zero at progress = 0 and progress = 1. Smooth "docking" from warmup (LR just plateaued) and smooth exit at end (LR just approached the floor). This avoids sudden LR changes that could shock the optimizer state (m and v). Contrast step decay, whose sudden drops can destabilize training if timed poorly.</>
+    },
+    {
+      q: "For a 500,000-step LLM pretraining run, a typical warmup length is:",
+      choices: [
+        { text: "1 step (immediate full lr)" },
+        { text: "50 steps" },
+        { text: "About 2000 steps (1-5% of total)", correct: true },
+        { text: "All 500,000 steps" },
+      ],
+      explanation: <>Standard practice: warmup is 1-5% of total training steps. For 500k steps, ~2000-5000 warmup is typical. Too short and you invite early divergence; too long and you leave loss improvement on the table (peak lr comes too late). Big-model recipes (LLaMA, GPT-3) tend toward the higher end (~4000-5000 warmup steps).</>
+    },
+    {
+      q: "Gradient clipping and learning-rate scheduling are:",
+      choices: [
+        { text: "Redundant — you only need one" },
+        { text: "Complementary — schedule controls AVERAGE step size, clipping bounds WORST-CASE step size", correct: true },
+        { text: "In conflict — using both hurts training" },
+        { text: "Only needed for RNN training, not transformers" },
+      ],
+      explanation: <>They target different failure modes. LR schedule handles overall training dynamics (peak lr chosen to be as high as possible while stable on average). Grad clipping (typically ‖g‖ ≤ 1.0) prevents rare huge gradient events (from bad batches or numerical edge cases) from destroying weights even when the schedule is well-tuned. Every modern LLM training config uses both — they're both cheap and both provide meaningful robustness improvements.</>
+    },
+    {
+      q: "The 'one-cycle' schedule is:",
+      choices: [
+        { text: "Constant lr throughout training" },
+        { text: "Ramp lr UP to a high peak, then anneal DOWN — one cycle over total training", correct: true },
+        { text: "The same as cosine annealing with warmup" },
+        { text: "Only used for reinforcement learning" },
+      ],
+      explanation: <>One-cycle (Leslie Smith): linear ramp up to a high peak lr, then annealed decay down. Different from warmup + cosine (which uses a lower peak). Popular for shorter training runs and CNN training on CIFAR / ImageNet — often achieves "super-convergence" (fast, high final accuracy). Less common for LLM pretraining because the "ramp up high" idea doesn't extrapolate to million-step runs.</>
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/optimization/learning-rate-schedules" title="Learning rate schedules & warmup" />

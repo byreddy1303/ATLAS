@@ -115,6 +115,13 @@ plt.legend(); plt.grid(alpha=0.3); plt.tight_layout()`;
   { href: "/learn/mathematics/vectors-space/linear-independence-basis", label: "Linear independence, span & basis", blurb: "Bases and coordinates — orthonormal bases are the special case where coordinates become dot products." },
 ]} />
 
+<NewConcepts
+  concepts={[
+    { name: "attention mechanism", blurb: "the transformer building block. Each attention output is a projection of a query onto a subspace spanned by key vectors — one of this chapter&rsquo;s three canonical use-cases." },
+    { name: "PCA (principal component analysis)", blurb: "the classical dimensionality-reduction technique. Every PCA step is an orthogonal projection onto the top eigenvectors of the covariance. Full chapter in Phase 1.2." },
+  ]}
+/>
+
 <Motivation title="Least squares, attention, PCA — one operation">
 
 Regression fits a line to points by minimizing squared error — that turns out to be a **projection** of the target vector onto the space spanned by the features. PCA finds the direction that captures the most variance — the projection whose residual is smallest. Attention averages value vectors weighted by attention scores — a projection onto the span of the values. Layer normalization removes the mean from an activation — a projection onto the subspace where entries sum to zero.

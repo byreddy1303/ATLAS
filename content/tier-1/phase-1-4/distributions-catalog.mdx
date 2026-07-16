@@ -1,0 +1,545 @@
+---
+title: A catalog of distributions
+tier: 1
+phase: "1.4"
+---
+
+export const discreteCode = `# Discrete distributions: Bernoulli, Binomial, Categorical, Poisson.
+# Each is a probability mass function on a specific support with 1-2 parameters.
+import numpy as np
+from scipy.stats import bernoulli, binom, poisson
+rng = np.random.default_rng(0)
+
+# Bernoulli(p): one flip of a coin with heads-probability p.  Support {0, 1}.
+p = 0.3
+print("Bernoulli(0.3):")
+print(f"  P(X = 0) = {bernoulli.pmf(0, p):.4f}    P(X = 1) = {bernoulli.pmf(1, p):.4f}")
+print(f"  Sample mean of 10000 draws = {rng.binomial(1, p, 10_000).mean():.4f}   (expect ~0.3)")
+
+# Binomial(n, p): number of successes in n independent Bernoulli(p) trials.  Support {0, 1, ..., n}.
+n, p = 10, 0.3
+print("\\nBinomial(10, 0.3):")
+for k in [0, 3, 5, 10]:
+    print(f"  P(X = {k}) = {binom.pmf(k, n, p):.4f}")
+print(f"  mean  = n*p    = {n * p}    (empirical {rng.binomial(n, p, 10_000).mean():.4f})")
+print(f"  var   = n*p*(1-p) = {n * p * (1 - p):.4f}   (empirical {rng.binomial(n, p, 10_000).var():.4f})")
+
+# Categorical: generalization of Bernoulli to K categories.  Softmax output IS a categorical.
+K = 5
+probs = np.array([0.1, 0.2, 0.4, 0.2, 0.1])
+print(f"\\nCategorical over {K} categories with p = {probs}:")
+samples = rng.choice(K, size=10_000, p=probs)
+counts = np.bincount(samples, minlength=K) / 10_000
+print(f"  Empirical frequencies: {counts}")
+
+# Poisson(lambda): count of events in unit time given rate lambda.  Support {0, 1, 2, ...}.
+lam = 2.5
+print(f"\\nPoisson(lambda = {lam}):")
+for k in [0, 1, 2, 3, 5, 10]:
+    print(f"  P(X = {k}) = {poisson.pmf(k, lam):.5f}")
+print(f"  mean = variance = lambda = {lam}   (empirical mean {rng.poisson(lam, 10_000).mean():.4f})")`;
+
+export const continuousCode = `# Non-Gaussian continuous distributions: Uniform, Exponential, Beta, Gamma.
+import numpy as np
+from scipy.stats import uniform, expon, beta as beta_dist, gamma
+rng = np.random.default_rng(0)
+
+# Uniform(a, b): equal density on [a, b].  Support [a, b].
+a, b = -1, 3
+print(f"Uniform({a}, {b}):")
+print(f"  Density on support: 1/(b-a) = {1/(b-a):.4f}")
+print(f"  Mean = (a+b)/2 = {(a+b)/2}   (empirical {rng.uniform(a, b, 100_000).mean():.4f})")
+print(f"  Var  = (b-a)^2/12 = {(b-a)**2/12:.4f}   (empirical {rng.uniform(a, b, 100_000).var():.4f})")
+
+# Exponential(rate = lambda): waiting time until next Poisson event.  Support [0, inf).
+# f(x) = lambda * exp(-lambda * x).  Memoryless: P(X > s+t | X > s) = P(X > t).
+lam = 2.0
+print(f"\\nExponential(rate = {lam}):")
+print(f"  Density at 0: lambda = {lam}")
+print(f"  Mean = 1/lambda = {1/lam:.4f}   (empirical {rng.exponential(1/lam, 100_000).mean():.4f})")
+print(f"  P(X > 1) = exp(-lambda) = {np.exp(-lam):.4f}")
+
+# Beta(alpha, beta): distribution over [0, 1].  Great for modeling probabilities of probabilities.
+# alpha = beta = 1 -> Uniform(0, 1).  alpha, beta > 1 -> unimodal.  alpha < 1 or beta < 1 -> U-shape.
+print("\\nBeta distribution -- shape depends on (alpha, beta):")
+for alpha, bet in [(1, 1), (2, 5), (5, 2), (0.5, 0.5)]:
+    x = rng.beta(alpha, bet, 10_000)
+    print(f"  Beta({alpha}, {bet}): mean = {x.mean():.4f}   (theory {alpha/(alpha+bet):.4f})")
+
+# Gamma(k, theta): sum of k independent Exp(1/theta).  Support [0, inf).
+# Common in Bayesian posteriors of positive quantities (variances, rates).
+k, theta = 2, 1.5
+print(f"\\nGamma(shape = {k}, scale = {theta}):")
+print(f"  Mean = k * theta = {k * theta}   (empirical {rng.gamma(k, theta, 100_000).mean():.4f})")
+print(f"  Var  = k * theta^2 = {k * theta**2:.4f}   (empirical {rng.gamma(k, theta, 100_000).var():.4f})")`;
+
+export const gaussianCode = `# The Gaussian (normal) distribution -- the workhorse of ML.
+# N(mu, sigma^2): PDF f(x) = 1/(sigma * sqrt(2*pi)) * exp(-(x - mu)^2 / (2 * sigma^2))
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import norm
+rng = np.random.default_rng(0)
+
+# Basic facts.
+mu, sigma = 3, 2
+print(f"N(mu = {mu}, sigma^2 = {sigma**2}):")
+print(f"  Density at the mean f({mu}) = {norm.pdf(mu, mu, sigma):.4f}   = 1/(sigma * sqrt(2*pi)) = {1/(sigma * np.sqrt(2*np.pi)):.4f}")
+print(f"  P(mu - sigma < X < mu + sigma)   = {norm.cdf(1) - norm.cdf(-1):.4f}   (68% rule)")
+print(f"  P(mu - 2*sigma < X < mu + 2*sigma) = {norm.cdf(2) - norm.cdf(-2):.4f}   (95% rule)")
+print(f"  P(mu - 3*sigma < X < mu + 3*sigma) = {norm.cdf(3) - norm.cdf(-3):.4f}   (99.7% rule)")
+
+# Two key properties:
+# (1) Linear combinations of Gaussians are Gaussian.
+# If X ~ N(mu_1, sigma_1^2), Y ~ N(mu_2, sigma_2^2), independent, then
+# aX + bY ~ N(a*mu_1 + b*mu_2, a^2*sigma_1^2 + b^2*sigma_2^2).
+X = rng.normal(0, 1, size=100_000)
+Y = rng.normal(0, 2, size=100_000)
+Z = 3 * X + 2 * Y
+print(f"\\n3X + 2Y with X ~ N(0,1), Y ~ N(0,4):")
+print(f"  Theoretical mean = 0, variance = 9*1 + 4*4 = 25   -> sigma = 5")
+print(f"  Empirical mean {Z.mean():+.4f}, sigma {Z.std():.4f}")
+
+# (2) Q-Q plot: sample quantiles vs theoretical quantiles.
+# If the sample IS Gaussian, points lie on the diagonal.
+fig, ax = plt.subplots(figsize=(5.2, 5.2), facecolor="none")
+ax.set_facecolor("#0f0f14")
+samples = rng.normal(size=200)
+theoretical_q = norm.ppf(np.linspace(0.005, 0.995, len(samples)))
+ax.scatter(theoretical_q, np.sort(samples), s=14, alpha=0.7, color="#c4f04b")
+lo, hi = -3, 3
+ax.plot([lo, hi], [lo, hi], "--", color="#8a8a82", lw=1)
+ax.set_xlabel("theoretical N(0,1) quantiles", color="#dcdcd6")
+ax.set_ylabel("sample quantiles", color="#dcdcd6")
+ax.set_title("Q-Q plot: N(0,1) samples", color="#dcdcd6")
+ax.tick_params(colors="#dcdcd6")
+for spine in ax.spines.values():
+    spine.set_color("#2a2a35")
+plt.tight_layout()
+plt.show()
+print("\\nQ-Q plot: points close to the diagonal confirm Gaussianity; deviations expose skew or heavy tails.")`;
+
+export const mvGaussianCode = `# Multivariate Gaussian N(mu, Sigma) in d dimensions.
+# mu is a d-vector; Sigma is a d x d SYMMETRIC POSITIVE DEFINITE covariance matrix.
+# Density: f(x) = (1 / ((2*pi)^(d/2) * sqrt(det(Sigma))))
+#              * exp(-0.5 * (x - mu)^T Sigma^-1 (x - mu))
+import numpy as np
+import matplotlib.pyplot as plt
+rng = np.random.default_rng(0)
+
+# 2D example with a positively correlated covariance.
+mu = np.array([1.0, 2.0])
+Sigma = np.array([[2.0, 1.5],
+                  [1.5, 3.0]])
+
+# Sample 800 points using numpy.
+samples = rng.multivariate_normal(mu, Sigma, size=800)
+
+# Empirical mean and covariance.
+print("Theoretical mu     =", mu)
+print("Empirical  mu bar  =", samples.mean(axis=0))
+print("\\nTheoretical Sigma =\\n", Sigma)
+print("Empirical  S      =\\n", np.cov(samples.T))
+
+# Eigendecomposition of Sigma tells you the ellipse axes.
+# Sigma = V Lambda V^T.  Columns of V are unit-length principal directions;
+# sqrt(Lambda) gives the standard deviations along each direction.
+w, V = np.linalg.eigh(Sigma)
+print("\\nEigenvalues of Sigma:", w)
+print("Principal directions (columns of V):\\n", V)
+print("=> ellipse major axis in direction V[:,1] with length ~", np.sqrt(w[1]))
+
+# Visualize samples plus the 1-sigma contour.
+theta = np.linspace(0, 2*np.pi, 200)
+circle = np.stack([np.cos(theta), np.sin(theta)])
+# Transform unit circle by V * sqrt(Lambda) to get 1-sigma ellipse.
+ellipse = mu[:, None] + V @ np.diag(np.sqrt(w)) @ circle
+
+fig, ax = plt.subplots(figsize=(5.6, 5.6), facecolor="none")
+ax.set_facecolor("#0f0f14")
+ax.scatter(samples[:, 0], samples[:, 1], s=10, alpha=0.5, color="#c4f04b")
+ax.plot(ellipse[0], ellipse[1], color="#f5cf3d", lw=2)
+ax.set_aspect("equal")
+ax.set_xlabel("x1", color="#dcdcd6")
+ax.set_ylabel("x2", color="#dcdcd6")
+ax.set_title("2D Gaussian samples + 1-sigma ellipse", color="#dcdcd6")
+ax.tick_params(colors="#dcdcd6")
+for spine in ax.spines.values():
+    spine.set_color("#2a2a35")
+plt.tight_layout()
+plt.show()
+
+print("\\nThe covariance matrix IS an ellipse: eigenvectors are the axis directions,")
+print("sqrt of eigenvalues are the axis half-lengths.  Every VAE latent space plot")
+print("is drawing exactly this picture per input example.")`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/probability/random-variables", label: "Random variables & distributions", blurb: "PMFs, PDFs, and CDFs from that chapter are the language every named distribution speaks — this chapter is a catalog of specific parameterizations." },
+  { href: "/learn/mathematics/linear-algebra/positive-definite", label: "Positive-definite matrices", blurb: "The multivariate Gaussian is defined by a positive-definite covariance matrix; the eigendecomposition of Σ gives the shape of the density ellipsoid." },
+]} />
+
+<NewConcepts
+  concepts={[
+    { name: "Gaussian processes (GPs)", blurb: "a nonparametric Bayesian regression tool built entirely from multivariate Gaussians. Referenced in RealWorldML as the workhorse of Bayesian hyperparameter optimization." },
+    { name: "Bayesian optimization", blurb: "hyperparameter tuning by fitting a GP to the loss landscape and picking the next point via an acquisition function (EI, UCB, Thompson sampling)." },
+    { name: "Cauchy / Pareto heavy-tailed distributions", blurb: "distributions with tails so fat they have infinite variance; break naive Gaussian modeling for tail risk. Skim for context." },
+    { name: "Dirichlet distribution", blurb: "the multivariate generalization of Beta — a distribution over probability vectors. Used as a prior for Categorical outputs (label smoothing, LDA, etc.)." },
+    { name: "Laplace distribution", blurb: "double-exponential; heavy-tailed with a spike at zero. Used as an alternative to Gaussian noise (MAE loss ≡ Laplace likelihood)." },
+  ]}
+/>
+
+<Motivation title="Every ML modeling choice picks a distribution family — knowing the catalog is the difference between guessing and reasoning">
+
+Distributions are the vocabulary of ML modeling. Every architectural or algorithmic choice implicitly picks one:
+
+- **Classification loss = negative log-likelihood of a categorical.** Cross-entropy is literally −log p(true class) under the model&rsquo;s categorical distribution over classes. Every softmax layer is a parameterization of Categorical(π).
+- **Regression loss = negative log-likelihood of a Gaussian.** MSE is (up to constants) −log p(y | ŷ) when y | ŷ ~ 𝒩(ŷ, σ²) for a fixed σ. Mean-absolute-error corresponds to a Laplace likelihood instead. Every loss function is a chosen distribution family.
+- **VAE latents are Gaussians.** Encoder outputs μ(x), σ(x); the latent z ~ 𝒩(μ(x), diag(σ²(x))). KL to prior 𝒩(0, I) is closed-form because both are Gaussians.
+- **Diffusion noise is standard Gaussian.** ε ~ 𝒩(0, I). Forward process is a scheduled sequence of Gaussians; reverse process learns to invert them.
+- **Rewards in reinforcement learning are often modeled as exponential-family** (Gaussian, Gamma, Bernoulli depending on the domain). Policy gradients decompose neatly for exponential-family distributions.
+- **Bayesian priors on positive quantities** (variances, precisions, rates) are usually Gamma or InverseGamma. Priors on probabilities are Beta or Dirichlet.
+
+You don&rsquo;t need to memorize every distribution; you need to know the shapes and the typical settings so you can pattern-match. A count of arrivals per hour? Poisson. Time-until-event? Exponential. Probability of success? Beta prior. Ellipsoidal cluster? Multivariate Gaussian. This chapter builds that pattern library, then dives deep into the Gaussian (the most-important-single-distribution in ML).
+
+</Motivation>
+
+<Intuition title="A distribution family is a *shape* parameterized by a small set of knobs">
+
+Each family is a parameterized shape. Turning a knob changes the shape, but the family stays what it is. **Gaussian** = a smooth bell, knobs = (mean, variance). **Bernoulli** = two vertical bars whose heights sum to 1, knob = P(success). **Poisson** = a decaying tail of bars over the non-negative integers, knob = rate. **Beta** = a curve on [0, 1] whose shape ranges from U-shaped to bell-shaped to skewed, knobs = (α, β).
+
+Real data is never *exactly* any of these — but many phenomena are approximately one of them, and that&rsquo;s enough. Choosing a distribution is choosing which family&rsquo;s knobs to fit to the data. When the family fits well, downstream math becomes tractable (closed-form posteriors, low-variance estimators, calibrated confidence intervals). When it doesn&rsquo;t, you switch families or use a non-parametric method.
+
+</Intuition>
+
+<Recall term="PMF vs PDF">
+
+Discrete distributions are described by a **PMF** p(x) = P(X = x). Continuous distributions by a **PDF** f(x); probability comes from integrating over intervals. Both are non-negative and total to 1 (sum or integral respectively). Named distributions specify a functional form and the parameters that appear in it.
+
+</Recall>
+
+## Discrete distributions
+
+### Bernoulli(p)
+
+One trial with a binary outcome. Support &#123;0, 1&#125;. Parameter p ∈ [0, 1] = P(X = 1).
+
+$$
+p(x) = p^x (1 - p)^{1-x} \quad \text{for } x \in \{0, 1\}, \qquad E[X] = p, \qquad \mathrm{Var}(X) = p(1 - p).
+$$
+
+Uses: binary labels, click-through rate, single coin flip. The build block of everything else discrete.
+
+### Binomial(n, p)
+
+Number of successes in n independent Bernoulli(p) trials. Support &#123;0, 1, …, n&#125;.
+
+$$
+p(k) = \binom{n}{k} p^k (1 - p)^{n-k}, \qquad E[X] = np, \qquad \mathrm{Var}(X) = np(1 - p).
+$$
+
+Uses: number of correct predictions on a test set of size n, batch-level success counts.
+
+### Categorical / Multinoulli over K classes
+
+Support = &#123;1, 2, …, K&#125;. Parameter π = (π₁, …, π_K) with π_k ≥ 0 and Σ π_k = 1.
+
+$$
+p(k) = \pi_k, \qquad E[\mathbf{1}\{X = k\}] = \pi_k.
+$$
+
+Uses: LLM next-token distribution (K = vocabulary size), image classification (K = number of classes), multi-class softmax output. The most-used distribution in modern ML by frequency.
+
+### Poisson(λ)
+
+Number of events in a fixed interval when events occur at average rate λ per interval, independently. Support = &#123;0, 1, 2, …&#125;.
+
+$$
+p(k) = \frac{\lambda^k e^{-\lambda}}{k!}, \qquad E[X] = \lambda, \qquad \mathrm{Var}(X) = \lambda.
+$$
+
+Uses: number of tokens generated before &lt;end&gt;, number of Bernoulli events aggregated over rare-event windows, count regression.
+
+**Mean = variance** is the Poisson signature. If your count data has variance much larger than its mean, use Negative Binomial (a Poisson-Gamma mixture) instead — the phenomenon is called *overdispersion*.
+
+<RunnableCode title="The four discrete distributions in action" code={discreteCode} packages={["numpy", "scipy"]} />
+
+## Continuous distributions (non-Gaussian)
+
+### Uniform(a, b)
+
+Equal density on [a, b], zero outside.
+
+$$
+f(x) = \frac{1}{b - a} \text{ for } x \in [a, b], \qquad E[X] = \frac{a+b}{2}, \qquad \mathrm{Var}(X) = \frac{(b-a)^2}{12}.
+$$
+
+Uses: default random-number generator output; noise in continuous latent spaces; base measure for inverse-CDF sampling.
+
+### Exponential(λ)
+
+Waiting time until the next event in a Poisson process of rate λ. Support [0, ∞).
+
+$$
+f(x) = \lambda e^{-\lambda x}, \qquad F(x) = 1 - e^{-\lambda x}, \qquad E[X] = \frac{1}{\lambda}, \qquad \mathrm{Var}(X) = \frac{1}{\lambda^2}.
+$$
+
+**Memoryless property**: P(X &gt; s + t | X &gt; s) = P(X &gt; t). The only continuous distribution with this property. Uses: modeling times between events, decay processes, RL episode lengths under a constant termination rate.
+
+### Beta(α, β)
+
+Distribution on [0, 1]. Extremely flexible shape controlled by two positive parameters.
+
+$$
+f(x) = \frac{x^{\alpha-1}(1-x)^{\beta-1}}{B(\alpha, \beta)}, \qquad E[X] = \frac{\alpha}{\alpha + \beta}, \qquad \mathrm{Var}(X) = \frac{\alpha \beta}{(\alpha+\beta)^2 (\alpha+\beta+1)}.
+$$
+
+Shape zoo (make a mental picture):
+
+- α = β = 1: Uniform(0, 1) (flat).
+- α, β both &gt; 1: unimodal, peaked interior.
+- α = β &lt; 1: U-shaped (mass at edges).
+- α &gt; β: right-skewed toward 1. α &lt; β: left-skewed toward 0.
+
+Uses: **conjugate prior for Bernoulli/Binomial** — start with Beta(α₀, β₀) prior, observe k successes in n trials, posterior is Beta(α₀ + k, β₀ + n − k). Also used for modeling proportions and probabilities of probabilities.
+
+### Gamma(k, θ)
+
+Distribution on [0, ∞). Two parameterizations exist — *shape-scale* (k, θ) and *shape-rate* (α, β = 1/θ). Shape k controls skewness; scale θ (or 1/rate) sets overall size.
+
+$$
+f(x) = \frac{x^{k-1} e^{-x/\theta}}{\Gamma(k) \theta^k}, \qquad E[X] = k \theta, \qquad \mathrm{Var}(X) = k \theta^2.
+$$
+
+**Special cases**: Gamma(1, θ) = Exponential(1/θ). Gamma(k, 2) = Chi-squared with 2k degrees of freedom. Sum of k iid Exp(1/θ) = Gamma(k, θ) — a common "waiting time until the k-th event" model.
+
+Uses: **conjugate prior for the rate of a Poisson** or for the precision (1/σ²) of a Gaussian. Common in Bayesian modeling of positive quantities.
+
+<RunnableCode title="Uniform, Exponential, Beta, Gamma — shapes and moments" code={continuousCode} packages={["numpy", "scipy"]} />
+
+## The Gaussian (deep dive)
+
+The Gaussian, or Normal, distribution 𝒩(μ, σ²) is the workhorse of applied probability. Every serious ML curriculum spends a large fraction of its time on it because it appears everywhere: the CLT (next chapter) makes it the natural distribution of averages and sums; the maximum-entropy distribution with fixed mean and variance is Gaussian; and its mathematical properties are uniquely convenient (linear combinations stay Gaussian, closed under conditioning, closed-form KL divergence).
+
+$$
+f(x) = \frac{1}{\sigma \sqrt{2\pi}} \exp\left(-\frac{(x - \mu)^2}{2\sigma^2}\right), \qquad E[X] = \mu, \qquad \mathrm{Var}(X) = \sigma^2.
+$$
+
+**The 68–95–99.7 rule.** For X ~ 𝒩(μ, σ²):
+
+- 68% of mass within ±σ of μ.
+- 95% within ±2σ.
+- 99.7% within ±3σ.
+
+Beyond 4σ is astronomically rare (1 in ~16,000). This is why "the tails are thin" for Gaussians — extreme events are extraordinarily unlikely, which is *not* the case for heavier-tailed distributions like Cauchy or Pareto.
+
+**Linear combinations stay Gaussian.** If X ~ 𝒩(μ_X, σ_X²) and Y ~ 𝒩(μ_Y, σ_Y²) are independent, then
+
+$$
+aX + bY \;\sim\; \mathcal{N}(a\mu_X + b\mu_Y,\; a^2 \sigma_X^2 + b^2 \sigma_Y^2).
+$$
+
+This linearity is what makes Gaussians tractable. Every step in a Kalman filter, every score matching argument in diffusion, every reparameterization trick in VAEs — all rely on this closure property.
+
+**Standardization** transforms any Gaussian to the *standard* Gaussian 𝒩(0, 1): if X ~ 𝒩(μ, σ²), then Z = (X − μ)/σ ~ 𝒩(0, 1). Every practical Gaussian computation reduces to a lookup in tables (or scipy) of the standard normal CDF Φ.
+
+<RunnableCode title="Gaussian basics: PDF, 68–95–99.7, linear combinations, Q-Q diagnostics" code={gaussianCode} packages={["numpy", "scipy", "matplotlib"]} />
+
+## Multivariate Gaussian anatomy
+
+A d-dimensional Gaussian 𝒩(μ, Σ) is parameterized by a mean vector μ ∈ ℝᵈ and a symmetric positive-definite covariance matrix Σ ∈ ℝᵈˣᵈ.
+
+$$
+f(\mathbf{x}) = \frac{1}{(2\pi)^{d/2} |\Sigma|^{1/2}} \exp\left(-\tfrac{1}{2}(\mathbf{x} - \boldsymbol{\mu})^\top \Sigma^{-1} (\mathbf{x} - \boldsymbol{\mu})\right).
+$$
+
+**Read the covariance matrix.**
+
+- **Diagonal entries** Σ_ii = variance of the i-th coordinate.
+- **Off-diagonal entries** Σ_ij = covariance of coordinates i and j (positive = they co-vary, negative = anti-correlated, zero = uncorrelated).
+- **Eigenvectors of Σ = principal directions of the density ellipsoid.**
+- **Square-roots of eigenvalues = half-lengths of the ellipsoid axes** in each principal direction.
+
+**Marginalization is free**: any subset of coordinates is itself Gaussian, with mean and covariance found by simply dropping the other rows/columns of μ and Σ. **Conditioning is closed-form**: given X = (X_A, X_B) jointly Gaussian, the conditional X_A | X_B is Gaussian with mean and covariance computable via block-matrix inversion. This closure is exactly what makes Gaussian processes and Kalman filters tractable — you can propagate Gaussians through linear operations, marginalization, and conditioning without ever leaving the family.
+
+<RunnableCode title="2D multivariate Gaussian: mean, covariance, principal-axis ellipse" code={mvGaussianCode} packages={["numpy", "matplotlib"]} />
+
+## Choosing the right distribution — a cheat sheet
+
+| Data | Distribution family |
+|---|---|
+| Binary label | Bernoulli |
+| Count of successes out of n trials | Binomial |
+| One of K categories (LLM next token) | Categorical |
+| Count of rare events in a fixed interval | Poisson |
+| Continuous real value with roughly-symmetric spread | Gaussian |
+| Continuous positive value (times, sizes) | Exponential, Gamma, or Log-normal |
+| Continuous value in [0, 1] (a probability) | Beta (or Dirichlet if multivariate) |
+| Multivariate cluster with elliptical shape | Multivariate Gaussian |
+
+Two rules of thumb before you commit:
+
+- **Sanity-check the support.** A Gaussian model of ages will give negative ages some probability. Use a positive-supported distribution (log-normal, Gamma) if it&rsquo;s conceptually wrong for values to go negative.
+- **Empirical histograms are your friend.** Plot the data. A tail that dies faster than Gaussian is *light-tailed* (bounded, sub-Gaussian). Fatter than Gaussian is *heavy-tailed*; consider Student-t, Cauchy, or Pareto for extreme tails.
+
+## The traps that matter
+
+**"Everything is Gaussian" is wrong.** The CLT says *averages* of iid variables tend to be Gaussian, not raw data. Real data often has heavy tails, skewness, or bounded support that Gaussians ignore. Fit a Gaussian to a heavy-tailed dataset and you&rsquo;ll systematically underestimate the tail probabilities — bad for risk management, safety-critical systems, and outlier detection.
+
+**Mean and variance don&rsquo;t determine a distribution.** Two very different distributions (Gaussian, exponential, uniform on some range) can share a mean and variance. When someone reports "mean = 3, std = 1," you still know almost nothing about the shape. Ask for a histogram, or at minimum the quantiles.
+
+**Poisson variance = mean is a strong assumption.** Real count data often has variance much larger than the mean (overdispersion). Test this before assuming Poisson; use Negative Binomial or a mixture if overdispersed.
+
+**The Beta prior isn&rsquo;t neutral.** Beta(1, 1) = Uniform, sometimes called an "uninformative" prior, but it&rsquo;s not truly uninformative for all quantities. Jeffreys prior (Beta(0.5, 0.5)) is another choice. If your prior has strong weight relative to your data (α + β large), it will bias the posterior.
+
+**Multivariate Gaussian requires PD covariance.** If Σ has zero or negative eigenvalues, the density is undefined (0 determinant → 1/0 in the formula). Numerically this manifests as `LinAlgError: not positive definite` when you try to compute log-likelihoods. Add a tiny diagonal jitter (Σ + εI) as a fix. This is exactly what Gaussian-process libraries do internally.
+
+**Independence != uncorrelated for non-Gaussians.** For Gaussians, uncorrelated = independent. For non-Gaussians in general, uncorrelated is a weaker condition. Don&rsquo;t assume independence just because you saw zero correlation.
+
+<RealWorldML title="Every ML architecture is a distribution choice">
+
+Trace any modern GenAI system and you find a distribution at every interface:
+
+- **Softmax over the vocabulary** in an LLM = Categorical(π) where π = softmax(logits). Temperature and top-p sharpen or restrict this measure. Cross-entropy loss during training is the negative log-likelihood of this Categorical.
+- **VAE encoder output** = per-example Gaussian 𝒩(μ(x), diag(σ²(x))). The ELBO training objective is closed-form because KL between two diagonal Gaussians has a formula. Non-Gaussian variational families (normalizing-flow posteriors, discrete latents) are active research precisely because the Gaussian assumption is limiting.
+- **Diffusion forward noise** = 𝒩(0, I). Reverse-process training loss is closed-form because the intermediate distributions are analytically Gaussians. Alternatives (categorical diffusion, Poisson diffusion) exist but are harder to train.
+- **RLHF reward model** = often modeled as producing a Gaussian scalar per completion. Policy update depends on the *distribution* of rewards, not just a point estimate. Assumptions about reward variance affect KL constraints in PPO.
+- **Gaussian processes for hyperparameter tuning** (Bayesian optimization) = fully Gaussian belief over the loss landscape. Every acquisition function (EI, UCB, TS) is an integral against a Gaussian posterior.
+
+The list goes on. Every time you see a `torch.distributions.Normal` or a softmax or a `sample()` call in ML code, you&rsquo;re reaching for one of these named families. Knowing which one to reach for — and being able to argue *why* — is the mark of an ML engineer who has this chapter internalized.
+
+</RealWorldML>
+
+<StudyDepth
+  intro={<>Distributions are the interface between the mathematical framework of probability and the practical work of ML modeling. Learn the shape of each family, its parameters and their effect, and the canonical uses. The Gaussian gets its own bullet because it&rsquo;s in every ML system.</>}
+  drill={[
+    <>Bernoulli(p), Binomial(n, p), Categorical(π), Poisson(λ) — the four discrete workhorses</>,
+    <>Gaussian 𝒩(μ, σ²) — PDF, 68–95–99.7 rule, linear combinations, standardization</>,
+    <>Multivariate Gaussian: covariance = axes and shape of the density ellipsoid</>,
+    <>Beta(α, β) as conjugate prior for Bernoulli/Binomial; Gamma as conjugate prior for Poisson rate and Gaussian precision</>,
+    <>Match distribution to data support: positive-only → Exponential/Gamma; [0, 1] → Beta; count → Poisson (check overdispersion)</>,
+    <>Every ML loss corresponds to a likelihood: MSE = Gaussian; Cross-entropy = Categorical; MAE = Laplace</>,
+  ]}
+  skim={[
+    <>Exponential family unification — beautiful theory, rarely needed for engineering</>,
+    <>Rare distributions (Weibull, Rayleigh, Chi-squared) — pick up when you need them, don&rsquo;t memorize now</>,
+    <>Advanced heavy-tailed distributions (Pareto, Cauchy, Student-t) — matter for risk and outliers, less for standard ML</>,
+  ]}
+/>
+
+<CodeItYourself title="Three drills — fitting, sampling, likelihood">
+
+1. **Fit each family to random data.** Generate 5000 samples from a mystery mixture (e.g., 70% 𝒩(0, 1) + 30% 𝒩(4, 0.5²)). Fit a single Gaussian, a single exponential, and a single Beta (after rescaling to [0, 1]) via `scipy.stats.<dist>.fit`. Compare log-likelihoods. Note: the single-Gaussian fit will be much worse than a two-component mixture would be — this is the everyday reality of "real data isn&rsquo;t any one distribution."
+
+2. **Beta prior updating.** You&rsquo;re modeling P(click) for a new ad. Prior: Beta(2, 8) (biased toward low CTR since most ads underperform). Observe 30 clicks in 200 impressions. Compute the posterior Beta(2 + 30, 8 + 200 − 30) = Beta(32, 178). Plot prior vs posterior — the posterior should be sharply peaked around 30/200 = 0.15. Try shrinking the prior to Beta(0.5, 0.5) and see how much wider the posterior gets.
+
+3. **Multivariate Gaussian conditional.** Generate 1000 samples from a 2D Gaussian with a positively-correlated covariance. Condition on X₁ = 1.0 (approximately — restrict to |X₁ − 1| &lt; 0.05). The conditional distribution of X₂ | X₁ = 1 should itself be Gaussian, with mean and variance predicted by the closed-form conditioning formula for jointly Gaussian variables. Verify by histogram.
+
+</CodeItYourself>
+
+<Summary>
+
+- **Discrete**: Bernoulli (single trial), Binomial (n trials), Categorical (K outcomes, LLM softmax), Poisson (rare event counts, mean = variance).
+- **Continuous**: Uniform (equal density), Exponential (memoryless waiting time), Beta (on [0, 1], conjugate prior for Bernoulli), Gamma (on [0, ∞), conjugate prior for Poisson rate and Gaussian precision).
+- **Gaussian 𝒩(μ, σ²)**: bell shape, 68–95–99.7 rule, linear combinations stay Gaussian, standardization Z = (X − μ)/σ.
+- **Multivariate Gaussian 𝒩(μ, Σ)**: Σ must be symmetric PD. Eigenvectors of Σ = principal axes; √eigenvalues = axis half-lengths. Marginalization by dropping rows/columns; conditioning is closed-form.
+- **Match distribution to data support and shape**: positive → Exp/Gamma, [0, 1] → Beta, count → Poisson, real-valued → Gaussian (or heavier-tailed if tails matter).
+- **Every ML loss is a likelihood**: MSE ↔ Gaussian, cross-entropy ↔ Categorical, MAE ↔ Laplace, Poisson-NLL ↔ Poisson.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>You flip a coin with P(heads) = 0.4 six times. What is the probability of getting exactly 3 heads?</>,
+      hint: <>This is Binomial(n = 6, p = 0.4). Use the formula P(X = k) = C(n, k) p^k (1 − p)^(n − k).</>,
+      answer: <>P(X = 3) = C(6, 3) · 0.4³ · 0.6³ = 20 · 0.064 · 0.216 = <b>0.2765</b>. <br /> Sanity check: E[X] = np = 2.4, so 3 is a bit above the mean but well within the typical range.</>,
+    },
+    {
+      difficulty: "easy",
+      q: <>Requests arrive at a server at 4 per second on average. What is P(exactly 6 requests in one second)? What is the variance of the count in one second?</>,
+      hint: <>Poisson(λ = 4). P(X = k) = λᵏ eᵏ / k! ... wait, correction: P(X = k) = λᵏ e^(−λ) / k!.</>,
+      answer: <>P(X = 6) = 4⁶ · exp(−4) / 6! = 4096 · 0.01832 / 720 = <b>0.1042</b>. <br /> For Poisson, Var(X) = λ = <b>4</b>. This "variance = mean" is the Poisson signature. If your log data has a much higher variance (say 12 with mean 4), it is overdispersed and Poisson is not the right model.</>,
+    },
+    {
+      difficulty: "medium",
+      q: <>X ~ 𝒩(10, 4). Compute P(X &gt; 13). Use the standard-normal CDF Φ.</>,
+      hint: <>Standardize: Z = (X − μ)/σ ~ 𝒩(0, 1). Compute Φ of the appropriate z.</>,
+      answer: <>σ = √4 = 2, so Z = (X − 10) / 2. Then <br /> P(X &gt; 13) = P(Z &gt; (13 − 10)/2) = P(Z &gt; 1.5) = 1 − Φ(1.5) ≈ 1 − 0.9332 = <b>0.0668</b>. <br /> About 6.7% of the mass lies above 13. This is roughly 1.5σ above the mean, and the 1σ region contains 68% of mass (so 32% outside, 16% on each side); 1.5σ is a bit further out.</>,
+    },
+    {
+      difficulty: "medium",
+      q: <>Show that the sum of two independent Gaussians is Gaussian with variance equal to the sum of variances.</>,
+      hint: <>Compute the moment generating function of X + Y as the product of individual MGFs. Or use the convolution of two Gaussian PDFs.</>,
+      answer: <>Let X ~ 𝒩(μ_X, σ_X²), Y ~ 𝒩(μ_Y, σ_Y²), independent. The MGF of X is M_X(t) = exp(μ_X t + σ_X² t² / 2), similarly for Y. Because X, Y are independent, <br /> M_{"{X+Y}"}(t) = M_X(t) · M_Y(t) = exp((μ_X + μ_Y) t + (σ_X² + σ_Y²) t² / 2). <br /> That is the MGF of a Gaussian with mean μ_X + μ_Y and variance σ_X² + σ_Y². Since the MGF uniquely determines the distribution: <br /> <b>X + Y ~ 𝒩(μ_X + μ_Y, σ_X² + σ_Y²).</b> ∎ <br /><br /> More generally, aX + bY ~ 𝒩(aμ_X + bμ_Y, a²σ_X² + b²σ_Y²). This linear-combination closure is one reason the Gaussian is so central to ML.</>,
+    },
+    {
+      difficulty: "hard",
+      q: <>You have a Beta(2, 3) prior for a click-through-rate. You observe 15 clicks in 50 impressions. Compute the posterior distribution and its mean.</>,
+      hint: <>Beta is the conjugate prior for Bernoulli/Binomial: prior Beta(α₀, β₀) + observed k successes in n trials → posterior Beta(α₀ + k, β₀ + n − k).</>,
+      answer: <>Prior: Beta(α₀ = 2, β₀ = 3). Observed k = 15 in n = 50. <br /> Posterior: Beta(2 + 15, 3 + 50 − 15) = <b>Beta(17, 38)</b>. <br /> Posterior mean = 17 / (17 + 38) = <b>17 / 55 ≈ 0.309</b>. <br /><br /> Compare to the maximum-likelihood estimate 15/50 = 0.30 (ignoring the prior) and the prior mean 2/5 = 0.40. The posterior mean 0.309 sits between the two, pulled slightly toward the prior because we had only 50 observations (α + β = 55 total &ldquo;equivalent samples&rdquo; in the posterior, of which 5 came from the prior). Adding more data (say 500 observations) would shrink the prior&rsquo;s influence.</>,
+    },
+    {
+      difficulty: "hard",
+      q: <>Consider a 2D multivariate Gaussian with mean (0, 0) and covariance Σ = [[4, 2], [2, 3]]. What are the principal axes of the density ellipsoid, and what are the axis half-lengths (in standard deviations)?</>,
+      hint: <>Eigendecompose Σ = VΛV^T. Columns of V are principal directions; sqrt(eigenvalues) are half-lengths.</>,
+      answer: <>Solve det(Σ − λI) = 0: <br /> (4 − λ)(3 − λ) − 4 = 0 → λ² − 7λ + 8 = 0 → λ = (7 ± √17) / 2. <br /> Numerically: λ₁ ≈ 5.56, λ₂ ≈ 1.44. <br /><br /> Eigenvectors: for λ₁ ≈ 5.56, solve (Σ − 5.56 I) v = 0. First-row equation: −1.56 v₁ + 2 v₂ = 0, so v ∝ (2, 1.56). Normalize: <b>v₁ ≈ (0.789, 0.615)</b>. For λ₂ ≈ 1.44: v ∝ (−1.56, 2), normalized ≈ (−0.615, 0.789). <br /><br /> Principal axes: v₁ ≈ (0.789, 0.615) with half-length √λ₁ ≈ <b>2.36</b>. v₂ ≈ (−0.615, 0.789) with half-length √λ₂ ≈ <b>1.20</b>. <br /><br /> Interpretation: the 1σ ellipse is elongated along direction v₁ (mostly along the diagonal) with half-length 2.36, and squeezed along v₂ (perpendicular) with half-length 1.20. This visualization is exactly what PCA plots look like for 2D Gaussian data.</>,
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "The LLM softmax over the vocabulary is a:",
+      choices: [
+        { text: "Bernoulli distribution" },
+        { text: "Categorical distribution over K = |V| tokens", correct: true },
+        { text: "Poisson distribution" },
+        { text: "Gaussian distribution" },
+      ],
+      explanation: <>Softmax(logits) produces a probability vector π_1, …, π_K with π_k ≥ 0 and Σ π_k = 1. That&rsquo;s a Categorical(π). Cross-entropy loss during training is the negative log-likelihood of this categorical: −log π_{"{true_token}"}.</>,
+    },
+    {
+      q: "For a Poisson(λ), the variance equals:",
+      choices: [
+        { text: "λ² (variance is mean squared)" },
+        { text: "λ (variance equals the mean)", correct: true },
+        { text: "1/λ (variance is inverse mean)" },
+        { text: "λ · (1 − λ) (Bernoulli-like)" },
+      ],
+      explanation: <>The Poisson has the &ldquo;mean = variance&rdquo; signature. If your count data has variance much larger than its mean (overdispersion), Poisson is the wrong model — use Negative Binomial instead.</>,
+    },
+    {
+      q: "For X ~ 𝒩(5, 9), the standard deviation is:",
+      choices: [
+        { text: "9" },
+        { text: "3", correct: true },
+        { text: "81" },
+        { text: "5" },
+      ],
+      explanation: <>The second parameter σ² = 9 is the variance. σ = √9 = 3 is the standard deviation. Remember: 𝒩(μ, σ²) uses variance as the second parameter, but some libraries (torch.distributions.Normal) use σ. Read documentation carefully.</>,
+    },
+    {
+      q: "The Beta distribution is a conjugate prior for:",
+      choices: [
+        { text: "The rate of a Poisson" },
+        { text: "The probability parameter of a Bernoulli or Binomial", correct: true },
+        { text: "The mean of a Gaussian" },
+        { text: "The scale of a Gamma" },
+      ],
+      explanation: <>Conjugate means the posterior is in the same family as the prior. For Bernoulli/Binomial data with a Beta(α, β) prior, the posterior is Beta(α + k, β + n − k) — closed-form and cheap. Gamma is the conjugate prior for the Poisson rate; Gaussian is its own conjugate prior for the mean (when variance is known).</>,
+    },
+    {
+      q: "The eigenvectors of the covariance matrix Σ of a multivariate Gaussian are:",
+      choices: [
+        { text: "Random directions" },
+        { text: "The principal axes of the density ellipsoid; √eigenvalues are the axis half-lengths", correct: true },
+        { text: "The mean vector μ" },
+        { text: "Always the coordinate axes" },
+      ],
+      explanation: <>The density level sets of a multivariate Gaussian are ellipsoids centered at μ. The eigendecomposition Σ = VΛV^T reveals the ellipsoid: columns of V are the principal directions, and √Λ_ii are the half-lengths in those directions. This is why PCA (eigendecomposition of an empirical covariance matrix) finds &ldquo;directions of maximum variance&rdquo; — it&rsquo;s literally reading off the axes of the fitted Gaussian.</>,
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/probability/distributions-catalog" title="A catalog of distributions" />

@@ -439,7 +439,7 @@ const tier1: Tier = {
             "Associativity, non-commutativity, distributivity",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "determinant-inverse",
@@ -453,7 +453,7 @@ const tier1: Tier = {
             "Numerical instability of the inverse in practice",
           ],
           priority: "mandatory",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "rank-nullspace",
@@ -467,7 +467,7 @@ const tier1: Tier = {
             "Rank as the effective dimension of a dataset",
           ],
           priority: "mandatory",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "eigenvectors-eigenvalues",
@@ -523,7 +523,7 @@ const tier1: Tier = {
             "Where PSD lurks: covariance, kernels, Hessians",
           ],
           priority: "mandatory",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "pca-from-linear-algebra",
@@ -537,7 +537,7 @@ const tier1: Tier = {
             "Explained variance & scree plots",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
       ],
     },
@@ -559,7 +559,7 @@ const tier1: Tier = {
             "Why numerical discontinuity matters in loss landscapes",
           ],
           priority: "mandatory",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "derivatives-single-var",
@@ -573,7 +573,7 @@ const tier1: Tier = {
             "Higher-order derivatives; concavity",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "chain-rule",
@@ -679,7 +679,7 @@ const tier1: Tier = {
             "Frequentist vs Bayesian readings",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "conditional-independence",
@@ -693,7 +693,7 @@ const tier1: Tier = {
             "Common paradoxes (Monty Hall, base rate)",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "bayes-theorem",
@@ -721,7 +721,7 @@ const tier1: Tier = {
             "Change of variables",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "expectation-variance",
@@ -735,7 +735,7 @@ const tier1: Tier = {
             "Covariance and correlation",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "distributions-catalog",
@@ -749,7 +749,7 @@ const tier1: Tier = {
             "Distribution family cheat-sheet",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "clt-lln",
@@ -763,7 +763,7 @@ const tier1: Tier = {
             "Consequences for ML sampling",
           ],
           priority: "mandatory",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "information-entropy",
@@ -799,7 +799,7 @@ const tier1: Tier = {
             "MLE as an ML objective",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "map-and-priors",
@@ -813,7 +813,7 @@ const tier1: Tier = {
             "Conjugate priors sneak peek",
           ],
           priority: "mandatory",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "hypothesis-testing",
@@ -827,7 +827,7 @@ const tier1: Tier = {
             "Multiple-comparison corrections",
           ],
           priority: "mandatory",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "confidence-bootstrap",
@@ -841,7 +841,7 @@ const tier1: Tier = {
             "When bootstrap breaks down",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "ab-testing-power",
@@ -855,7 +855,7 @@ const tier1: Tier = {
             "Bayesian A/B alternatives",
           ],
           priority: "mandatory",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "regression-diagnostics",
@@ -905,7 +905,7 @@ const tier1: Tier = {
             "Non-convex realities of neural networks",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "sgd-and-friends",
@@ -919,7 +919,7 @@ const tier1: Tier = {
             "The generalization value of noise",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "adaptive-optimizers",
@@ -933,7 +933,7 @@ const tier1: Tier = {
             "When plain SGD still wins",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "learning-rate-schedules",
@@ -947,7 +947,7 @@ const tier1: Tier = {
             "How to sanity-check your schedule",
           ],
           priority: "mandatory",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "constrained-optimization",
@@ -961,7 +961,7 @@ const tier1: Tier = {
             "Where this shows up (SVM, RLHF)",
           ],
           priority: "optional",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "second-order-methods",
@@ -975,7 +975,7 @@ const tier1: Tier = {
             "Cost vs benefit at LLM scale",
           ],
           priority: "optional",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "project-numpy-optimization",
@@ -1029,7 +1029,7 @@ const tier2: Tier = {
             "Interpretability of coefficients",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "logistic-regression",
@@ -1043,7 +1043,7 @@ const tier2: Tier = {
             "Multiclass extension (softmax)",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "regularization",
@@ -1057,7 +1057,7 @@ const tier2: Tier = {
             "Hyperparameter selection",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "bias-variance-tradeoff",
@@ -1071,7 +1071,7 @@ const tier2: Tier = {
             "Modern deep-learning wrinkle (double descent)",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "cross-validation",
@@ -1085,7 +1085,7 @@ const tier2: Tier = {
             "Nested CV for hyperparameter search",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "metrics-classification",
@@ -1099,7 +1099,7 @@ const tier2: Tier = {
             "Cost-sensitive thresholding",
           ],
           priority: "core",
-          status: "outline",
+          status: "written",
         },
         {
           slug: "metrics-regression",
@@ -1113,7 +1113,7 @@ const tier2: Tier = {
             "Residual analysis",
           ],
           priority: "mandatory",
-          status: "outline",
+          status: "written",
         },
       ],
     },

@@ -1,0 +1,476 @@
+---
+title: A/B testing & statistical power
+tier: 1
+phase: "1.5"
+---
+
+export const powerCurveCode = `# Power = P(reject H0 | H1 true).  It depends on effect size, sample size, and alpha.
+# Visualize power as a function of n for a fixed effect size.
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import norm
+rng = np.random.default_rng(0)
+
+def power_for_two_sample_z(n_per_arm, delta, sigma, alpha=0.05):
+    """
+    Power of a two-sided two-sample z-test for a difference of means.
+    delta = true difference between arms; sigma = pooled std dev per arm.
+    """
+    se = sigma * np.sqrt(2 / n_per_arm)
+    z_alpha = norm.ppf(1 - alpha / 2)
+    # Under H1, the test statistic Z ~ N(delta / se, 1); we reject if |Z| > z_alpha.
+    z_shift = delta / se
+    power = norm.cdf(z_shift - z_alpha) + norm.cdf(-z_shift - z_alpha)
+    return power
+
+sigma = 1.0
+delta = 0.2   # detect a 0.2 unit lift
+
+# Plot power vs sample size per arm.
+ns = np.arange(20, 1500, 20)
+powers = [power_for_two_sample_z(n, delta, sigma) for n in ns]
+
+fig, ax = plt.subplots(figsize=(6.4, 3.6), facecolor="none")
+ax.set_facecolor("#0f0f14")
+ax.plot(ns, powers, color="#c4f04b", lw=2)
+ax.axhline(0.8, color="#f5cf3d", ls="--", label="80% power target")
+ax.axhline(0.05, color="#8a8a82", ls=":", label="alpha (type I error)")
+ax.set_xlabel("n per arm", color="#dcdcd6")
+ax.set_ylabel("power", color="#dcdcd6")
+ax.set_title(f"Power curve for detecting delta = {delta} at alpha = 0.05", color="#dcdcd6")
+ax.legend(facecolor="#181820", edgecolor="#2a2a35", labelcolor="#dcdcd6")
+ax.tick_params(colors="#dcdcd6")
+for spine in ax.spines.values():
+    spine.set_color("#2a2a35")
+plt.tight_layout()
+plt.show()
+
+# Find the smallest n giving 80% power.
+target = 0.80
+n_needed = next(n for n, p in zip(ns, powers) if p >= target)
+print(f"Smallest n per arm giving >= 80% power: {n_needed}")`;
+
+export const sampleSizeCode = `# Sample-size formula for two-sample z-test:
+#   n per arm ~ (z_alpha/2 + z_beta)^2 * (sigma_C^2 + sigma_T^2) / delta^2
+# For pooled equal variances sigma^2: n ~ 2 * sigma^2 * (z_alpha/2 + z_beta)^2 / delta^2.
+import numpy as np
+from scipy.stats import norm
+
+def n_per_arm(delta, sigma, alpha=0.05, power=0.80, two_sided=True):
+    z_a = norm.ppf(1 - alpha / 2) if two_sided else norm.ppf(1 - alpha)
+    z_b = norm.ppf(power)
+    n = ((z_a + z_b) ** 2) * 2 * sigma ** 2 / delta ** 2
+    return int(np.ceil(n))
+
+# Various effect sizes for the same variance.
+sigma = 1.0
+print(f"{'Delta':>10}  {'n per arm (80% power, 5% alpha)':>35}")
+for delta in [0.10, 0.20, 0.30, 0.50, 1.00]:
+    n = n_per_arm(delta, sigma)
+    print(f"{delta:>10.2f}  {n:>35}")
+
+# For proportion tests (Bernoulli), sigma^2 = p*(1-p).  Use p = baseline for planning.
+print("\\nProportion test (baseline p = 0.10, target detect absolute lift delta_p):")
+p0 = 0.10
+for delta_p in [0.005, 0.01, 0.02, 0.05]:
+    var_per_arm = p0 * (1 - p0)   # rough conservative estimate; more accurate uses both p0 and p1
+    n = int(np.ceil((norm.ppf(0.975) + norm.ppf(0.80)) ** 2 * 2 * var_per_arm / delta_p ** 2))
+    print(f"  delta_p = {delta_p}: n per arm = {n}")
+
+print("\\nRule of thumb: halving delta requires 4x more samples (n scales as 1/delta^2).")`;
+
+export const peekingCode = `# Peeking: repeatedly looking at the running A/B test and stopping when p < alpha.
+# This dramatically inflates the Type I error rate.  Simulate to see.
+import numpy as np
+from scipy.stats import norm
+rng = np.random.default_rng(0)
+
+alpha = 0.05
+z_alpha = norm.ppf(1 - alpha / 2)
+
+# Scenario: control and treatment are actually identical (H0 true).  Draw one sample at a time
+# and, after each new sample, run a z-test.  Stop as soon as p < 0.05.
+def one_peeking_experiment(max_n=5000):
+    """Return True if the experiment ever crossed the significance threshold."""
+    z_score = 0.0
+    n_c, n_t = 0, 0
+    sum_c, sum_t = 0.0, 0.0
+    sq_c, sq_t = 0.0, 0.0
+    for i in range(1, max_n + 1):
+        # Draw one from each arm.
+        x_c = rng.normal(0, 1)
+        x_t = rng.normal(0, 1)   # SAME distribution -- H0 true
+        n_c += 1; n_t += 1
+        sum_c += x_c; sum_t += x_t
+        sq_c += x_c ** 2; sq_t += x_t ** 2
+        if i < 30:   # skip early where estimates are noisy
+            continue
+        # Compute two-sample z-statistic.
+        m_c = sum_c / n_c; m_t = sum_t / n_t
+        v_c = (sq_c - n_c * m_c ** 2) / (n_c - 1)
+        v_t = (sq_t - n_t * m_t ** 2) / (n_t - 1)
+        se = np.sqrt(v_c / n_c + v_t / n_t)
+        z = (m_t - m_c) / se
+        if abs(z) > z_alpha:
+            return True
+    return False
+
+# How often does peeking find "significance" even under H0?
+n_experiments = 500
+false_pos = sum(one_peeking_experiment() for _ in range(n_experiments))
+print(f"Under H0, peeking-based tests found significance in {false_pos} / {n_experiments} experiments")
+print(f"Effective false-positive rate: {false_pos / n_experiments * 100:.1f}%")
+print(f"Nominal alpha: {alpha * 100:.0f}%")
+print("\\nPeeking inflates the FP rate from 5% to 30-40% or worse.")
+print("Fixes: fixed-horizon test, group-sequential methods, or Bayesian monitoring.")`;
+
+export const bayesianABCode = `# Bayesian A/B test: place a Beta prior on each arm's conversion rate, update to
+# posterior Beta after data, and compute P(treatment > control) directly.
+# No p-value peeking issue because probabilities monotonically update.
+import numpy as np
+from scipy.stats import beta as beta_dist
+import matplotlib.pyplot as plt
+rng = np.random.default_rng(0)
+
+# True conversion rates.
+true_p_c = 0.10
+true_p_t = 0.12    # 2 percentage-point absolute lift (20% relative)
+
+# Prior: Beta(1, 1) = Uniform.  Weakly informative.
+alpha_c, beta_c = 1, 1
+alpha_t, beta_t = 1, 1
+
+# Simulate the experiment; check P(treatment > control) at each checkpoint.
+checkpoints = [50, 200, 500, 2000, 5000]
+n_max = max(checkpoints)
+control_hits, treatment_hits = 0, 0
+
+for n in range(1, n_max + 1):
+    if rng.binomial(1, true_p_c): control_hits += 1
+    if rng.binomial(1, true_p_t): treatment_hits += 1
+    if n in checkpoints:
+        # Posteriors.
+        alpha_c_post = alpha_c + control_hits;   beta_c_post = beta_c + (n - control_hits)
+        alpha_t_post = alpha_t + treatment_hits; beta_t_post = beta_t + (n - treatment_hits)
+        # P(p_t > p_c) via Monte Carlo from the two posteriors.
+        n_mc = 10_000
+        samples_c = beta_dist.rvs(alpha_c_post, beta_c_post, size=n_mc)
+        samples_t = beta_dist.rvs(alpha_t_post, beta_t_post, size=n_mc)
+        p_t_gt_c = (samples_t > samples_c).mean()
+        # 95% credible intervals on each arm.
+        lo_c, hi_c = beta_dist.ppf([0.025, 0.975], alpha_c_post, beta_c_post)
+        lo_t, hi_t = beta_dist.ppf([0.025, 0.975], alpha_t_post, beta_t_post)
+        print(f"n per arm = {n:>5}: control = [{lo_c:.4f}, {hi_c:.4f}], treatment = [{lo_t:.4f}, {hi_t:.4f}], P(t > c) = {p_t_gt_c:.4f}")
+
+print("\\nP(treatment > control) directly answers the business question.")
+print("You can stop whenever it crosses your decision threshold (e.g., 95%) -- no correction needed.")`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/statistics/hypothesis-testing", label: "Hypothesis testing done honestly", blurb: "This chapter operationalizes hypothesis testing for A/B experiments; you need Type I / II errors and p-value machinery first." },
+  { href: "/learn/mathematics/statistics/confidence-bootstrap", label: "Confidence intervals & the bootstrap", blurb: "CIs are the effect-size uncertainty companion to p-values in every A/B decision." },
+]} />
+
+<NewConcepts
+  concepts={[
+    { name: "Group-sequential methods (O'Brien–Fleming, Pocock)", blurb: "test designs that pre-specify k peek times with adjusted α at each look. The classical fix for peeking without inflating Type I error." },
+    { name: "Always-valid p-values / e-values (Howard, Ramdas)", blurb: "modern methods that give valid statistical inference under arbitrary continuous monitoring; used by Netflix, LinkedIn, and others." },
+    { name: "Multi-armed bandits (Thompson sampling, UCB)", blurb: "adaptive experiment designs that route traffic toward promising arms while still exploring. Trades off exploration and exploitation." },
+    { name: "Delta method (for ratio metrics)", blurb: "the Taylor-expansion technique used to compute SEs of ratios like clicks-per-user. Naive t-tests on ratios are often wrong; the delta method fixes them." },
+    { name: "Sample Ratio Mismatch (SRM)", blurb: "a design-integrity check: if your intended 50/50 split doesn't match the observed split with high confidence, your experiment is broken. Standard practice at every serious A/B platform." },
+    { name: "Simpson's paradox", blurb: "the phenomenon where an aggregate treatment effect reverses direction when you disaggregate by segment. Always analyze segments in addition to the pooled result." },
+  ]}
+/>
+
+<Motivation title="A/B testing turns statistics into shipping decisions — done wrong, it ships noise as improvements">
+
+Every experiment you run to compare two versions of a system — new prompt vs old, new model vs baseline, new RAG configuration vs current — is an A/B test. The math is the two-sample hypothesis testing from the previous chapter; the *practice* is where things get subtle:
+
+- **Sample-size planning**: how many users / examples / interactions do you need to reliably detect a lift of a given size?
+- **Power**: is your test big enough that a real effect would show up? If power is low, non-significant results tell you nothing.
+- **Peeking traps**: stopping when p &lt; 0.05 inflates your effective false-positive rate. Design of the experiment matters as much as the analysis.
+- **Bayesian alternatives**: for continuous monitoring, Bayesian A/B tests are cleaner than frequentist ones because posterior probabilities update monotonically.
+
+For a GenAI engineer, three concrete uses:
+
+- **Deciding whether to ship a prompt change**. Prompt A gives baseline conversion, prompt B is candidate. You need enough traffic to distinguish them with high probability; too little traffic = ambiguous result = another week&rsquo;s wait.
+- **Comparing models on internal benchmarks**. Model A gets 82.1%, model B gets 82.4% on 500 eval examples. Is that real? Sample-size and power analysis before rolling out.
+- **RLHF preference collection**. How many pairwise preferences do you need to distinguish a good reward-model update from noise? Same math.
+
+This chapter completes the &ldquo;statistics for A/B&rdquo; toolkit: power curves, sample-size formulas, sequential/peeking-safe designs, and Bayesian alternatives that solve the peeking problem outright.
+
+</Motivation>
+
+<Intuition title="Power = 'if there is a real effect, how likely am I to catch it?' — a function of sample size and effect size">
+
+Power is P(reject H₀ | H₁ true). It answers &ldquo;if the treatment truly works, what&rsquo;s the chance my test detects it?&rdquo; Three factors move it:
+
+- **Sample size n**: more data → smaller SE → higher power.
+- **Effect size Δ**: bigger effect → more visible → higher power.
+- **Significance level α**: more permissive threshold → higher power (at cost of more false positives).
+
+Standard target: power ≥ 0.80. That means &ldquo;if the treatment works by our specified effect size, we catch it 80% of the time.&rdquo; If your test has 30% power, you&rsquo;ll miss most real effects — non-significance is nearly meaningless.
+
+**Sample-size planning** works backward from the required power. Given (target effect size Δ, variance σ², α, target power 1 − β), compute the smallest n giving that power. Do this *before* the experiment.
+
+The **peeking problem**: if you keep looking at a running test and stop when p &lt; 0.05, you turn a 5% single-look false-positive rate into a much higher effective rate. This is not a subtle problem; it&rsquo;s a first-year statistics violation that produces most of the &ldquo;experiments that mysteriously don&rsquo;t replicate&rdquo; in industry.
+
+</Intuition>
+
+<Recall term="Type I / Type II errors">
+
+Type I: reject H₀ when it&rsquo;s true (false positive). Rate = α, set by the analyst. Type II: fail to reject H₀ when it&rsquo;s false (miss a real effect). Rate = β, depends on n and effect size. Power = 1 − β = probability of catching a real effect.
+
+</Recall>
+
+## Power in one picture
+
+Given control and treatment with equal variance σ² and true mean difference Δ, the two-sample z-test statistic under H₁ has distribution 𝒩(Δ/SE, 1) where SE = σ · √(2/n). We reject if |Z| &gt; z_(α/2). So:
+
+$$
+\text{Power} \;=\; P(|Z| > z_{\alpha/2}) \;=\; \Phi(z_{\text{shift}} - z_{\alpha/2}) + \Phi(-z_{\text{shift}} - z_{\alpha/2})
+$$
+
+where z_shift = Δ / SE = Δ · √(n / (2σ²)). This function grows with n (for fixed Δ) and grows with Δ (for fixed n). A common target is 80% power at a specified effect size.
+
+<RunnableCode title="Power vs sample size — where the '80% at n' curve lives" code={powerCurveCode} packages={["numpy", "scipy", "matplotlib"]} />
+
+## Sample-size formulas — plan before you run
+
+For a two-sided two-sample z-test (or t-test with large n) with equal per-arm variance σ²:
+
+$$
+n_{\text{per arm}} \;\approx\; \frac{(z_{\alpha/2} + z_\beta)^2 \cdot 2\sigma^2}{\Delta^2}
+$$
+
+Substituting standard values (α = 0.05 → z_(α/2) ≈ 1.96, power 0.80 → z_β ≈ 0.84):
+
+$$
+n_{\text{per arm}} \;\approx\; \frac{(1.96 + 0.84)^2 \cdot 2\sigma^2}{\Delta^2} \;\approx\; \frac{15.7 \sigma^2}{\Delta^2}.
+$$
+
+Halving Δ (detecting a smaller lift) **quadruples** the required n. Detecting a 1% lift at 80% power in a Bernoulli test with baseline 10% needs about 15,700 samples per arm. Detecting a 0.5% lift needs 62,800 per arm.
+
+For **proportion tests** (Bernoulli), σ² = p(1 − p). Practical rule for A/B on conversions:
+
+$$
+n_{\text{per arm}} \;\approx\; \frac{16 \cdot p(1-p)}{\Delta^2}
+$$
+
+for α = 0.05 and 80% power.
+
+<RunnableCode title="Sample-size formulas for continuous and proportion tests" code={sampleSizeCode} packages={["numpy", "scipy"]} />
+
+## The peeking trap and how to avoid it
+
+Suppose you plan an A/B test for n = 5,000 per arm but check the running p-value each day. If, on any day, p &lt; 0.05, you stop and declare victory.
+
+This is a classic garden-path violation. The reason: each &ldquo;peek&rdquo; is a potential rejection opportunity. Under H₀, the running test statistic wanders — sometimes crossing the ±1.96 threshold by chance even when there&rsquo;s no true effect. Given enough peeks, you *will* find a spurious crossing.
+
+Concrete: continuous peeking with a naive test on Gaussian data under H₀ produces an effective false-positive rate of ~30–40% instead of 5%. That&rsquo;s a 6–8× inflation of Type I error.
+
+<RunnableCode title="Peeking under H0: nominal 5% alpha becomes ~30% empirical FP rate" code={peekingCode} packages={["numpy", "scipy"]} />
+
+**Fixes**:
+
+- **Fixed-horizon test**: pre-commit to a sample size. Look ONCE at the end. Simple and correct but requires patience.
+- **Group-sequential methods**: pre-specify k peek times and use tighter significance thresholds at each peek. O&rsquo;Brien–Fleming and Pocock boundaries are canonical designs. Maintains overall FWER at α.
+- **Always-valid p-values / e-values**: modern methods (Howard, Ramdas, and collaborators) that give valid inference under arbitrary continuous monitoring. Practical for real-time A/B testing.
+- **Bayesian monitoring**: switch to Bayesian A/B testing where the posterior probability of &ldquo;treatment better&rdquo; is monitored. No peeking problem (see below).
+
+## Bayesian A/B: posteriors that don&rsquo;t care about peeking
+
+Instead of computing a p-value, formulate the test Bayesianly:
+
+- Prior on each arm&rsquo;s conversion rate: Beta(α, β) (usually Beta(1, 1) = Uniform).
+- Update to posterior with observed data: control ~ Beta(α + k_C, β + n_C − k_C), similarly treatment.
+- Compute P(p_T &gt; p_C | data) via Monte Carlo from the two Beta posteriors.
+- Decision rule: ship treatment if P(p_T &gt; p_C) &gt; 0.95 (or some business-appropriate threshold).
+
+**Why peeking is safe under Bayes**: the posterior updates monotonically as data accumulates. There&rsquo;s no &ldquo;multiple looks&rdquo; inflating error rate. If you continuously monitor and stop the first time the posterior crosses 95%, you get exactly the &ldquo;this experiment shows 95% posterior evidence of a lift&rdquo; interpretation — no correction needed.
+
+**Trade-off**: the Bayesian answer depends on the prior. A skeptical prior (Beta(20, 100)) will require more data to shift the posterior; a flat prior (Beta(1, 1)) accepts weaker evidence. In practice, industrial Bayesian A/B systems use lightly informative priors calibrated to historical baseline rates.
+
+<RunnableCode title="Bayesian A/B test — posterior probability of lift updates monotonically" code={bayesianABCode} packages={["numpy", "scipy", "matplotlib"]} />
+
+## Design of experiments — beyond A/B
+
+Standard A/B is the simplest randomized experiment. Real production experimentation often needs more:
+
+- **A/B/C/… tests** with multiple treatments. Requires multiple-comparison correction (Bonferroni or FDR) to control error rate across arms.
+- **Factorial designs**: test multiple factors simultaneously (say, prompt A vs B AND retrieval strategy X vs Y). Compact way to test interactions.
+- **Multi-armed bandits**: adaptively route more traffic to promising arms. Trades off exploration and exploitation. Used for continuous optimization (Thompson sampling, UCB).
+- **Interleaving**: instead of showing user group A one system and group B the other, interleave results from both systems within one user&rsquo;s experience. Higher statistical power because each user contributes to both arms; used in search-ranking evaluation.
+- **Segmentation and heterogeneous treatment effects**: some users respond, others don&rsquo;t. Test-level averages hide this. Segmentation analysis or causal-inference methods estimate treatment effects per segment.
+
+Every serious ML deployment framework has infrastructure for one or more of these. Statistical foundations are the same; the twist is the experimental design.
+
+## The traps that matter
+
+**Design first, analyze second.** Compute required sample size *before* running the experiment. Don&rsquo;t adjust n post-hoc.
+
+**Power without effect size assumptions is meaningless.** &ldquo;80% power&rdquo; needs a target effect size to be quoted. Different effect-size choices give wildly different n.
+
+**Peeking without correction is a bug, not a shortcut.** If you monitor daily and stop early, apply group-sequential or always-valid methods, or use Bayes.
+
+**Novelty effects and time-of-day**: A/B users behave differently in the first day (novelty) vs the fifth day (steady state). Run long enough to see steady state. Include a warm-up period in analysis if needed.
+
+**External validity**: an A/B on 1% of your users during a specific time may not generalize to the full population. Segment and check.
+
+**Simpson&rsquo;s paradox in aggregation**: pooling data across arms and segments can reverse the aggregate direction. Analyze by segment or use causal-inference methods.
+
+**Ratio metrics (delta method vs bootstrap)**. Common web metrics like &ldquo;clicks per user&rdquo; are ratios, not raw counts. Their SE requires the delta method or a bootstrap; naive t-tests on ratios can be badly wrong.
+
+**Sample ratio mismatch (SRM)**. If your control/treatment split is 50/50 by design but the observed split is 51/49 with high confidence, something is wrong with your randomization or bucketing. Check SRM before trusting downstream results.
+
+<RealWorldML title="A/B testing in modern ML deployment: from prompt shipping to LLM evaluation">
+
+**Shipping an LLM prompt change**. You&rsquo;ve tried a new system prompt on internal eval; it looks like a 3% improvement in helpfulness. To ship, you run a production A/B for a week: 50k users each arm, primary metric = 1–5 star rating. Sample-size planning: at baseline σ ≈ 1 and target Δ = 0.05 stars, you need roughly 16 · 1 / 0.05² ≈ 6,400 users per arm — easy at production scale. After the week, welch t-test gives p = 0.003 with observed lift 0.07 ± 0.02. Ship.
+
+**Comparing two LLMs on a static benchmark**. Model A: 82.1% on 500 examples. Model B: 82.4% on same 500 examples. Compute paired accuracy differences with bootstrap CI. If the CI includes 0 (which it almost certainly does at n = 500 for a 0.3% lift), you cannot claim B is better. Bigger eval set needed, or accept the honest &ldquo;within noise&rdquo; conclusion.
+
+**RLHF preference collection**. To fine-tune a reward model, you collect pairwise preferences. Sample-size planning tells you how many preferences per baseline-vs-candidate comparison you need to distinguish quality reliably. For a 5% win-rate lift with baseline 50% (near-tie), you need approximately 16 · 0.25 / 0.05² ≈ 1600 pairs per candidate.
+
+**Continuous monitoring for prompt-injection detection**. You&rsquo;re monitoring the rate of prompt-injection attacks on your API. This is not a designed A/B test — you&rsquo;re observing a stream and want to detect changes. Use SPC (statistical process control) or online change-point detection instead of a fixed-horizon test.
+
+**Feature flags and gradual rollouts**. Big-tech deployment: flip a feature flag to 1% of users, then 10%, then 100%. Each step is (implicitly) an A/B compared to prior state. Modern experimentation platforms (Netflix XP, Meta Deltoid, Split, LaunchDarkly) automate the analysis. Understanding the statistics keeps you from getting fooled by the automated report.
+
+**Bayesian A/B in industry**. Netflix, Booking.com, Shopify, and others use variants of Bayesian A/B testing in production. It handles peeking, handles heterogeneous priors, and gives intuitive probabilistic answers to stakeholders (&ldquo;95% chance treatment is better&rdquo; is a more digestible statement than &ldquo;p = 0.03 on a two-sample z-test with Welch correction&rdquo;). Every ML engineer working on user-facing deployment should understand both frameworks.
+
+</RealWorldML>
+
+<StudyDepth
+  intro={<>A/B testing is where statistics meets shipping decisions. Master power / sample size / peeking traps, and you&rsquo;ll know exactly how much data you need — and won&rsquo;t get fooled by noise dressed up as improvements.</>}
+  drill={[
+    <>Power = P(reject H₀ | H₁ true). Target: 80% at specified effect size</>,
+    <>Sample-size formula: n per arm ≈ 16 · σ² / Δ² for α = 0.05 and 80% power</>,
+    <>Halving Δ quadruples required n (n scales as 1/Δ²) — detecting small effects is expensive</>,
+    <>Peeking + stop-on-significance without correction inflates FP rate from 5% to ~30%</>,
+    <>Fixes: fixed-horizon, group-sequential (O'Brien-Fleming, Pocock), always-valid p-values, or Bayesian monitoring</>,
+    <>Bayesian A/B: P(treatment better | data) updates monotonically — no peeking problem</>,
+  ]}
+  skim={[
+    <>Full group-sequential design theory (O'Brien-Fleming boundaries, alpha spending) — for statisticians, use libraries</>,
+    <>Multi-armed bandits (Thompson sampling, UCB) — separate topic in RL/decision theory</>,
+    <>Delta method for ratio metrics — needed for click-through rates in web A/B, look up when needed</>,
+  ]}
+/>
+
+<CodeItYourself title="Three drills — sample size, peeking simulation, Bayesian A/B on a small dataset">
+
+1. **Sample size for a Bernoulli A/B.** You want to detect a 1% absolute lift in a 5% baseline conversion rate at α = 0.05, 80% power. Compute n per arm using the formula n ≈ 16 · p(1 − p) / Δ² (with p = baseline). Then simulate 500 experiments at that n where the true lift is exactly 1%. Empirical power should be about 80%.
+
+2. **Peeking under H₀.** Simulate two-sample z-tests where control and treatment have IDENTICAL distributions (H₀ true). At each step from n = 30 to n = 2000, compute the running p-value. Stop when p &lt; 0.05 (or reach n = 2000 without rejecting). Repeat 500 times. Fraction of experiments that ever crossed p &lt; 0.05 should be much larger than 5% — showing peeking&rsquo;s Type I inflation.
+
+3. **Bayesian A/B on a small experiment.** Control: 20 conversions in 200 users. Treatment: 30 conversions in 200 users. Compute posterior Beta distributions (Beta(1,1) priors). Sample 10,000 points from each posterior; compute the fraction where treatment sample &gt; control sample. This is your posterior P(treatment better). Compare to a frequentist two-proportion z-test on the same data.
+
+</CodeItYourself>
+
+<Summary>
+
+- **A/B testing** decides whether a change is worth shipping. Power / sample size / peeking are the operational concerns.
+- **Power** = 1 − β = P(reject H₀ | H₁ true). Standard target 0.80 at a specified effect size.
+- **Sample size formula**: n per arm ≈ 16 · σ² / Δ² for α = 0.05, 80% power. Halving Δ requires 4× more data.
+- **Peeking** with stop-on-significance inflates FP rate from 5% to 30–40%. Fixes: fixed-horizon, group-sequential, always-valid p-values, or Bayesian monitoring.
+- **Bayesian A/B**: prior + posterior gives P(treatment better | data), updates monotonically, safe under peeking.
+- **Advanced designs**: A/B/C, factorial, bandits, interleaving, segmentation — all rest on the same statistical foundations.
+- **Practical traps**: SRM (sample ratio mismatch), novelty effects, Simpson&rsquo;s paradox, ratio metrics needing delta method or bootstrap.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>Compute the sample size per arm to detect an absolute lift of 2% in a conversion rate around 10% at 80% power and 5% two-sided significance.</>,
+      hint: <>n ≈ 16 · p(1 − p) / Δ² with p = 0.10 and Δ = 0.02.</>,
+      answer: <>n ≈ 16 · 0.10 · 0.90 / 0.02² = 16 · 0.09 / 0.0004 = 1.44 / 0.0004 = <b>3600 per arm</b>. <br /><br /> Sanity check with the precise formula: (1.96 + 0.84)² · 2 · 0.09 / 0.0004 ≈ 7.84 · 0.18 / 0.0004 ≈ 3528. Close to 3600. Both formulas agree to within a few percent.</>,
+    },
+    {
+      difficulty: "easy",
+      q: <>An A/B test has power 0.50 at the target effect size. Explain what that means and what you should do.</>,
+      hint: <>Power is the probability of detecting a real effect. 0.50 is a coin flip.</>,
+      answer: <>Power 0.50 means: <b>if the true effect equals the target, we&rsquo;d find it significant only 50% of the time</b>. Half of real effects would go undetected. <br /><br /> Consequences: non-significant results are nearly meaningless — you can&rsquo;t distinguish &ldquo;no effect&rdquo; from &ldquo;you missed a real effect.&rdquo; <br /><br /> Fix: <b>increase sample size</b> until power reaches at least 0.80. Standard target. If you can&rsquo;t collect more data, redesign the test (a within-subject design, better metric, longer duration) to increase effective statistical power. If you must publish an underpowered result, be honest about it in the caveats.</>,
+    },
+    {
+      difficulty: "medium",
+      q: <>Why does halving the target effect size Δ require 4× the sample size (not 2×)?</>,
+      hint: <>Look at where Δ appears in the sample-size formula.</>,
+      answer: <>Sample-size formula: n ∝ 1 / Δ². <br /><br /> If Δ → Δ/2, then 1/Δ² → 4/Δ². Sample size grows by a factor of 4. <br /><br /> Intuition: smaller effects are harder to distinguish from noise. SE of the difference of means scales as 1/√n, so to detect a signal Δ/2 at the same signal-to-noise ratio, you need SE to shrink by a factor of 2 — which requires n to grow by 4×. <br /><br /> Practical consequence: detecting a 0.5% lift requires 4× the data of a 1% lift, 16× the data of a 2% lift, and so on. Small lifts on core metrics can take weeks of traffic to distinguish from noise, which is why detecting tiny effects is expensive.</>,
+    },
+    {
+      difficulty: "medium",
+      q: <>Explain in one paragraph why peeking + stop-on-significance inflates the Type I error rate.</>,
+      hint: <>Each look is an opportunity to reject; probabilities compound.</>,
+      answer: <>Each &ldquo;peek&rdquo; at a running test is a separate chance to reject H₀. Under H₀, the running test statistic wanders randomly; over time it may cross the ±1.96 threshold by chance even without a real effect. If you stop the first time p &lt; 0.05, you&rsquo;re guaranteed to reject if the statistic ever wanders across — the probability of doing so at least once grows toward 1 as you keep looking. <br /><br /> Concrete: 5 peeks at α = 0.05 has empirical FP rate approximately 1 − 0.95⁵ ≈ 0.23. Continuous monitoring pushes it toward 0.3–0.4. So peeking-based tests can produce &ldquo;discoveries&rdquo; with roughly 30% false-positive rate instead of the nominal 5%. <br /><br /> This is one of the most common sources of &ldquo;experiments that don&rsquo;t replicate&rdquo; in industry — teams look at running dashboards, stop when the number looks good, and ship what turns out to be noise. Fixes: fixed-horizon tests, group-sequential methods, or Bayesian monitoring.</>,
+    },
+    {
+      difficulty: "hard",
+      q: <>You&rsquo;re running an A/B test with 100 users per arm and want to design a Bayesian A/B analysis with Beta(2, 20) prior for both arms (skeptical prior — you a priori believe conversion is low). After the test, control had 8 conversions and treatment had 15. Compute (a) posterior distributions, (b) posterior means, (c) an approximate P(treatment &gt; control) via Monte Carlo (sketch the algorithm).</>,
+      hint: <>Beta + Bernoulli conjugate updating. Draw from each posterior and count.</>,
+      answer: <>(a) Posteriors: <br /> Control: Beta(2 + 8, 20 + 92) = <b>Beta(10, 112)</b>. <br /> Treatment: Beta(2 + 15, 20 + 85) = <b>Beta(17, 105)</b>. <br /><br /> (b) Posterior means: <br /> Control: 10 / (10 + 112) = 10/122 ≈ <b>0.082</b> (8.2%). <br /> Treatment: 17 / (17 + 105) = 17/122 ≈ <b>0.139</b> (13.9%). <br /><br /> (c) Monte Carlo P(treatment &gt; control): <br /> ```python<br /> from scipy.stats import beta as beta_dist<br /> import numpy as np<br /> samples_c = beta_dist.rvs(10, 112, size=100_000)<br /> samples_t = beta_dist.rvs(17, 105, size=100_000)<br /> p_t_gt_c = (samples_t &gt; samples_c).mean()<br /> ``` <br /> Numerically this should give P(treatment &gt; control) ≈ 0.90–0.93. Not quite the 95% threshold for automatic shipping — you might want more data or accept lower confidence. Business tradeoff, not a fixed rule.</>,
+    },
+    {
+      difficulty: "hard",
+      q: <>Explain why a Bayesian A/B test does NOT suffer from the peeking problem, unlike a frequentist test.</>,
+      hint: <>Think about what the Bayesian posterior does when new data arrives.</>,
+      answer: <>Frequentist p-values are designed for <b>one look at the data</b>. Multiple looks combined with an early-stopping rule inflate the Type I error rate because the running statistic can wander into the rejection region by chance. <br /><br /> Bayesian posteriors are designed to <b>update sequentially and monotonically</b>. Each new data point applies Bayes&rsquo; rule: posterior_new ∝ posterior_old · likelihood. If you monitor the posterior and stop when P(θ ∈ region | data) &gt; 0.95, that statement is TRUE at every moment — it doesn&rsquo;t depend on when you looked or how often. <br /><br /> There is no analog of &ldquo;false positive rate from multiple looks&rdquo; because the Bayesian quantity is a probability about the parameter given the current data, not a probability derived under a hypothetical null. <br /><br /> Caveat: this is not quite &ldquo;free lunch.&rdquo; The Bayesian answer depends on the prior — a weak prior gives faster convergence but more sensitivity to noisy early data. And &ldquo;posterior &gt; 0.95&rdquo; is a business decision threshold, not a formal Type I error guarantee. But operationally, Bayesian monitoring is safe under peeking and is why many industrial A/B systems (Booking.com, Netflix, Shopify) use it.</>,
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "The power of a hypothesis test is:",
+      choices: [
+        { text: "The probability of a false positive (Type I error)" },
+        { text: "The probability of correctly rejecting H₀ when H₁ is true", correct: true },
+        { text: "The p-value" },
+        { text: "The effect size" },
+      ],
+      explanation: <>Power = 1 − β = P(reject H₀ | H₁ true). It measures your test&rsquo;s ability to detect a real effect. Standard target: 0.80. Low-power tests miss real effects and produce non-significant results even when the effect is real.</>,
+    },
+    {
+      q: "The sample size required to detect an effect at a given power scales as:",
+      choices: [
+        { text: "1 / effect_size (linear)" },
+        { text: "1 / effect_size² (quadratic — halving the target effect quadruples n)", correct: true },
+        { text: "log(effect_size)" },
+        { text: "It doesn&rsquo;t depend on effect size" },
+      ],
+      explanation: <>n ~ 1/Δ² in the standard sample-size formulas. Halving the target lift requires 4× the data. Detecting tiny effects is expensive; detecting big ones is cheap. This is the fundamental economics of experimentation.</>,
+    },
+    {
+      q: "Peeking at a running A/B test and stopping when p &lt; 0.05 (without correction):",
+      choices: [
+        { text: "Is fine because p &lt; 0.05 still means p &lt; 0.05" },
+        { text: "Dramatically inflates the effective false-positive rate, potentially to 30% or more", correct: true },
+        { text: "Only inflates the false-negative rate, not the false-positive rate" },
+        { text: "Is only a problem for very small n" },
+      ],
+      explanation: <>Each peek is a chance to reject; probabilities compound. Uncorrected peeking with continuous monitoring can push the empirical Type I error rate from 5% to 30–40%. Fix with group-sequential methods, always-valid p-values, or Bayesian monitoring.</>,
+    },
+    {
+      q: "In a Bayesian A/B test, P(treatment better than control | data) is:",
+      choices: [
+        { text: "Equivalent to a frequentist p-value" },
+        { text: "A posterior probability that requires a prior; safe to monitor continuously without correction", correct: true },
+        { text: "Only computable via the bootstrap" },
+        { text: "Always equal to 0.5 under H₀" },
+      ],
+      explanation: <>Bayesian A/B computes a direct posterior probability from the data (using a prior). It updates monotonically as data arrives and is not subject to the peeking / multiple-looks problem. Trade-off: the answer depends on the chosen prior. Industry practice uses light priors calibrated to historical baselines.</>,
+    },
+    {
+      q: "Sample Ratio Mismatch (SRM) refers to:",
+      choices: [
+        { text: "A misspecified prior in a Bayesian test" },
+        { text: "The control/treatment split observed in the data differs significantly from the intended split — a red flag for a broken experiment", correct: true },
+        { text: "A property of the bootstrap distribution" },
+        { text: "A statistical significance threshold" },
+      ],
+      explanation: <>SRM is a design-integrity check. If you intend 50/50 random assignment but observe 51/49 with high statistical confidence (chi-squared p &lt; 0.001), your randomization is broken — maybe due to a bug in the bucketing code, mid-experiment configuration change, or filtering that&rsquo;s not random. Fix the experiment before analyzing the result. This is standard practice at every serious A/B platform.</>,
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/statistics/ab-testing-power" title="A/B testing & statistical power" />

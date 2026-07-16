@@ -161,6 +161,15 @@ print(f"reconstruction error (rank {r_lora} approx) : {np.linalg.norm(Delta_true
   { href: "/learn/mathematics/vectors-space/projections-orthogonality", label: "Projections & orthogonality", blurb: "SVD's U and V matrices are orthogonal — Q⁻¹ = Qᵀ — the same 'coordinates via dot products' machinery." },
 ]} />
 
+<NewConcepts
+  concepts={[
+    { name: "LoRA (Low-Rank Adaptation)", blurb: "the fine-tuning technique whose entire mathematical justification is a truncated SVD of the weight update. Chapter deep-dive in Tier 4." },
+    { name: "PCA (principal component analysis)", blurb: "dimensionality reduction built on either eigen-decomposition or SVD; the numerically-preferred route uses SVD. Full chapter later in this phase." },
+    { name: "Eckart–Young theorem", blurb: "the result that says truncated SVD gives the best low-rank matrix approximation in Frobenius / spectral norms. Foundation of LoRA, PCA, and matrix completion." },
+    { name: "attention low-rank tricks", blurb: "many transformer efficiency methods (Linformer, Performer, LoRA) exploit that attention or its weights have low effective rank — all versions of truncated SVD." },
+  ]}
+/>
+
 <Motivation title="The one decomposition every GenAI engineer needs">
 
 Two of the most important techniques in modern deep learning are direct applications of SVD:

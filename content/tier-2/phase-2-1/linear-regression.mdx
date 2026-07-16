@@ -1,0 +1,514 @@
+---
+title: Linear regression — closed form and gradient
+tier: 2
+phase: "2.1"
+---
+
+export const closedFormCode = `# Linear regression via the normal equations: fit y = X @ w + noise on synthetic data.
+# Closed-form: w_hat = (XᵀX)⁻¹ X^T y  (assuming X^T X is invertible).
+import numpy as np
+import matplotlib.pyplot as plt
+
+np.random.seed(0)
+N, D = 100, 3
+
+# Synthetic ground truth: 3 features + a bias, y = X @ w_true + noise
+X_raw = np.random.randn(N, D)
+X     = np.hstack([X_raw, np.ones((N, 1))])          # append bias column
+w_true = np.array([2.0, -3.0, 0.5, 1.0])             # last is bias
+y = X @ w_true + 0.5 * np.random.randn(N)            # sigma = 0.5
+
+# The normal equations, spelled out
+XtX = X.T @ X
+Xty = X.T @ y
+w_hat = np.linalg.solve(XtX, Xty)                    # solve is more stable than @ inv
+
+print(f"true    w = {w_true}")
+print(f"fitted  w = {w_hat.round(3)}")
+print()
+
+# Sanity check against numpy's canonical solver
+w_lstsq, *_ = np.linalg.lstsq(X, y, rcond=None)
+print(f"lstsq   w = {w_lstsq.round(3)}   (should match fitted w)")
+
+# Residual sum of squares and R^2
+y_hat = X @ w_hat
+rss   = ((y - y_hat) ** 2).sum()
+tss   = ((y - y.mean()) ** 2).sum()
+r2    = 1 - rss / tss
+print(f"\\nRSS = {rss:.3f}   TSS = {tss:.3f}   R^2 = {r2:.4f}")
+
+# Plot the fit versus target (2D projection: first feature vs y)
+fig, ax = plt.subplots(figsize=(7, 4))
+order = np.argsort(X[:, 0])
+ax.plot(X[order, 0], y[order], "o", color="royalblue", alpha=0.6, label="data")
+ax.plot(X[order, 0], y_hat[order], "-", color="crimson", lw=2, label="fitted line (marginal)")
+ax.set_xlabel("feature 0"); ax.set_ylabel("y"); ax.grid(alpha=0.3); ax.legend()
+ax.set_title("Linear regression: first-feature projection of the fit")
+plt.tight_layout()`;
+
+export const gdVsClosedFormCode = `# Gradient descent finds the SAME solution as the normal equations,
+# but iteratively — the two agree in the limit.
+import numpy as np, matplotlib.pyplot as plt
+
+np.random.seed(0)
+N, D = 300, 4
+X = np.hstack([np.random.randn(N, D), np.ones((N, 1))])
+w_true = np.array([1.5, -2.0, 0.3, 0.8, 1.0])
+y = X @ w_true + 0.4 * np.random.randn(N)
+
+def loss(w): return 0.5 * np.mean((X @ w - y) ** 2)
+def grad(w): return X.T @ (X @ w - y) / N
+
+# Closed form
+w_star = np.linalg.solve(X.T @ X, X.T @ y)
+print(f"Closed-form w = {w_star.round(3)}")
+print(f"Closed-form loss = {loss(w_star):.6f}")
+
+# Gradient descent from zero init
+w = np.zeros(X.shape[1])
+lr = 0.03
+losses = [loss(w)]
+for step in range(1, 5001):
+    w = w - lr * grad(w)
+    if step % 500 == 0:
+        print(f"step {step:>4}: loss = {loss(w):.6f}  |w - w*| = {np.linalg.norm(w - w_star):.6f}")
+    losses.append(loss(w))
+
+print(f"\\nFinal GD  w = {w.round(3)}")
+print(f"Distance to closed-form: {np.linalg.norm(w - w_star):.6f}")
+
+plt.figure(figsize=(7, 3.6))
+plt.semilogy(losses, color="crimson", lw=2)
+plt.axhline(loss(w_star), linestyle="--", color="teal", label=f"closed-form loss ({loss(w_star):.4f})")
+plt.xlabel("GD step"); plt.ylabel("loss (log)"); plt.title("GD converges to the closed-form loss")
+plt.legend(); plt.grid(alpha=0.3); plt.tight_layout()`;
+
+export const assumptionsCode = `# Two datasets: one respects linear-regression assumptions, one violates them.
+# Look at the RESIDUAL plots -- they diagnose the failure.
+import numpy as np, matplotlib.pyplot as plt
+
+np.random.seed(0)
+N = 300
+X = np.linspace(-3, 3, N).reshape(-1, 1)
+X_aug = np.hstack([X, np.ones((N, 1))])
+
+# GOOD dataset: linear + iid Gaussian noise (assumptions hold)
+y_good = 2 * X.ravel() + 1 + 0.5 * np.random.randn(N)
+
+# BAD dataset 1: TRUE relationship is quadratic (nonlinearity)
+y_nonlin = 2 * X.ravel() + 0.6 * X.ravel() ** 2 + 0.4 * np.random.randn(N)
+
+# BAD dataset 2: heteroscedastic noise (variance grows with X)
+y_hetero = 2 * X.ravel() + 1 + (0.3 + 0.5 * np.abs(X.ravel())) * np.random.randn(N)
+
+def fit_and_residuals(X_aug, y):
+    w = np.linalg.solve(X_aug.T @ X_aug, X_aug.T @ y)
+    y_hat = X_aug @ w
+    return y_hat, y - y_hat
+
+fig, axes = plt.subplots(2, 3, figsize=(13, 6))
+titles = ["GOOD (assumptions hold)", "BAD 1: nonlinearity", "BAD 2: heteroscedasticity"]
+ys = [y_good, y_nonlin, y_hetero]
+
+for col, (title, y) in enumerate(zip(titles, ys)):
+    y_hat, res = fit_and_residuals(X_aug, y)
+    axes[0, col].plot(X.ravel(), y, "o", color="royalblue", alpha=0.5, markersize=4, label="data")
+    axes[0, col].plot(X.ravel(), y_hat, "-", color="crimson", lw=2, label="fit")
+    axes[0, col].set_title(title); axes[0, col].legend(); axes[0, col].grid(alpha=0.3)
+    axes[1, col].plot(X.ravel(), res, "o", color="crimson", alpha=0.5, markersize=4)
+    axes[1, col].axhline(0, color="k", lw=0.7)
+    axes[1, col].set_title(f"residuals vs x  (mean = {res.mean():.3f}, std = {res.std():.3f})")
+    axes[1, col].grid(alpha=0.3)
+plt.tight_layout()
+
+print("Diagnosis from the residual plots:")
+print("  GOOD:  residuals scatter uniformly around 0 -- assumptions look fine.")
+print("  BAD 1: residuals show a U-shape -- nonlinearity in the data.  Add a quadratic term.")
+print("  BAD 2: residuals fan outward -- variance depends on x (heteroscedasticity).")
+print("         Use weighted least-squares or transform y (e.g. log) to stabilize.")`;
+
+export const linearProbingCode = `# Linear PROBING: fit a linear model on top of a pretrained model's features.
+# Simulate features from a fictitious pretrained encoder + true target signal.
+import numpy as np
+
+np.random.seed(0)
+N = 500
+D_emb = 64        # pretend embedding dim
+
+# Simulate a "pretrained encoder": random projection that captures some signal.
+np.random.seed(42)
+true_direction = np.random.randn(D_emb)
+raw_input = np.random.randn(N, 5)
+signal = raw_input @ np.array([1.0, -0.5, 0.3, 0.0, 0.2])
+noise = 0.3 * np.random.randn(N)
+y = signal + noise
+
+# The "encoder" -- imagine this is a frozen LLM producing embeddings for each input.
+E = raw_input @ np.random.randn(5, D_emb) + 0.1 * np.random.randn(N, D_emb)
+E_aug = np.hstack([E, np.ones((N, 1))])
+
+# Linear PROBE: closed-form regression on the frozen embeddings
+train_idx = np.arange(0, N//2)
+test_idx  = np.arange(N//2, N)
+w = np.linalg.lstsq(E_aug[train_idx], y[train_idx], rcond=None)[0]
+
+y_pred_train = E_aug[train_idx] @ w
+y_pred_test  = E_aug[test_idx]  @ w
+
+train_r2 = 1 - ((y[train_idx] - y_pred_train)**2).sum() / ((y[train_idx] - y[train_idx].mean())**2).sum()
+test_r2  = 1 - ((y[test_idx]  - y_pred_test)**2).sum()  / ((y[test_idx]  - y[test_idx].mean())**2).sum()
+
+print(f"Linear probe on 64-dim frozen embeddings:")
+print(f"  train R^2 = {train_r2:.4f}")
+print(f"  test  R^2 = {test_r2:.4f}")
+print()
+print("This is exactly what 'linear probing' does in modern LLM/vision research:")
+print("freeze a big model, extract its representations, fit a linear regression or")
+print("logistic regression on top for a downstream task. The linear model's R^2")
+print("measures how much the embeddings ALREADY encode the target -- if it's high,")
+print("the pretrained model has 'learned' the signal without task-specific fine-tuning.")`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/vectors-space/dot-product-cosine-similarity", label: "Dot product & cosine similarity", blurb: "Linear regression predicts y_hat = w · x — a single dot product per example. Everything from prediction to gradient uses this operation." },
+  { href: "/learn/mathematics/calculus/gradient-descent-intuition", label: "Gradient descent — the intuition", blurb: "Both derivations of linear regression's fit — the normal equations and the GD iteration — depend on gradient thinking." },
+  { href: "/learn/mathematics/linear-algebra/positive-definite", label: "Positive definite matrices", blurb: "X^T X must be positive-definite (rank(X) = D) for the normal equations to have a unique solution. This chapter uses that fact directly." },
+  { href: "/learn/foundations/scientific-stack/sklearn-shape-of-ml", label: "Sklearn — the shape of ML", blurb: "Every fit-predict-transform contract, every train/test split, every Pipeline pattern begins here — linear regression is the simplest instance of that contract." },
+]} />
+
+<NewConcepts
+  concepts={[
+    { name: "R² (coefficient of determination)", blurb: "the fraction of the target's variance explained by the model: R² = 1 − RSS/TSS. R² = 1 means perfect fit, 0 means no better than predicting the mean, negative means worse than the mean. Standard regression metric." },
+    { name: "Ordinary least squares (OLS) / BLUE", blurb: "the classical name for linear regression via minimizing squared error. Gauss-Markov theorem: OLS is the Best Linear Unbiased Estimator when errors are iid with finite variance." },
+    { name: "Standardization / z-scoring", blurb: "subtract mean, divide by standard deviation, applied per feature. Makes coefficients comparable and stabilizes gradient descent on features with wildly different scales. Applied to X before fitting, undone after." },
+    { name: "Multicollinearity & VIF", blurb: "when two features are strongly correlated, X^T X becomes near-singular and the estimated coefficients get huge & unstable. Variance Inflation Factor (VIF) diagnoses this per feature." },
+    { name: "Linear probing", blurb: "the 'evaluate a pretrained model' trick: freeze the encoder, extract embeddings, fit a linear regression (or logistic regression for classification) on top. If the probe fits well, the pretraining already captured the target signal." },
+  ]}
+/>
+
+<Motivation title="Linear regression — the one model to derive fully">
+
+Linear regression is the simplest possible supervised model. Given features `x` and a target `y`, predict:
+
+$$
+\hat{y} = w \cdot x + b
+$$
+
+That is it. One dot product per prediction. Yet **every single idea in modern ML has a "linear regression version"** — regularization, gradient descent, MLE, feature engineering, cross-validation, bias-variance decomposition, model interpretability, uncertainty estimation. Understanding all of them fully in the linear-regression setting is the cheapest way to build intuition for their harder analogs.
+
+For a GenAI engineer, linear regression comes up in four specific places:
+
+1. **Debugging.** When a big model is misbehaving, one of the fastest sanity checks is "does a linear regression on the same features do reasonable things?" If YES, the signal is there and the big model is broken. If NO, the features themselves don't capture what you need.
+2. **Linear probing.** Modern LLM/vision research evaluates pretrained representations by fitting a linear model on top of frozen embeddings. If the linear probe's accuracy is high, the pretrained model already "understands" the target without task-specific fine-tuning.
+3. **The last layer of everything.** Almost every neural net ends with a linear layer (`W · h + b` where h is the last hidden state). That's a linear regression (or classification) whose weights are learned jointly with the encoder.
+4. **Baseline you must beat.** Before deploying a fancy model, always compare it to linear regression. It's free, fast, and often surprisingly close in accuracy on tabular data — a paper reporting a 5% improvement over a linear baseline on some task is trivial; a paper reporting a 50% improvement is real.
+
+This chapter covers:
+
+- The **model** and its squared-error loss (why squared, and why the classical alternatives lose).
+- The **closed-form solution** (the normal equations) — derived by hand.
+- The **gradient descent path** to the same answer, and when to prefer it.
+- The **four classical assumptions** and how their violations manifest in residual plots.
+- **Interpretability of coefficients** — the real reason linear regression is still central to statistics.
+
+</Motivation>
+
+<Intuition title="Fit the best line through the points — but 'best' means smallest total squared error">
+
+Given a scatterplot of `(x_i, y_i)` points, the goal is to draw a line (or a hyperplane in higher dimensions) that "best" passes through them.
+
+**Best = smallest squared error.** For each data point i, the model predicts `ŷ_i = w · x_i + b`. The error is `ŷ_i − y_i`. Squaring the errors (before summing) turns positive and negative errors into "how far off?" and penalizes big errors much more than small ones:
+
+$$
+L(w, b) = \frac{1}{N} \sum_{i=1}^N (\hat{y}_i - y_i)^2 = \frac{1}{N} \sum_i (w \cdot x_i + b - y_i)^2
+$$
+
+The line that minimizes this is unique (under mild conditions). And crucially, it has a **closed-form solution** — you can write down the optimal `w` and `b` in matrix form, no iterative training needed.
+
+The story extends to multiple features. If x has D dimensions, we're fitting a hyperplane in (D + 1)-space (D features + 1 for the bias). The picture is the same: minimize total squared error, get a unique optimum.
+
+</Intuition>
+
+<Recall term="Mean squared error (MSE)">
+
+Given predictions `ŷ_i` and true values `y_i` for i = 1..N, the **mean squared error** is `(1/N) · Σ (ŷ_i − y_i)²`. It's the loss function used by linear regression and the "standard" loss for continuous-valued targets. Two properties: (1) it's differentiable everywhere (unlike absolute error), so gradient methods work; (2) it corresponds to maximum likelihood under Gaussian noise — a fact the assumptions section formalizes.
+
+</Recall>
+
+<Recall term="Dot product">
+
+For two vectors `a` and `b` of the same length, the dot product is `a · b = Σ_i a_i b_i`. It's the single operation behind linear regression's prediction (`ŷ = w · x`), attention (`softmax(Q·Kᵀ/√d)·V` uses dot products), classification (each output logit is a dot product), and every "score" in ML. When you optimize a linear regression, you're optimizing a set of dot-product-produced predictions.
+
+</Recall>
+
+## The model and its loss
+
+**Model.** For a single example with features `x ∈ R^D`:
+
+$$
+\hat{y} = w_1 x_1 + w_2 x_2 + \dots + w_D x_D + b = w \cdot x + b
+$$
+
+For a batch of N examples with feature matrix `X ∈ R^{N × D}` and targets `y ∈ R^N`:
+
+$$
+\hat{y} = X w + b \mathbf{1}
+$$
+
+**The bias trick.** Absorb `b` into `w` by appending a column of 1s to X: `X_aug = [X | 1]`, `w_aug = [w; b]`. Then `ŷ = X_aug · w_aug` and the bias drops out of every subsequent formula. In code:
+
+```python
+X_aug = np.hstack([X, np.ones((N, 1))])
+```
+
+**Squared-error loss (halved for clean derivative):**
+
+$$
+L(w) = \frac{1}{2N} \|Xw - y\|^2 = \frac{1}{2N} \sum_{i=1}^N (\hat{y}_i - y_i)^2
+$$
+
+Halving isn't necessary — it just makes the gradient prettier. Any positive scalar multiple gives the same optimizer.
+
+**Why squared and not absolute error?** Three reasons:
+
+1. **Differentiable everywhere.** Absolute error `|ŷ - y|` has a kink at zero; MSE is smooth. Gradient methods work directly on MSE.
+2. **Closed-form solvable.** MSE gives linear equations for the optimum; MAE requires linear programming or iteratively-reweighted-least-squares.
+3. **Statistically justified.** Under Gaussian noise assumption `y = w·x + ε` with `ε ~ N(0, σ²)`, the MLE for w minimizes exactly the MSE. Different noise models give different losses (Laplace noise → MAE, etc.).
+
+## The normal equations — closed-form solution
+
+Set the gradient of the loss to zero:
+
+$$
+\nabla_w L(w) = \frac{1}{N} X^\top (X w - y) = 0
+$$
+
+Solve for w:
+
+$$
+X^\top X w = X^\top y \quad \Longrightarrow \quad w^* = (X^\top X)^{-1} X^\top y
+$$
+
+This is **the normal equations**. Two remarks:
+
+- **Uniqueness requires rank(X) = D** (X has full column rank). Then `X^T X` is invertible. If features are perfectly correlated (multicollinearity), `X^T X` is singular and the solution is not unique.
+- **Numerical stability.** Never actually compute `inv(X^T X)`. Instead use `np.linalg.solve(X.T @ X, X.T @ y)` or better `np.linalg.lstsq(X, y)` — both are far more numerically stable than explicit inversion.
+
+<RunnableCode title="Fit linear regression via normal equations" code={closedFormCode} packages={["numpy", "matplotlib"]} captureFig={true} />
+
+**Cost of closed form:** computing `X^T X` is O(N·D²). Solving the D×D system is O(D³). For small D (say D under 10,000) this is instant. For D ≥ 10⁶, it becomes prohibitive — that's when GD wins.
+
+**Geometric picture.** The normal equations say `X^T (Xw* - y) = 0` — the residual `Xw* - y` is **orthogonal to every column of X**. Geometrically, `Xw*` is the orthogonal projection of `y` onto the column space of X. Any other `w` gives predictions that miss orthogonally in a suboptimal way. This is why linear regression is also called "least squares projection."
+
+## Gradient descent gets the same answer
+
+For large D or streaming data, GD is preferable. The update rule:
+
+$$
+w \leftarrow w - \eta \cdot \nabla L(w) = w - \eta \cdot \frac{1}{N} X^\top (X w - y)
+$$
+
+Because L is **convex** (Hessian = X^T X / N is PSD), any local minimum is global. GD from any starting point converges to `w*` (the normal-equations solution) — no worry about initialization.
+
+<RunnableCode title="Gradient descent converges to the closed-form solution" code={gdVsClosedFormCode} packages={["numpy", "matplotlib"]} captureFig={true} />
+
+**Choosing between closed form and GD:**
+
+- **Small D (< 10k features), plenty of RAM, no streaming:** closed form. Fastest, exact, no hyperparameters.
+- **Large D, streaming, or an already-existing pipeline:** GD (or SGD with mini-batches). Same optimum, more flexible.
+- **Regularization needed (L2 = ridge):** either — closed form for ridge is `w* = (XᵀX + λI)⁻¹ X^T y`, still one equation.
+
+## Assumptions — and how their violations look
+
+The classical statistical treatment of linear regression rests on four assumptions:
+
+1. **Linearity.** The true relationship is `y = X w_true + ε`. If the true relationship is quadratic or oscillatory, LR is misspecified.
+2. **Independent errors.** `ε_i` for different examples are independent. Violated by time series (correlated shocks) or grouped data.
+3. **Homoscedasticity.** The noise variance is the same for every example. Violated when variance grows with x (e.g., higher-income individuals have more variable spending).
+4. **Normality of errors.** `ε_i ~ N(0, σ²)`. Needed for classical CI / hypothesis-test theory; not needed for a *point estimate* of w.
+
+**Coefficient estimation itself only needs (1) and (2)** — the Gauss-Markov theorem says under linearity + independent errors + finite variance, OLS is the Best Linear Unbiased Estimator (BLUE). Confidence intervals and p-values need the other assumptions.
+
+<RunnableCode title="Residual plots diagnose assumption violations" code={assumptionsCode} packages={["numpy", "matplotlib"]} captureFig={true} />
+
+**Fixes for common violations:**
+
+- **Nonlinearity** (residuals show a U-shape): add polynomial features (x², x·y, etc.), or use a nonlinear model.
+- **Heteroscedasticity** (residual variance grows with x): use weighted least squares, or transform the target (`log(y)` if y is always positive).
+- **Autocorrelated errors** (time-series): use ARIMA-family models or add lagged features.
+- **Non-normal residuals for CIs**: bootstrap the coefficient estimates.
+
+## Interpretability of coefficients
+
+Once you fit `ŷ = w · x + b`, each `w_i` has a specific interpretation:
+
+$$
+w_i = \text{expected change in } y \text{ per one-unit increase in } x_i, \text{ holding other features constant}
+$$
+
+This "holding other features constant" is the CETERIS PARIBUS interpretation. It's why linear regression is central to statistics: no other ML model gives such a clean per-feature effect estimate.
+
+**Practical rules:**
+
+- **Standardize features before comparing coefficients.** If `x_1` is in dollars and `x_2` is in years, their coefficients are on wildly different scales. Standardize (subtract mean, divide by std) so all coefficients are per-standard-deviation changes.
+- **Check for multicollinearity.** If two features are strongly correlated, individual coefficient values become unstable (one can be huge positive, the other huge negative, canceling). VIF above 10 is a red flag.
+- **Beware causal interpretation.** The coefficient is the association given the model + observed data. Whether X causes Y is a separate question that no regression can answer alone — but a well-designed regression can be evidence.
+
+<RealWorldML title="Linear probing on pretrained embeddings">
+
+A modern LLM or vision model produces **embeddings** — dense vectors that summarize an input. For evaluating whether these embeddings capture some target property, researchers use **linear probing**: freeze the encoder, extract embeddings on a labeled dataset, fit a linear regression (or logistic regression for classification) on top.
+
+If the probe fits well (high R² for regression, high accuracy for classification), the embeddings ALREADY encode the target signal — the pretrained model has "learned it" without task-specific supervision. If the probe fits poorly, either the target is more subtle than the embedding captures, or the embedding is bad.
+
+<RunnableCode title="Linear probing on 64-dim frozen embeddings" code={linearProbingCode} packages={["numpy"]} />
+
+**Why linear probing is important for LLM evaluation:**
+
+1. **Cheap.** Fitting linear regression on 64-1024 dim embeddings takes seconds. Fine-tuning the full model can take hours or days.
+2. **Interpretable.** The probe weights say WHICH embedding dimensions carry the target signal. On a large labeled task, a linear probe with high R² is convincing evidence that the pretrained model captures the concept.
+3. **Standard.** Papers report linear-probe results on downstream tasks (STS, Sentence-BERT eval, ImageNet linear evaluation, etc.). Beating a linear probe by a small margin with fine-tuning tells you the model's marginal capability is limited; beating it by a lot suggests real task-specific learning.
+
+**Fun connection:** the last layer of any classifier is itself a linear probe on the previous layer's embeddings. So "linear-probe accuracy" and "final-layer accuracy" are the same thing when the earlier layers are frozen. Fine-tuning is just "linear-probing PLUS updating the encoder."
+
+</RealWorldML>
+
+<StudyDepth
+  drill={[
+    "Linear model: ŷ = w · x + b. In batch form: ŷ = X · w (using the bias trick).",
+    "MSE loss: L(w) = (1/(2N)) · Σ (ŷ - y)² = (1/(2N)) · ‖Xw - y‖².",
+    "Normal equations: w* = (XᵀX)⁻¹ X^T y — the closed-form minimizer.",
+    "np.linalg.solve or np.linalg.lstsq are better than np.linalg.inv — always.",
+    "For large D or streaming data, gradient descent gets the same w*. LR loss is convex.",
+    "R² = 1 - RSS/TSS. Standardize features before comparing coefficients.",
+    "Residual plot diagnoses: U-shape = nonlinearity; fan-out = heteroscedasticity.",
+    "Linear probing: freeze pretrained encoder, fit LR on top — measures 'has the encoder learned this?'",
+  ]}
+  skim={[
+    "Gauss-Markov theorem proof (OLS is BLUE).",
+    "Iteratively-reweighted least squares (IRLS) for MAE / robust regression.",
+    "GLS (generalized least squares) for correlated errors.",
+    "Cook's distance & leverage — advanced diagnostics.",
+    "Sherman-Morrison for updating regression coefficients online (streaming).",
+  ]}
+/>
+
+<CodeItYourself title="Three drills — normal equations by hand, GD variants, linear probing">
+
+1. **Fit by hand.** For the tiny dataset `X = [[1, 1], [1, 2], [1, 3]]` (bias column + one feature) and `y = [1.5, 2.5, 3.4]`, compute w* = (XᵀX)⁻¹ X^T y by hand. Verify with `np.linalg.solve`.
+
+2. **GD sensitivity to LR.** For the synthetic problem above, sweep learning rates lr = 0.001, 0.01, 0.1, 1.0 and watch what happens. At lr = 1.0 the largest eigenvalue of the Hessian exceeds 1/lr and GD diverges; at lr = 0.001 it converges but slowly. Find the sweet spot.
+
+3. **Linear probe on toy embeddings.** Generate synthetic "embeddings" `E = np.random.randn(500, 128)` and a target `y = E[:, :10].sum(1) + noise` — only the first 10 dimensions carry signal. Fit a linear probe on the first 250 examples, evaluate on the rest. R² should be high because the linear model can rediscover the "signal is in first 10 dims" structure automatically.
+
+</CodeItYourself>
+
+<Summary>
+
+- **Model:** ŷ = w · x + b (with `x, w ∈ R^D`, `b ∈ R`). Batch: ŷ = Xw using bias trick.
+- **Loss:** MSE L(w) = (1/2N) · ‖Xw - y‖². Squared for smoothness, closed-form solvability, and MLE justification under Gaussian noise.
+- **Normal equations:** w* = (XᵀX)⁻¹ X^T y. Requires rank(X) = D. Compute via np.linalg.solve or np.linalg.lstsq — never inv().
+- **Gradient descent** gets the same w* (loss is convex). Better when D exceeds ~10⁴ or data is streaming.
+- **R² = 1 - RSS/TSS** measures fraction of variance explained. Standardize features before comparing coefficients.
+- **Four classical assumptions:** linearity, independent errors, homoscedasticity, normality. Coefficient point estimates only need the first two.
+- **Residual plots diagnose violations:** U-shape = nonlinearity, fan-out = heteroscedasticity.
+- **Linear probing** is linear regression on top of a pretrained encoder's frozen embeddings — the standard evaluation for representation quality.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>For a linear regression with 3 features and a bias, how many parameters are being learned?</>,
+      hint: <>Count the entries in w plus the bias.</>,
+      answer: <><b>4 parameters total</b>: w_1, w_2, w_3, and b. Using the "bias trick" (appending a column of 1s to X), we treat b as one more entry of w — an augmented weight vector of length 4. All formulas (normal equations, gradient) apply to this augmented vector.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>You fit a linear regression and get R² = 0.03. What does this tell you?</>,
+      hint: <>R² = 1 - RSS/TSS. What does R² near zero mean?</>,
+      answer: <>R² = 0.03 means the model explains only 3% of the variance in y — it's <b>barely better than predicting the mean</b>. Either (a) the features don't carry meaningful signal for y, (b) the relationship is highly non-linear so linear regression can't capture it, or (c) the noise level is high. Diagnostic: plot residuals; if they show clear structure vs x, the model is misspecified and you need nonlinear features or a different model.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>Why do we use np.linalg.solve(A, b) instead of np.linalg.inv(A) @ b to fit linear regression?</>,
+      hint: <>Consider numerical stability and computational cost.</>,
+      answer: <>Two reasons: <br /><br /> <b>1. Numerical stability.</b> `inv(A)` explicitly computes the matrix inverse, which amplifies numerical errors when A is ill-conditioned. `solve(A, b)` uses direct methods (LU factorization) that are more numerically stable — you get up to 10⁶× better accuracy on ill-conditioned problems. <br /><br /> <b>2. Computational cost.</b> Computing `inv(A)` requires ~O(D³) work AND uses more memory (a whole matrix). Then `inv(A) @ b` is another O(D²) work. Total ~O(D³ + D²). `solve(A, b)` factorizes A once (O(D³)) and does one back-substitution (O(D²)) — same asymptotic but simpler, less memory. <br /><br /> Even better: `np.linalg.lstsq(X, y)` uses QR or SVD factorization of X directly, avoiding forming `X^T X` at all — the most numerically robust choice for real data. That's why sklearn uses lstsq internally.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>You standardize your features (subtract mean, divide by std) and refit the linear regression. How do the coefficients change, and how do the predictions change?</>,
+      hint: <>Substitute z = (x - mean) / std into the linear formula and derive the new coefficients.</>,
+      answer: <>Let x be a feature with mean μ and std σ. Standardized: z = (x - μ) / σ, so x = σ · z + μ. <br /><br /> Original: ŷ = w · x + b. Substitute: ŷ = w · (σ · z + μ) + b = (w · σ) · z + (w · μ + b). <br /><br /> So the new coefficient on z is <b>w_z = σ · w_x</b> (scaled by σ), and the new bias is <b>b_z = b + w · μ</b> (shifted by the mean-effect). <br /><br /> The predictions are IDENTICAL (they'd better be — we didn't change the model, just the parameterization). What changes is: <br /> - Coefficients are now on the same scale ("effect per SD change"), making comparison possible. <br /> - Gradient descent converges much faster because the loss landscape is well-conditioned. <br /> - Regularization (L2) now penalizes coefficients on the same footing — no longer favors features that happen to have larger units.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Prove that the linear regression estimator w* = (XᵀX)⁻¹ X^T y is unbiased under the assumption y = X w_true + ε with E[ε] = 0.</>,
+      hint: <>Substitute the assumed model for y and take expectation of w*.</>,
+      answer: <>By definition: w* = (XᵀX)⁻¹ X^T y. <br /><br /> Substitute y = X w_true + ε: <br /> w* = (XᵀX)⁻¹ X^T (X w_true + ε) <br /> = (XᵀX)⁻¹ X^T X w_true + (XᵀX)⁻¹ X^T ε <br /> = w_true + (XᵀX)⁻¹ X^T ε <br /><br /> Take expectation (X is treated as fixed, only ε is random): <br /> E[w*] = w_true + (XᵀX)⁻¹ X^T E[ε] = w_true + 0 = <b>w_true</b>. ∎ <br /><br /> So on average, the OLS estimator gives back the true parameters — it's <b>unbiased</b>. Combined with the Gauss-Markov theorem (it also has minimum variance among linear unbiased estimators), this is BLUE: Best Linear Unbiased Estimator. <br /><br /> Note: unbiasedness doesn't require normality of ε, only E[ε] = 0. Normality would be needed for confidence intervals and t-tests, but not for the point estimate.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>A colleague fits a linear regression on a dataset where feature x_1 = number of car doors and feature x_2 = number of car wheels. Both variables are HIGHLY correlated (most cars have 4 doors and 4 wheels). What might go wrong with the regression, and what should they do?</>,
+      hint: <>Consider what happens to (XᵀX)⁻¹ when features are nearly collinear.</>,
+      answer: <><b>The problem: multicollinearity.</b> When x_1 and x_2 are strongly correlated, X^T X becomes near-singular (small eigenvalues), and (XᵀX)⁻¹ has large eigenvalues. The estimated coefficients get: <br /><br /> - <b>Huge magnitudes</b>: numerical inverse of a near-zero eigenvalue amplifies noise. <br /> - <b>Unstable</b>: small changes in y or dropping one row can flip the sign of w_1 and w_2. <br /> - <b>Individually uninterpretable</b>: w_1 might be +2000 and w_2 might be -1990, canceling to a reasonable sum but useless per-feature interpretation. <br /><br /> The predictions ŷ can still be fine, but the SEPARATION of effects into "doors matter this much, wheels matter this much" is meaningless. <br /><br /> <b>Diagnosis:</b> compute VIF (variance inflation factor) per feature — VIF above 10 is a red flag. Or just look at the correlation matrix of features. <br /><br /> <b>Fixes:</b> <br /> 1. Drop one of the correlated features (probably wheels — doors have more variance). <br /> 2. Combine them: use x = (doors + wheels) / 2, or PCA to a single component. <br /> 3. Add L2 regularization (ridge): (XᵀX + λI)⁻¹ X^T y stays stable even when X^T X is nearly singular. Ridge trades a small bias for large variance reduction. <br /> 4. Elastic-net if you want feature selection (L1 + L2 hybrid). <br /><br /> The lesson: linear regression's clean interpretation requires reasonably independent features. Multicollinearity is one of the most common practical issues in tabular ML.</>
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "The normal equations for linear regression give:",
+      choices: [
+        { text: "w* = X · y" },
+        { text: "w* = (XᵀX)⁻¹ X^T y", correct: true },
+        { text: "w* = X^T · y" },
+        { text: "w* = X · X^T · y" },
+      ],
+      explanation: <>Standard derivation: set gradient of MSE loss to zero, get X^T X w = X^T y, solve for w. Note we should never LITERALLY compute the inverse — use np.linalg.solve(X.T @ X, X.T @ y) or np.linalg.lstsq(X, y) for numerical stability. The formula tells you what the solution IS; the code uses more stable factorizations to compute it.</>
+    },
+    {
+      q: "R² = 0.85 means:",
+      choices: [
+        { text: "The model is 85% accurate." },
+        { text: "85% of the target's variance is explained by the model (RSS is 15% of TSS).", correct: true },
+        { text: "The model always predicts within 15% of the true value." },
+        { text: "The model has 0.85 as the average absolute error." },
+      ],
+      explanation: <>R² = 1 - RSS/TSS. R² = 0.85 means the residual sum of squares is 15% of the total sum of squares — the model captures 85% of the target's variance. It's a UNITLESS metric on a 0-1 scale (can go negative for very bad models). Not the same as "accuracy" — R² is about explained variance, accuracy would be per-example correctness (which only makes sense for classification).</>
+    },
+    {
+      q: "When the number of features D is much less than the number of examples N, which optimization method is preferred?",
+      choices: [
+        { text: "Closed-form normal equations (np.linalg.solve or lstsq).", correct: true },
+        { text: "Gradient descent from a large learning rate." },
+        { text: "SGD with mini-batches of size 1." },
+        { text: "Random search over parameter space." },
+      ],
+      explanation: <>For small D (say D &lt; 10,000), the closed-form is fastest, exact, and hyperparameter-free. Cost: O(N · D² + D³). For large D or streaming data, GD (or SGD) is preferred because the closed-form becomes computationally prohibitive. sklearn's default depends on the dataset size — small: SVD-based lstsq; large: SGD-based fallback.</>
+    },
+    {
+      q: "Residual plot shows a clear U-shape (residuals negative in middle, positive at extremes). This most likely indicates:",
+      choices: [
+        { text: "Nonlinear relationship between features and target (need quadratic or nonlinear terms).", correct: true },
+        { text: "Multicollinearity between features." },
+        { text: "Not enough training data." },
+        { text: "The learning rate is too high." },
+      ],
+      explanation: <>A U-shape in residuals is the signature of NONLINEARITY — the true relationship curves, but the linear model draws a straight line through it, systematically under-predicting at the extremes and over-predicting in the middle (or vice versa). Fix: add polynomial features (x², x·y, etc.) or use a nonlinear model. This is the most common assumption violation in practice.</>
+    },
+    {
+      q: "'Linear probing' in modern LLM evaluation means:",
+      choices: [
+        { text: "Running the LLM on a linear list of queries." },
+        { text: "Freezing the pretrained encoder, extracting embeddings, and fitting a linear regression or classifier on top for a downstream task.", correct: true },
+        { text: "Only using linear layers in the model." },
+        { text: "Poking the model with linear-shaped inputs." },
+      ],
+      explanation: <>Linear probing: freeze the pretrained model, extract its embeddings on a labeled task, fit a linear classifier or regressor on those embeddings. If the probe fits well, the encoder ALREADY captures the target — it "learned" the concept during pretraining. If the probe fits poorly, the target is subtle or the encoder is bad for this task. Standard evaluation in LLM/CV research (STS, ImageNet linear eval, etc.). Fast, interpretable, gives a per-dimension importance signal.</>
+    },
+  ]}
+/>
+
+<MarkDone slug="core-ml/supervised-basics/linear-regression" title="Linear regression — closed form and gradient" />

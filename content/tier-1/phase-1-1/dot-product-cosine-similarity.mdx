@@ -120,6 +120,14 @@ def most_similar_cities(home, cities, k=5):
   { href: "/learn/mathematics/vectors-space/norms-distances", label: "Norms & distances", blurb: "Length ‖v‖ = √(v·v). We rely on this today." },
 ]} />
 
+<NewConcepts
+  concepts={[
+    { name: "softmax", blurb: "the function exp(x_i) / Σ exp(x_j) that turns arbitrary logits into a probability vector. The output activation of every classifier and every transformer attention layer." },
+    { name: "transformer attention", blurb: "the mechanism `softmax(Q Kᵀ / √d) V` inside modern LLMs. Every query-key pair is a scaled dot product — this chapter is one of its two foundations." },
+    { name: "LLM (large language model)", blurb: "a neural network trained to predict the next token in a sequence (GPT, Llama, Claude). Full deep-dive in Tier 4." },
+  ]}
+/>
+
 <Motivation title="Why the dot product had to be invented">
 
 A user just finished *Arrival*. Out of ten thousand movies, which are most similar to what they enjoyed? Every movie is five numbers — `[sci-fi, romance, action, philosophy, pace]` — and the user's taste is five numbers too. "Similar" has to become arithmetic.

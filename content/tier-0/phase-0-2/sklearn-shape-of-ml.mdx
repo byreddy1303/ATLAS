@@ -187,6 +187,13 @@ print(f"new raw customer -> churn probability {p:.0%}")`;
   { href: "/learn/foundations/scientific-stack/pandas-dataframe-fundamentals", label: "Pandas · DataFrames", blurb: "Pipelines eat DataFrames directly; column selection by name is how ColumnTransformer routes." },
 ]} />
 
+<NewConcepts
+  concepts={[
+    { name: "LLM (large language model)", blurb: "modern LLM APIs (OpenAI, Anthropic, HuggingFace transformers) borrow scikit-learn&rsquo;s `.fit` / `.predict` / `.transform` grammar for their pipelines. Full deep-dive in Tier 4." },
+    { name: "transformer / HuggingFace pipeline", blurb: "the HuggingFace `pipeline(...)` API mirrors sklearn&rsquo;s pattern — declare a task, get a callable object with a predict method. Tier 4." },
+  ]}
+/>
+
 <Motivation title="One API to rule a decade of ML — learn the grammar once, speak every library">
 
 You don't yet know how any model works inside — that's Tier 2's job. You don't need to. scikit-learn's genius was separating the *grammar* of machine learning from the *math* of it: every model, from a one-line linear regression to a gradient-boosted forest, is driven through the same three methods — `fit`, `predict`, `transform`. Learn the grammar now, on models treated as black boxes, and every algorithm you meet later arrives with its interface already familiar.

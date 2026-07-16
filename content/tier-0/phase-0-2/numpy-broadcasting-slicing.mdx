@@ -241,6 +241,15 @@ print("output shape:", out.shape)             # (3, 8) — one context vector pe
   { href: "/learn/foundations/scientific-stack/numpy-arrays-vectorization", label: "NumPy · arrays & vectorization", blurb: "Shape, dtype, buffer, strides — the four fields of an ndarray." },
 ]} />
 
+<NewConcepts
+  concepts={[
+    { name: "PyTorch tensor shapes", blurb: "the framework whose broadcasting semantics are copied verbatim from NumPy. Reading tensor shape errors is a daily activity for a GenAI engineer." },
+    { name: "attention (softmax over Q @ K.T)", blurb: "transformer building block. Its shape gymnastics are the canonical broadcasting workout — batched matmul across (batch, heads, seq, dim) axes. Tier 4." },
+    { name: "GPT / transformer / LLM", blurb: "families of neural networks whose forward passes are chains of broadcast + reduce operations on 4-D tensors. Referenced here as motivating use-cases." },
+    { name: "softmax", blurb: "row-normalization operation applied along a specific axis; understanding axis-keeping vs axis-collapsing is essential for correct implementations." },
+  ]}
+/>
+
 <Motivation title="Shape math is the language of every model you'll ever build">
 
 Z-score a `(1000, 3)` sensor matrix column-by-column: in pure Python, twenty loop lines; in NumPy, `(X - X.mean(axis=0)) / X.std(axis=0)`. The step that makes the shapes fit — matching a `(3,)` vector against every row of a `(1000, 3)` matrix — is **broadcasting**, and it's the same mechanism behind adding a bias to a layer's output, normalizing embeddings, and computing attention scores. Learn the rule once and matrix code in NumPy, PyTorch, and JAX stops needing loops.

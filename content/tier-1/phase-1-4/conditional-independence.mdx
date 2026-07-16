@@ -1,0 +1,444 @@
+---
+title: Conditional probability & independence
+tier: 1
+phase: "1.4"
+---
+
+export const conditionalCode = `# Conditional probability: P(A | B) = P(A and B) / P(B).
+# Meaning: restrict the sample space to the outcomes where B is true,
+# then measure how big A is inside that restricted world.
+import numpy as np
+rng = np.random.default_rng(0)
+
+# Two fair dice.  Sample space = 36 ordered pairs.  Uniform measure.
+n_trials = 200_000
+d1 = rng.integers(1, 7, size=n_trials)
+d2 = rng.integers(1, 7, size=n_trials)
+S = d1 + d2
+
+# Event B = "first die is 6".  Event A = "sum > 10".
+B = d1 == 6
+A = S > 10
+
+p_A     = A.mean()
+p_B     = B.mean()
+p_AandB = (A & B).mean()
+p_A_given_B = p_AandB / p_B
+
+print(f"P(A)        = P(sum > 10)          = {p_A:.4f}   (analytical 3/36 = 0.0833)")
+print(f"P(B)        = P(first die = 6)     = {p_B:.4f}   (analytical 1/6  = 0.1667)")
+print(f"P(A and B)  = P(sum > 10 AND d1=6) = {p_AandB:.4f}   (analytical 2/36 = 0.0556)")
+print(f"P(A | B)    = P(sum > 10 | d1=6)   = {p_A_given_B:.4f}   (analytical 2/6  = 0.3333)")
+
+# Direct verification: among trials where d1 == 6, what fraction has S > 10?
+p_direct = A[B].mean()
+print(f"P(A | B) computed directly by restricting Omega to B: {p_direct:.4f}")
+print("Both methods agree -- 'condition on B' means 'zoom in on the subset where B holds'.")`;
+
+export const independenceCode = `# Two events A, B are independent iff  P(A and B) = P(A) * P(B).
+# Equivalently, P(A | B) = P(A) -- knowing B tells you nothing about A.
+import numpy as np
+rng = np.random.default_rng(0)
+
+# Case 1: two independent coin flips.
+n = 200_000
+f1 = rng.integers(0, 2, size=n)
+f2 = rng.integers(0, 2, size=n)
+
+A = f1 == 1
+B = f2 == 1
+p_A, p_B = A.mean(), B.mean()
+p_AB = (A & B).mean()
+print("Case 1 -- two independent flips:")
+print(f"  P(A)*P(B) = {p_A * p_B:.4f}")
+print(f"  P(A and B)= {p_AB:.4f}   (matches -- independent)")
+
+# Case 2: dependent -- both flips share a hidden coin bias.
+# Draw a bias Z; then both flips use it.  A and B are marginally identical to case 1
+# but strongly correlated because they share Z.
+Z = rng.beta(2, 2, size=n)         # random bias per trial
+f1 = (rng.random(n) < Z).astype(int)
+f2 = (rng.random(n) < Z).astype(int)
+
+A = f1 == 1
+B = f2 == 1
+p_A, p_B = A.mean(), B.mean()
+p_AB = (A & B).mean()
+print("\\nCase 2 -- coupled flips (shared hidden bias Z):")
+print(f"  P(A)*P(B) = {p_A * p_B:.4f}")
+print(f"  P(A and B)= {p_AB:.4f}   (LARGER -- events are dependent)")
+
+# Case 3: independence CAN return conditional on Z.  Given Z, the two flips are independent.
+# This is 'conditional independence' -- the pattern behind Naive Bayes and hierarchical models.
+mask = (rng.random(n) < 0.4)       # sub-sample where Z is roughly fixed
+print("\\nCase 3 -- given (roughly fixed) Z, the same coupled flips look independent:")
+sub_Z = Z[mask]
+f1s = (rng.random(len(sub_Z)) < sub_Z).astype(int)
+f2s = (rng.random(len(sub_Z)) < sub_Z).astype(int)
+A = f1s == 1
+B = f2s == 1
+print(f"  P(A|Z)*P(B|Z) approx {A.mean() * B.mean():.4f}")
+print(f"  P(A and B | Z)        {(A & B).mean():.4f}")`;
+
+export const chainRuleCode = `# Chain rule for probability:
+#   P(A, B, C) = P(A) * P(B | A) * P(C | A, B)
+# This is how every autoregressive language model computes P(sequence).
+import numpy as np
+
+# Small hand-designed joint distribution over three binary variables A, B, C.
+# We'll fill in a full joint table, then factor it via the chain rule and verify.
+joint = np.zeros((2, 2, 2))
+joint[0, 0, 0] = 0.10
+joint[0, 0, 1] = 0.05
+joint[0, 1, 0] = 0.15
+joint[0, 1, 1] = 0.20
+joint[1, 0, 0] = 0.05
+joint[1, 0, 1] = 0.10
+joint[1, 1, 0] = 0.15
+joint[1, 1, 1] = 0.20
+assert np.isclose(joint.sum(), 1.0)
+
+# Marginals and conditionals from the joint.
+p_A = joint.sum(axis=(1, 2))                 # P(A)
+p_AB = joint.sum(axis=2)                     # P(A, B)
+p_B_given_A = p_AB / p_A[:, None]            # P(B | A)
+p_C_given_AB = joint / p_AB[:, :, None]      # P(C | A, B)
+
+# Chain-rule reconstruction.
+recon = p_A[:, None, None] * p_B_given_A[:, :, None] * p_C_given_AB
+print("Max absolute error between joint and chain-rule reconstruction:",
+      np.abs(recon - joint).max())
+print("Chain rule verified -- any joint distribution factors this way, regardless of dependence.")
+
+# Application: the joint probability of a length-T sequence x_1, ..., x_T factors as
+#   P(x_1) * P(x_2 | x_1) * P(x_3 | x_1, x_2) * ... * P(x_T | x_1, ..., x_{T-1}).
+# This is exactly what an autoregressive language model computes -- one conditional
+# per token, given the entire preceding context.  Log-probabilities add:
+#   log P(seq) = sum_t log P(x_t | x_<t).
+print("\\nAutoregressive LMs = chain-rule factorization of the joint over tokens.")`;
+
+export const montyHallCode = `# The Monty Hall paradox: three doors, one prize.  You pick a door.
+# The host (who knows) opens a losing door from the two you didn't pick.
+# Should you switch to the remaining door?
+# Answer: YES.  Switching wins with probability 2/3; staying wins with probability 1/3.
+import numpy as np
+rng = np.random.default_rng(0)
+n = 100_000
+
+# Simulate.  The prize is behind a uniformly random door.  Your first pick is
+# uniform.  The host opens a losing door among the two not picked.
+prize = rng.integers(0, 3, size=n)
+pick  = rng.integers(0, 3, size=n)
+
+# For each trial, decide what "switch" gives.  If pick == prize, switching loses.
+# If pick != prize, switching wins (host reveals the remaining loser, forcing you
+# to switch to the prize door).
+wins_switch = (pick != prize).mean()
+wins_stay   = (pick == prize).mean()
+
+print(f"Empirical P(win | switch) = {wins_switch:.4f}   (theory 2/3 = 0.6667)")
+print(f"Empirical P(win | stay)   = {wins_stay:.4f}   (theory 1/3 = 0.3333)")
+
+# Why: conditioning on 'host opened door H' doesn't reset the situation to
+# 50/50.  Your original pick was correct with probability 1/3; that probability
+# transfers to 'you were right, and switching loses'.  The remaining 2/3 mass
+# concentrates on the un-opened door.  Conditional probability, correctly applied.`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/probability/sample-spaces-events", label: "Sample spaces, events & axioms", blurb: "Conditional probability is a restriction of the sample space to a smaller universe — you need the sample-space vocabulary first." },
+  { href: "/learn/mathematics/probability/bayes-theorem", label: "Bayes' theorem", blurb: "Bayes is just conditional probability rearranged; conditioning is the workhorse and Bayes is one useful identity built from it." },
+]} />
+
+<NewConcepts
+  concepts={[
+    { name: "Hidden Markov Models (HMMs)", blurb: "sequence models where observations are conditionally independent given a latent Markov chain of hidden states. Covered later; here it&rsquo;s a canonical use of conditional independence." },
+    { name: "Bayesian belief networks / graphical models", blurb: "directed graphs where each node&rsquo;s distribution depends only on its parents; joint = product of conditionals. Deep-dive in a later chapter." },
+    { name: "Naive Bayes classifier", blurb: "a classifier that assumes features are conditionally independent given the class. Covered in the next chapter (bayes-theorem); mentioned here as a preview." },
+    { name: "RAG re-rankers", blurb: "retrieval-augmented-generation systems that model documents jointly rather than independently. Mentioned in the RealWorldML section — full treatment in Tier 4." },
+  ]}
+/>
+
+<Motivation title="Conditioning is how every ML model reasons about context">
+
+Conditioning is the operation "restrict attention to the subset of the world where B is known to be true, then re-measure." Every "in-context" claim in ML — every &ldquo;the model uses the previous tokens to predict the next one,&rdquo; every &ldquo;we retrieve the top-k documents relevant to this query,&rdquo; every &ldquo;we condition the diffusion model on the class label&rdquo; — is a conditional-probability statement.
+
+For a GenAI engineer, three deep uses:
+
+- **Autoregressive language models compute a chain-rule factorization.** P(sentence) = P(x₁) · P(x₂ | x₁) · P(x₃ | x₁, x₂) · … · P(xₜ | x_&lt;t). Every next-token distribution is a *conditional* probability. Log-probabilities of sequences add up because logs turn products of conditionals into sums.
+- **Conditional generation.** Class-conditional image generation, prompt-conditioned text, style-conditioned diffusion, retrieval-augmented generation — all of them are learning P(output | condition) instead of P(output). The condition changes the probability measure; conditioning is the mechanism.
+- **Feature reasoning.** &ldquo;This feature is independent of that one, given the class label&rdquo; is the Naive-Bayes assumption. &ldquo;These two documents are independent, given the query&rdquo; is what RAG re-rankers assume. Independence assumptions are wrong more often than you'd hope, and understanding *when* independence holds vs *why* it fails is the difference between a model that works and one that leaks.
+
+Two operators (conditioning, independence) plus one identity (the chain rule) do more work in ML than any other three pieces of probability. This chapter is the payoff for the sample-space vocabulary from the previous chapter.
+
+</Motivation>
+
+<Intuition title="Conditioning = zoom in on the sub-universe where B is true; re-measure areas relative to that">
+
+Go back to the rectangle picture. The whole rectangle Ω has area 1. Event B is a shape inside it. **Conditioning on B** means throwing away everything outside B and rescaling so B itself has total area 1 — the new sample space *is* B. Event A's conditional probability P(A | B) is the fraction of the new sample space (which is B) that A occupies.
+
+Formally:
+
+$$
+P(A \mid B) \;=\; \frac{P(A \cap B)}{P(B)}
+$$
+
+The numerator is the overlap of A and B (before rescaling). The denominator is the total mass of B (before rescaling). Divide, and you get the fraction of B taken up by A. If B has probability zero, conditioning on B is undefined — you can't zoom in on a zero-area region.
+
+**Independence** is when conditioning on B leaves A unchanged: P(A | B) = P(A). Knowing B tells you nothing about A. Rearranging gives the multiplicative form: P(A ∩ B) = P(A) · P(B). That's the version that generalizes to arbitrary events.
+
+</Intuition>
+
+<Recall term="Event">
+
+An event is any subset of the sample space Ω. Every probability statement is about events. Conditioning is a way of turning one probability measure (on Ω) into another (on the subset B), and independence is a *relationship* between events under a given measure.
+
+</Recall>
+
+## Conditional probability — restrict, then renormalize
+
+The definition again, this time with a small worked example. Roll two fair dice. Ω has 36 equally-likely outcomes. Let
+
+- A = &ldquo;the sum is greater than 10&rdquo; = &#123;(5,6), (6,5), (6,6)&#125;. So P(A) = 3/36 = 1/12.
+- B = &ldquo;the first die shows 6&rdquo; = 6 outcomes: (6,1), (6,2), …, (6,6). P(B) = 6/36 = 1/6.
+- A ∩ B = &#123;(6,5), (6,6)&#125;. P(A ∩ B) = 2/36.
+
+The definition gives P(A | B) = (2/36) / (6/36) = **2/6 = 1/3**. Way bigger than the unconditional P(A) = 1/12. Knowing the first die is a 6 makes &ldquo;sum > 10&rdquo; much more likely.
+
+The direct-count check: among the six outcomes where the first die is 6 (i.e., inside B), exactly two of them have sum > 10 — (6,5) and (6,6). So the fraction of B that lies inside A is 2/6 = 1/3. Same answer. **Conditioning is literally &ldquo;fraction of the sub-universe.&rdquo;**
+
+<RunnableCode title="Two dice — verify P(sum > 10 | first die = 6) by simulation" code={conditionalCode} packages={["numpy"]} />
+
+Three properties that follow immediately:
+
+- **P( · | B) is itself a probability measure on B.** All three Kolmogorov axioms are inherited, with Ω replaced by B.
+- **P(Ω | B) = 1.** Nothing outside B contributes, and B occupies all of the conditional world.
+- **P(A | Ω) = P(A).** Conditioning on the whole universe changes nothing.
+
+## Independence: when knowing B tells you nothing about A
+
+Two events A, B are **independent** if learning B doesn&rsquo;t change your belief about A:
+
+$$
+P(A \mid B) \;=\; P(A) \qquad \Longleftrightarrow \qquad P(A \cap B) \;=\; P(A) \cdot P(B)
+$$
+
+The multiplicative form is symmetric in A and B, which is why we say &ldquo;A and B are independent&rdquo; rather than &ldquo;A is independent of B.&rdquo; Independence is a *property of the joint measure*, not of the events themselves — the same events could be independent under one measure and dependent under another.
+
+**Examples that are independent.** Two flips of the same fair coin. A die roll and the color of a card drawn from a separate deck. Successive draws *with replacement* from a bag.
+
+**Examples that look independent but aren&rsquo;t.**
+
+- Two exam scores in a class. Both are affected by the difficulty of the exam and the quality of teaching — hidden common causes create correlation.
+- Two flips of a coin whose bias is unknown. Marginally each flip is 50/50, but if you see 20 heads in a row, you should now believe heads is more likely on flip 21.
+- The predictions of two different LLMs on the same prompt. Both are drawing from correlated training data; they're not independent.
+
+**Conditional independence.** A and B may be dependent overall but *become* independent when conditioned on a third variable Z. Formally:
+
+$$
+P(A \cap B \mid Z) \;=\; P(A \mid Z) \cdot P(B \mid Z)
+$$
+
+This is the assumption behind **Naive Bayes** (words are conditionally independent given the class label) and **hidden Markov models** (observations are conditionally independent given the hidden state). It's a much weaker and much more useful assumption than unconditional independence.
+
+<RunnableCode title="Independence, dependence, and conditional independence — three cases" code={independenceCode} packages={["numpy"]} />
+
+## The chain rule — factor any joint distribution into a product of conditionals
+
+For any three events A, B, C:
+
+$$
+P(A \cap B \cap C) \;=\; P(A) \cdot P(B \mid A) \cdot P(C \mid A \cap B)
+$$
+
+This is just the definition of conditional probability applied twice. It generalizes: for n events,
+
+$$
+P(A_1 \cap A_2 \cap \cdots \cap A_n) \;=\; P(A_1) \cdot P(A_2 \mid A_1) \cdot P(A_3 \mid A_1, A_2) \cdots P(A_n \mid A_1, \ldots, A_{n-1})
+$$
+
+The chain rule holds for *any* joint distribution — no independence assumption needed. It's the mathematical backbone of every autoregressive model.
+
+**Autoregressive language models are chain-rule factorizations.** P(sentence) = P(word₁) · P(word₂ | word₁) · P(word₃ | word₁, word₂) · … The model is trained to estimate each conditional; teacher-forcing at training time gives it the correct context; the sequence probability is the product (or log-sum) of conditionals. GPT, Llama, Claude — every one of them is computing a chain-rule factorization of a joint over tokens.
+
+<RunnableCode title="Chain-rule factorization of a joint distribution" code={chainRuleCode} packages={["numpy"]} />
+
+**When independence buys you factorization for free.** If A₁, …, A_n are mutually independent, every conditional collapses to the marginal: P(A₂ | A₁) = P(A₂), etc. The joint becomes the product of marginals. This is why independence is such a strong assumption — it turns an exponentially large joint into a linearly small product. It's also why real-world data rarely satisfies it.
+
+## The Monty Hall paradox — conditioning done right
+
+Three doors. One has a prize. You pick door 1. The host, who knows what's behind each door, opens a losing door among the two you didn&rsquo;t pick — say door 3. Should you switch to door 2 or stay with door 1?
+
+The naive answer &ldquo;50/50&rdquo; is wrong. **Switching wins with probability 2/3.**
+
+Careful conditioning: your original pick was correct with probability 1/3, so P(prize is behind door 1) = 1/3. The two doors you didn&rsquo;t pick collectively contain the prize with probability 2/3. The host&rsquo;s action of opening one of them doesn&rsquo;t redistribute that 2/3 — it *concentrates it* on the remaining unopened door. So switching gives you probability 2/3.
+
+The point isn&rsquo;t the paradox, it's the *lesson*: conditioning on a piece of information is different from redistributing probability uniformly. When someone reveals evidence, the update depends on *how* they revealed it, not just *what* was revealed. The host&rsquo;s knowledge (they never open the prize door) is the reason switching wins. Change the setup so the host opens a random door — including possibly the prize door — and switching becomes a wash.
+
+<RunnableCode title="Monty Hall simulation — switching wins 2/3 of the time" code={montyHallCode} packages={["numpy"]} />
+
+## The traps that matter
+
+**Conditioning is not commutative with intersection.** P(A ∩ B | C) is not the same as P(A | B ∩ C) or P(A | B) · P(B | C). Always write out the definition and check.
+
+**Independence is a property of the measure, not the events.** Two coins may look independent under &ldquo;fair coin&rdquo; assumption but be dependent under &ldquo;unknown-bias&rdquo; assumption. Ask &ldquo;independent under which distribution?&rdquo;
+
+**Pairwise independence doesn&rsquo;t imply mutual independence.** Three events can be pairwise independent (P(A ∩ B) = P(A)P(B), P(A ∩ C) = P(A)P(C), P(B ∩ C) = P(B)P(C)) and yet P(A ∩ B ∩ C) ≠ P(A)P(B)P(C). Classic example: A, B are independent coin flips; C = &ldquo;A and B agree.&rdquo; Any two of &#123;A, B, C&#125; are pairwise independent, but all three aren&rsquo;t.
+
+**Conditioning on zero-probability events is undefined.** P(A | B) = P(A ∩ B) / P(B) with P(B) = 0 gives 0/0. Continuous distributions face this constantly — you have to condition on events like &ldquo;X is in a small neighborhood of x&rdquo; and take a limit, which is what leads to the *conditional density* concept.
+
+**Beware the base-rate fallacy — conditioning correctly on tests results.** P(disease | positive test) is not the same as P(positive test | disease). The Bayes chapter has the full worked example; the point here is that conditional probabilities are directional and asymmetric. Always ask &ldquo;which way does the conditioning bar go?&rdquo;
+
+**Selection effects induce spurious dependence.** If you only look at data where B has been selected (survivorship bias, publication bias), the observed correlations between other variables are conditional-on-B correlations — often very different from the true marginal correlations. In ML this shows up as data-leakage bugs and cherry-picking artifacts.
+
+<RealWorldML title="The independence assumption behind Naive Bayes — and why RAG re-rankers exist">
+
+Naive Bayes classifies a document by computing
+
+$$
+P(\text{class} \mid w_1, \ldots, w_n) \propto P(\text{class}) \prod_i P(w_i \mid \text{class}).
+$$
+
+The product form is only valid if the words are **conditionally independent given the class label**. In real text, they aren&rsquo;t — seeing &ldquo;New&rdquo; makes &ldquo;York&rdquo; hugely more likely, and both are correlated with the class &ldquo;travel article.&rdquo; Naive Bayes ignores this and multiplies anyway. It works well as a *classifier* — the ordering of classes is often preserved despite bad probability estimates — but its output probabilities are usually way off from true posteriors (usually over-confident).
+
+A parallel story runs through RAG systems. The retriever scores each document independently against the query, producing a similarity score s(query, doc_i). Ranking documents by s pretends the documents' relevance is independent given the query. But when the top documents cover overlapping content, they're *not* independent — retrieving 5 near-duplicates gives you no more information than retrieving 1. This is why production RAG systems add a **re-ranker** or **diversifier** as a second stage: the re-ranker looks at documents *jointly* and models P(doc_i is useful | query, doc_1, …, doc_&lt;i&gt;) — a chain-rule factorization that gives up the independence assumption for a more expensive but accurate model.
+
+The pattern: **independence assumptions buy you speed and simplicity; dropping them buys accuracy at a cost.** The engineering skill is knowing which independence assumptions are close to true, which are wrong-but-cheap, and which need to be dropped altogether. Every layer of a modern GenAI stack — tokenization, attention, retrieval, decoding — makes some independence assumption and pays a specific cost for it.
+
+</RealWorldML>
+
+<StudyDepth
+  intro={<>Conditioning + independence + chain rule = the three tools you use every day in ML probability reasoning. Master these and every graphical model, every autoregressive factorization, every conditional generation setup becomes a routine calculation.</>}
+  drill={[
+    <>Definition: P(A | B) = P(A ∩ B) / P(B) — conditioning restricts and renormalizes</>,
+    <>Independence: P(A ∩ B) = P(A) · P(B) equivalently P(A | B) = P(A)</>,
+    <>Chain rule: P(A₁ ∩ ⋯ ∩ Aₙ) = P(A₁) · P(A₂ | A₁) · P(A₃ | A₁, A₂) · ⋯</>,
+    <>Conditional independence P(A ∩ B | Z) = P(A | Z) · P(B | Z) is the assumption behind Naive Bayes and HMMs</>,
+    <>Autoregressive LMs = chain-rule factorization of the joint over tokens; log-probabilities of sequences add</>,
+    <>Monty Hall lesson: conditioning on an informative reveal is not the same as redistributing uniformly</>,
+  ]}
+  skim={[
+    <>Pairwise vs mutual independence — a subtlety that matters in proofs, rarely in ML engineering</>,
+    <>Conditioning on measure-zero events — needs the continuous-distribution machinery of the random-variables chapter</>,
+    <>Full Bayesian-network / graphical-model machinery — for a later chapter</>,
+  ]}
+/>
+
+<CodeItYourself title="Three drills — conditioning, independence check, chain rule">
+
+1. **Card-hand conditioning.** Deal 5 cards from a standard 52-card deck. Compute P(hand has at least one Ace | hand contains the King of Spades) by simulation (100,000 hands). Compare to P(hand has at least one Ace) unconditionally. The conditional should be a bit higher — knowing one card is fixed leaves fewer &ldquo;slots&rdquo; for the other four, which makes it slightly more likely they include an Ace.
+
+2. **Test for independence numerically.** Generate 10,000 samples of (X, Y) where X ~ Bernoulli(0.5) and Y = X XOR ε with ε ~ Bernoulli(0.1). Compute P(X = 1), P(Y = 1), and P(X = 1, Y = 1) empirically. Check whether P(X=1, Y=1) ≈ P(X=1) · P(Y=1). It won&rsquo;t — Y is a noisy copy of X, so they&rsquo;re correlated. Vary the ε rate from 0 (perfectly correlated) to 0.5 (independent) and plot P(X, Y) − P(X) P(Y) vs ε.
+
+3. **Chain-rule sequence probability.** Given a length-4 sequence [a, b, c, d] and a hand-designed conditional table P(next_letter | previous_letter) (e.g., first-order Markov), compute P(sequence) two ways: (a) via the chain rule — multiply four conditionals; (b) directly by counting how often the sequence appears in a longer simulated stream. They should agree.
+
+</CodeItYourself>
+
+<Summary>
+
+- **Conditional probability** P(A | B) = P(A ∩ B) / P(B) — restrict the sample space to B, then measure A's fraction of the restricted space.
+- **P( · | B) is itself a probability measure** on B, satisfying all three Kolmogorov axioms.
+- **Independence** of A and B: P(A ∩ B) = P(A) · P(B). Equivalently, P(A | B) = P(A) — knowing B tells you nothing about A.
+- **Conditional independence given Z**: P(A ∩ B | Z) = P(A | Z) · P(B | Z). A weaker and more useful assumption than unconditional independence; the foundation of Naive Bayes and HMMs.
+- **Chain rule** P(A₁ ∩ … ∩ Aₙ) = P(A₁) · P(A₂ | A₁) · P(A₃ | A₁, A₂) · … Holds for any joint, no independence needed. The backbone of autoregressive language models.
+- **Monty Hall**: conditioning correctly on how information is revealed matters as much as what is revealed. Switching wins with probability 2/3.
+- **Naive Bayes and RAG re-rankers** are two sides of the same tradeoff — cheap independence assumptions vs expensive but accurate joint modeling.
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>Two fair dice are rolled. Compute P(sum = 7 | first die = 3).</>,
+      hint: <>Restrict to outcomes where the first die is 3, then count how many have sum 7.</>,
+      answer: <>Given first die = 3, the second die must be 4 for the sum to equal 7. Since the second die is uniform on &#123;1, …, 6&#125;, <br /> P(sum = 7 | first die = 3) = 1/6 ≈ <b>0.1667</b>. <br /> Notice that unconditional P(sum = 7) is also 1/6 — this pair of events happens to be independent. The first die value doesn&rsquo;t change P(sum = 7) because each fixed value of the first die leaves exactly one second-die value that hits sum = 7.</>,
+    },
+    {
+      difficulty: "easy",
+      q: <>A bag has 4 red and 6 blue marbles. Draw two marbles without replacement. What is P(second is red | first is red)? Is this the same as P(second is red)?</>,
+      hint: <>Restrict to outcomes where the first draw was red; the bag now has 3 red and 6 blue.</>,
+      answer: <>Given first is red, the bag now has 9 marbles, 3 of which are red. So P(second is red | first is red) = <b>3/9 = 1/3</b>. <br /> Unconditionally, by symmetry P(second is red) = 4/10 = 2/5 = 0.4. <br /> The two are different — draws without replacement are <em>dependent</em>. Independence would require sampling <em>with</em> replacement.</>,
+    },
+    {
+      difficulty: "medium",
+      q: <>Prove that if A and B are independent, then so are A and Bᶜ.</>,
+      hint: <>Decompose A into (A ∩ B) ∪ (A ∩ Bᶜ) — disjoint. Take probabilities.</>,
+      answer: <>A = (A ∩ B) ∪ (A ∩ Bᶜ), disjoint. By axiom 3: <br /> P(A) = P(A ∩ B) + P(A ∩ Bᶜ). <br /> Given A, B independent: P(A ∩ B) = P(A) P(B). Substitute: <br /> P(A) = P(A) P(B) + P(A ∩ Bᶜ), so <br /> P(A ∩ Bᶜ) = P(A) (1 − P(B)) = P(A) · P(Bᶜ). <br /> That&rsquo;s exactly the independence condition for A and Bᶜ. ∎ <br /><br /> Same argument shows Aᶜ and B are independent, and Aᶜ and Bᶜ are independent. Independence is preserved under complementation.</>,
+    },
+    {
+      difficulty: "medium",
+      q: <>An LLM assigns P(next token = &ldquo;Paris&rdquo; | context) = 0.6 and P(next token = &ldquo;London&rdquo; | context) = 0.2. What is the probability that the next generated token is one of these two capitals, assuming greedy decoding is not used?</>,
+      hint: <>&ldquo;Paris&rdquo; and &ldquo;London&rdquo; are two disjoint outcomes in the vocabulary sample space. Sum their probabilities.</>,
+      answer: <>The two token outcomes are disjoint (only one token is generated). By axiom 3: <br /> P(&ldquo;Paris&rdquo; or &ldquo;London&rdquo; | context) = P(&ldquo;Paris&rdquo; | context) + P(&ldquo;London&rdquo; | context) = 0.6 + 0.2 = <b>0.8</b>. <br /> This is why summing top-k token probabilities gives you the &ldquo;cumulative probability&rdquo; used in nucleus (top-p) sampling — the disjoint additivity of the conditional measure. Under greedy decoding, the answer would degenerate to just &ldquo;Paris&rdquo; being chosen (probability 1 on the argmax).</>,
+    },
+    {
+      difficulty: "hard",
+      q: <>Let A and B be events with 0 &lt; P(A), P(B) &lt; 1. Show that if A and B are independent, they cannot be disjoint (unless one has probability zero).</>,
+      hint: <>Compute P(A ∩ B) two ways: from independence and from disjointness.</>,
+      answer: <>Suppose A and B are both independent and disjoint. Then: <br /> Independence: P(A ∩ B) = P(A) · P(B) &gt; 0 (since both P(A) and P(B) are strictly positive). <br /> Disjoint: A ∩ B = ∅, so P(A ∩ B) = P(∅) = 0. <br /> Contradiction: 0 = P(A) · P(B) &gt; 0 is impossible. So A and B cannot be simultaneously independent and disjoint when both have positive probability. ∎ <br /><br /> Intuition: disjoint events are <em>maximally</em> dependent — knowing one occurred tells you the other definitely did not. Independence is the opposite regime. The only way both can hold is if one event has zero mass to begin with.</>,
+    },
+    {
+      difficulty: "hard",
+      q: <>Consider three fair coin flips. Let A = &ldquo;flip 1 is heads,&rdquo; B = &ldquo;flip 2 is heads,&rdquo; C = &ldquo;flips 1 and 2 match.&rdquo; Show that A, B, C are pairwise independent but not mutually independent.</>,
+      hint: <>Compute P(A), P(B), P(C), and each pairwise intersection. Then check the triple intersection.</>,
+      answer: <><b>Marginals.</b> P(A) = 1/2, P(B) = 1/2. For C, flips 1 and 2 match in 4 out of 8 outcomes (HH*, TT*), so P(C) = 1/2. <br /><br /> <b>Pairwise intersections.</b> <br /> A ∩ B = &ldquo;flip 1 heads AND flip 2 heads&rdquo; = 2 outcomes (HHH, HHT). P(A ∩ B) = 2/8 = 1/4 = P(A) · P(B). ✓ <br /> A ∩ C = &ldquo;flip 1 heads AND flips 1,2 match&rdquo; = &ldquo;flip 1 heads AND flip 2 heads&rdquo; = 2 outcomes. P(A ∩ C) = 1/4 = P(A) · P(C). ✓ <br /> B ∩ C = &ldquo;flip 2 heads AND flips 1,2 match&rdquo; = same 2 outcomes. P(B ∩ C) = 1/4 = P(B) · P(C). ✓ <br /><br /> <b>Triple intersection.</b> A ∩ B ∩ C = &ldquo;flip 1 heads AND flip 2 heads AND flips 1,2 match&rdquo; = 2 outcomes. P(A ∩ B ∩ C) = 2/8 = 1/4. <br /> But P(A) · P(B) · P(C) = 1/8. <br /> So P(A ∩ B ∩ C) ≠ P(A) · P(B) · P(C). The three events are pairwise independent but <b>not</b> mutually independent. ∎ <br /><br /> This is why &ldquo;independence&rdquo; in n-variable statements always means <em>mutual</em> independence, not just pairwise. Naive Bayes assumes conditional mutual independence — a much stronger condition than pairwise.</>,
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "P(A | B) is defined as:",
+      choices: [
+        { text: "P(A) · P(B)" },
+        { text: "P(A ∩ B) / P(B), requiring P(B) > 0", correct: true },
+        { text: "P(A) + P(B) − P(A ∩ B)" },
+        { text: "P(A) − P(B)" },
+      ],
+      explanation: <>The definition. Numerator = joint probability of A and B occurring together; denominator = total probability of B, which normalizes so P(Ω | B) = 1. When P(B) = 0, conditional probability is undefined — you cannot restrict the sample space to a zero-measure region.</>,
+    },
+    {
+      q: "Two events A and B are independent iff:",
+      choices: [
+        { text: "A ∩ B = ∅ (they are disjoint)" },
+        { text: "P(A ∩ B) = P(A) · P(B), equivalently P(A | B) = P(A)", correct: true },
+        { text: "P(A) = P(B)" },
+        { text: "A ⊆ B or B ⊆ A" },
+      ],
+      explanation: <>Independence and disjointness are opposite ideas. Disjoint = knowing one occurred means the other definitely did not (maximum dependence). Independent = knowing one occurred changes nothing about the other. Do not confuse them.</>,
+    },
+    {
+      q: "For n events A₁, …, Aₙ, the chain rule states:",
+      choices: [
+        { text: "P(A₁ ∩ ⋯ ∩ Aₙ) = P(A₁) + P(A₂) + ⋯ + P(Aₙ)" },
+        { text: "P(A₁ ∩ ⋯ ∩ Aₙ) = P(A₁) · P(A₂ | A₁) · P(A₃ | A₁, A₂) · ⋯ · P(Aₙ | A₁, …, Aₙ₋₁)", correct: true },
+        { text: "P(A₁ ∩ ⋯ ∩ Aₙ) = P(A₁) · P(A₂) · ⋯ · P(Aₙ)" },
+        { text: "The chain rule requires the events to be independent" },
+      ],
+      explanation: <>The chain rule is the definition of conditional probability applied n − 1 times. It holds for <em>any</em> joint distribution — no independence assumption is required. The all-marginals product form (option 3) is a <em>special case</em> when the events are mutually independent.</>,
+    },
+    {
+      q: "Autoregressive language models compute:",
+      choices: [
+        { text: "Just the marginal probability of the last token" },
+        { text: "A chain-rule factorization: P(x₁, …, xₜ) = P(x₁) · P(x₂ | x₁) · … · P(xₜ | x_{<t})", correct: true },
+        { text: "An independence-assumption factorization: P(x₁) · P(x₂) · … · P(xₜ)" },
+        { text: "The pairwise probabilities P(xᵢ, xⱼ) for all pairs" },
+      ],
+      explanation: <>The autoregressive factorization is a chain-rule factorization — each next-token conditional depends on the full preceding context. The independence factorization (option 3) would be a &ldquo;unigram&rdquo; language model, which cannot capture syntax or long-range structure. Every real LLM uses the chain rule.</>,
+    },
+    {
+      q: "In the Monty Hall problem, switching wins with probability:",
+      choices: [
+        { text: "1/2 — the two remaining doors are equally likely" },
+        { text: "2/3 — conditioning on the host's informed reveal concentrates probability on the unopened door", correct: true },
+        { text: "1/3 — your original pick was correct" },
+        { text: "1 — always switch" },
+      ],
+      explanation: <>Your original pick was correct with probability 1/3. That 1/3 does not change when the host opens a losing door — the host's action reveals information about the <em>two doors you didn&rsquo;t pick</em>, and the 2/3 collective probability those doors held gets concentrated on the single remaining unopened one. Switching wins with probability 2/3. The lesson: information revealed by a knowing agent has different consequences than information from a random event.</>,
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/probability/conditional-independence" title="Conditional probability & independence" />

@@ -1,0 +1,502 @@
+---
+title: Newton, quasi-Newton & natural gradients
+tier: 1
+phase: "1.6"
+---
+
+export const newtonVsGdCode = `# Newton's method vs gradient descent on a stretched quadratic.
+# Newton with a QUADRATIC objective converges in ONE step (exact minimum).
+# GD takes many steps and wobbles along the narrow direction.
+import numpy as np, matplotlib.pyplot as plt
+
+# f(x, y) = 10 x^2 + y^2  -- stretched 10x in the x direction.
+def f(v):    return 10 * v[0]**2 + v[1]**2
+def grad(v): return np.array([20 * v[0], 2 * v[1]])
+H = np.array([[20.0, 0.0], [0.0, 2.0]])          # Hessian is constant for a quadratic
+
+def gd(x0, lr=0.09, steps=25):
+    v = x0.copy(); traj = [v.copy()]
+    for _ in range(steps):
+        v = v - lr * grad(v); traj.append(v.copy())
+    return np.array(traj)
+
+def newton(x0, steps=5):
+    "Newton step: v <- v - H^{-1} · grad(v).  For a quadratic, ONE step reaches the min."
+    v = x0.copy(); traj = [v.copy()]
+    for _ in range(steps):
+        v = v - np.linalg.solve(H, grad(v))
+        traj.append(v.copy())
+    return np.array(traj)
+
+x0 = np.array([1.0, 1.0])
+gd_traj  = gd(x0)
+new_traj = newton(x0)
+
+# Plot
+xs, ys = np.meshgrid(np.linspace(-1.2, 1.2, 100), np.linspace(-1.2, 1.2, 100))
+Z = 10 * xs**2 + ys**2
+
+fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+for ax, (name, tr) in zip(axes, [("GD (lr=0.09)", gd_traj), ("Newton", new_traj)]):
+    ax.contour(xs, ys, Z, levels=15, colors="teal", alpha=0.4)
+    ax.plot(tr[:, 0], tr[:, 1], "-o", markersize=4, color="crimson", lw=1.5)
+    ax.plot(0, 0, "*", color="gold", markersize=14)
+    ax.set_title(f"{name} — {len(tr)-1} iterations, final loss {f(tr[-1]):.6f}")
+    ax.set_aspect("equal"); ax.grid(alpha=0.3); ax.set_xlim(-1.2, 1.2); ax.set_ylim(-1.2, 1.2)
+plt.tight_layout()
+
+print(f"GD:     took {len(gd_traj) - 1} steps, final loss {f(gd_traj[-1]):.6f}")
+print(f"Newton: took {len(new_traj) - 1} steps, final loss {f(new_traj[-1]):.6f}")
+print("On a quadratic, Newton solves it in ONE step (the exact minimizer).")`;
+
+export const bfgsCode = `# BFGS: quasi-Newton method that BUILDS UP an approximation of H^{-1} from gradients only.
+# No explicit Hessian needed.  This is the algorithm scipy.optimize.minimize defaults to.
+import numpy as np
+
+def rosenbrock(v):
+    "Classic hard test problem: banana-shaped valley, min at (1, 1) with f = 0."
+    x, y = v
+    return 100 * (y - x**2)**2 + (1 - x)**2
+
+def rosen_grad(v):
+    x, y = v
+    dx = -400 * x * (y - x**2) - 2 * (1 - x)
+    dy = 200 * (y - x**2)
+    return np.array([dx, dy])
+
+def bfgs(f, grad, x0, steps=50, tol=1e-8):
+    "Very short BFGS: maintain an inverse-Hessian approximation and update it after each step."
+    x = np.asarray(x0, float)
+    n = len(x)
+    H_inv = np.eye(n)             # start with identity as inverse-Hessian
+    trajectory = [x.copy()]
+    for k in range(steps):
+        g = grad(x)
+        if np.linalg.norm(g) < tol:
+            break
+        # Newton-like step using the current H^{-1} estimate
+        p = -H_inv @ g
+        # Line search: pick step size along p (backtracking Armijo)
+        alpha = 1.0
+        f_x = f(x)
+        while f(x + alpha * p) > f_x + 1e-4 * alpha * g @ p and alpha > 1e-10:
+            alpha *= 0.5
+        x_new = x + alpha * p
+        g_new = grad(x_new)
+        s = x_new - x
+        y = g_new - g
+        # BFGS update to H^{-1}  (Sherman-Morrison rearrangement)
+        rho = 1.0 / (y @ s + 1e-12)
+        I = np.eye(n)
+        H_inv = (I - rho * np.outer(s, y)) @ H_inv @ (I - rho * np.outer(y, s)) + rho * np.outer(s, s)
+        x = x_new
+        trajectory.append(x.copy())
+    return np.array(trajectory)
+
+traj = bfgs(rosenbrock, rosen_grad, np.array([-1.2, 1.0]))
+print(f"BFGS on Rosenbrock: converged to {traj[-1]} in {len(traj) - 1} iterations")
+print(f"Final loss: {rosenbrock(traj[-1]):.8f} (true min is 0 at (1, 1))")
+print()
+print("BFGS uses ONLY gradients (no Hessian), yet gets a super-linear convergence rate.")
+print("For comparison, plain GD on Rosenbrock takes 10,000+ iterations for similar loss.")`;
+
+export const naturalGradientCode = `# Natural gradient for a simple 2-parameter logistic model.
+# Compare updates in EUCLIDEAN geometry (standard GD) vs FISHER geometry (natural gradient).
+# The Fisher metric measures distance in the space of distributions, not parameters.
+import numpy as np
+
+# Bernoulli(sigmoid(theta)).  For each parameter theta, the model outputs p = 1/(1+exp(-theta)).
+# The Fisher information at theta is I(theta) = p(1-p).
+# For a batch of iid samples, Fisher-scaled gradient has a very different magnitude at
+# extreme parameter values (p ~ 0 or p ~ 1) than at the middle (p = 0.5).
+
+def sigmoid(z): return 1 / (1 + np.exp(-z))
+def nll(theta, y):
+    "Negative log-likelihood of iid Bernoulli(sigmoid(theta)) samples y."
+    p = sigmoid(theta)
+    return -(y * np.log(p + 1e-12) + (1 - y) * np.log(1 - p + 1e-12)).sum()
+def grad_nll(theta, y):
+    p = sigmoid(theta)
+    return (p - y).sum()
+def fisher(theta, n):
+    p = sigmoid(theta)
+    return n * p * (1 - p)
+
+np.random.seed(0)
+n = 100
+true_theta = 2.0                        # true p = sigmoid(2) ~= 0.88
+y = np.random.binomial(1, sigmoid(true_theta), size=n)
+
+# Standard GD vs natural GD, starting from theta = -3 (very far from truth)
+def gd_step(theta, lr):
+    return theta - lr * grad_nll(theta, y)
+
+def ng_step(theta, lr):
+    return theta - lr * grad_nll(theta, y) / (fisher(theta, n) + 1e-8)
+
+for method, step_fn in [("standard GD", gd_step), ("natural gradient", ng_step)]:
+    theta = -3.0
+    losses = [nll(theta, y)]
+    for _ in range(30):
+        theta = step_fn(theta, lr=0.02)
+        losses.append(nll(theta, y))
+    print(f"{method:>18}: final theta = {theta:.3f}   final loss = {losses[-1]:.3f}")
+
+print()
+print("Natural gradient converges MUCH faster because it corrects for the fact that")
+print("sigmoid is very flat at extreme theta (small standard gradient) but the model")
+print("distribution is actually changing a lot per unit of theta there. The Fisher metric")
+print("measures 'distance between distributions' which is what actually matters.")`;
+
+export const lbfgsScipyCode = `# L-BFGS via scipy.optimize is the workhorse for small-to-medium convex ML problems.
+# Fit logistic regression with L-BFGS -- the standard sklearn solver for LogisticRegression.
+import numpy as np
+from scipy.optimize import minimize
+
+# Synthetic linearly-separable 2D classification
+np.random.seed(0)
+N = 300
+X_pos = np.random.randn(N // 2, 2) + np.array([+1.5, +1.5])
+X_neg = np.random.randn(N // 2, 2) + np.array([-1.5, -1.5])
+X = np.vstack([X_pos, X_neg])
+y = np.concatenate([np.ones(N // 2), np.zeros(N // 2)])
+X = np.hstack([X, np.ones((N, 1))])  # add bias column
+
+def nll(w):
+    z = X @ w
+    return -np.sum(y * z - np.log1p(np.exp(z)))     # numerically-stable BCE
+
+def grad_nll(w):
+    p = 1 / (1 + np.exp(-X @ w))
+    return X.T @ (p - y)
+
+# L-BFGS with the scipy wrapper (this is EXACTLY what sklearn LogisticRegression uses)
+result = minimize(nll, np.zeros(3), jac=grad_nll, method="L-BFGS-B")
+
+print(f"L-BFGS converged in {result.nit} iterations, {result.nfev} function evaluations.")
+print(f"Final weights: {result.x}")
+print(f"Final loss: {result.fun:.4f}")
+print()
+print("For comparison, GD on this problem needs ~1000 steps to reach similar loss.")
+print("L-BFGS quasi-Newton wins on well-behaved medium-scale problems.")`;
+
+<Prerequisites items={[
+  { href: "/learn/mathematics/optimization/convex-vs-nonconvex", label: "Convex vs non-convex objectives", blurb: "Newton's method makes sense (and its convergence guarantees hold) on convex problems; on non-convex problems its behavior is much less clean." },
+  { href: "/learn/mathematics/optimization/sgd-and-friends", label: "SGD, momentum, and mini-batches", blurb: "First-order methods (GD, momentum) are the baseline. Second-order methods use additional curvature information; this chapter asks when the extra cost is worth it." },
+  { href: "/learn/mathematics/linear-algebra/positive-definite", label: "Positive definite matrices", blurb: "Newton's step uses H⁻¹ · grad; positive-definite Hessians make the direction sensible (points downhill)." },
+  { href: "/learn/mathematics/calculus/jacobian-hessian", label: "Jacobian & Hessian", blurb: "The Hessian is the object second-order methods use directly (or approximate)." },
+]} />
+
+<NewConcepts
+  concepts={[
+    { name: "Fisher information matrix", blurb: "the Hessian of the negative log-likelihood at the true parameter — or equivalently, the covariance of the score. Natural-gradient descent divides by this instead of the plain Hessian, giving a coordinate-invariant step." },
+    { name: "K-FAC (Kronecker-Factored Approximate Curvature)", blurb: "practical natural-gradient method for neural nets. Approximates the Fisher as a Kronecker product per layer, cheap to invert. Used in RLHF and some optimizer research." },
+    { name: "Shampoo / Sophia", blurb: "modern second-order methods that use Kronecker-factored curvature (Shampoo) or diagonal-Hessian estimates (Sophia) to improve on AdamW at scale. Referenced here as the cutting edge — not yet dominant in production LLM training." },
+    { name: "Secant condition (BFGS's key trick)", blurb: "B · (x_{k+1} - x_k) = ∇f_{k+1} - ∇f_k. BFGS updates B (the Hessian approximation) at each step to satisfy this exactly, without ever computing a Hessian." },
+    { name: "Sherman–Morrison formula", blurb: "the identity that lets BFGS maintain an EXPLICIT inverse-Hessian approximation via a rank-1 update — no matrix inversion needed each step." },
+  ]}
+/>
+
+<Motivation title="Second-order methods are theoretically superior — and rarely used for LLMs">
+
+Every textbook introduces Newton's method as the "gold standard" of optimization: convergence in one step for quadratics, quadratic convergence rate for general convex problems (double the number of correct digits per iteration). Then in the same chapter it explains why nobody uses Newton to train GPT-3.
+
+For a GenAI engineer, understanding second-order methods matters for two reasons:
+
+1. **Knowing what you're leaving on the table.** L-BFGS reaches the same solution as SGD in 10-100x fewer iterations on small convex problems (sklearn's LogisticRegression uses L-BFGS by default, not SGD). Understanding why lets you decide when to reach for it.
+2. **Understanding modern "adaptive" optimizers.** Adam approximates the diagonal of the Fisher information matrix — it's second-order-*flavored*. K-FAC and Shampoo are legitimate second-order methods gaining traction in training research. Sophia (2024) uses a cheap Hessian estimate.
+
+The core question this chapter answers: **when does the extra cost of curvature information pay off, and when doesn't it?** The answer for LLMs is "usually doesn't (yet)," but the "yet" is important — training research is actively closing the gap.
+
+</Motivation>
+
+<Intuition title="Gradient tells you which way is downhill; Hessian tells you how steeply">
+
+Gradient descent steps proportional to the gradient. But two problems can have the same gradient at the current point yet require very different steps:
+
+- A **bowl-shaped** loss (mild curvature): a large step is safe.
+- A **ravine-shaped** loss (steep in one direction, shallow in another): a large step overshoots along the steep direction.
+
+**The Hessian captures curvature** — it's the matrix of second partial derivatives that tells you how the gradient itself is changing. Newton's method uses that information to take a **curvature-adjusted** step:
+
+$$
+x_{k+1} = x_k - [H(x_k)]^{-1} \nabla f(x_k)
+$$
+
+Geometrically: on any quadratic function, Newton **jumps directly to the minimum in one step**. On a general smooth convex function, Newton achieves **quadratic convergence** — near the optimum, the number of correct digits doubles per iteration. Compare to gradient descent's linear convergence at rate `(1 − μ/L)`.
+
+**The cost:** computing and inverting an n × n Hessian is O(n³). For a network with 1 billion parameters, that's 10²⁷ FLOPs per iteration. Not happening.
+
+**The compromise:** quasi-Newton methods (BFGS, L-BFGS) build up an *approximation* of the Hessian from gradient differences, at O(n) memory and O(n²) per step. Better than plain GD, cheap enough to be practical.
+
+</Intuition>
+
+<Recall term="Hessian">
+
+The Hessian `H(x) = ∇²f(x)` is the matrix of second partial derivatives of a scalar function f. Entry `H_{ij} = ∂²f/∂x_i∂x_j`. It measures how the gradient changes as you move around: `∇f(x + Δx) ≈ ∇f(x) + H(x)·Δx`. For twice-differentiable f, H is symmetric (Schwarz's theorem). If H is positive-definite everywhere, f is (strictly) convex.
+
+</Recall>
+
+## Newton's method
+
+**The idea.** Locally, approximate f by its second-order Taylor expansion around x_k:
+
+$$
+f(x_k + \Delta x) \approx f(x_k) + \nabla f(x_k) \cdot \Delta x + \tfrac{1}{2} \Delta x^\top H(x_k) \Delta x
+$$
+
+Minimize this quadratic approximation exactly: set the gradient w.r.t. Δx to zero:
+
+$$
+\nabla f(x_k) + H(x_k) \Delta x = 0 \quad \Rightarrow \quad \Delta x = -H(x_k)^{-1} \nabla f(x_k)
+$$
+
+**The update:** `x_{k+1} = x_k - H(x_k)^{-1} · ∇f(x_k)`.
+
+**Two properties that make Newton attractive:**
+
+1. **One-step exact on quadratics.** If f is exactly quadratic, the second-order Taylor approximation IS f, so Newton's step jumps to the exact minimum. This is what the demo below shows.
+2. **Quadratic convergence rate.** Near a strong local minimum of a smooth convex function, `‖x_{k+1} - x*‖ ≤ C ‖x_k - x*‖²`. Each iteration approximately squares the distance to the minimum — insanely fast once you're close.
+
+<RunnableCode title="Newton on a quadratic — one-step exact" code={newtonVsGdCode} packages={["numpy", "matplotlib"]} captureFig={true} />
+
+**Three problems that keep Newton out of neural net training:**
+
+1. **O(n³) per iteration.** Inverting the Hessian scales cubically in the number of parameters. A 100M-parameter model needs 10²⁴ FLOPs per Newton step. Prohibitive.
+2. **O(n²) memory for the Hessian.** Even STORING a 100M × 100M matrix is 10¹⁶ floats. Impossible.
+3. **Hessian is not PSD in non-convex problems.** In deep-net loss landscapes, the Hessian at intermediate points can have negative eigenvalues (saddle points), which makes `-H⁻¹·grad` point UPHILL. Newton without safeguards is dangerous. Damping (`H + λI`) or trust-region methods fix this at additional cost.
+
+## Quasi-Newton — approximate the Hessian from gradients
+
+The BFGS insight: you can build up a good Hessian approximation from **gradient differences alone**, no second-derivative computation needed.
+
+**The secant condition.** Since `f(x_{k+1}) - f(x_k) ≈ ∇f(x_k) · Δx + ½ Δxᵀ H Δx`, differentiating gives:
+
+$$
+\nabla f(x_{k+1}) - \nabla f(x_k) \approx H (x_{k+1} - x_k)
+$$
+
+That is, `B_{k+1} · s_k = y_k` where `s_k = x_{k+1} - x_k` and `y_k = ∇f(x_{k+1}) - ∇f(x_k)`. Requires the new Hessian approximation `B_{k+1}` to be consistent with the observed gradient change.
+
+**The BFGS update** finds the closest PSD matrix to the previous approximation that satisfies the secant condition. Via the Sherman-Morrison formula, this can be done as a **rank-2 update of the inverse Hessian approximation** — no matrix inversion needed. Cost per step: O(n²).
+
+**L-BFGS (limited-memory BFGS)** goes further: store only the last k gradient/step pairs (`k ~ 10-20`) instead of the whole approximate Hessian. Cost: O(k·n) memory and O(k·n) per step. For k = 10 and n = 100M, that's 1G floats — manageable.
+
+<RunnableCode title="BFGS on the Rosenbrock 'banana' function — canonical hard test" code={bfgsCode} packages={["numpy"]} />
+
+**Where L-BFGS wins:**
+
+- **Small-to-medium convex problems.** sklearn's `LogisticRegression` and `LinearSVC` default to L-BFGS. For a 10k-parameter logistic regression, L-BFGS reaches the exact optimum in ~50 iterations while SGD would need thousands.
+- **Scientific ML / physics-informed nets.** When the objective is smooth and the number of parameters is moderate (10⁴-10⁶), L-BFGS with automatic differentiation from PyTorch/JAX is a strong choice.
+
+**Where L-BFGS loses:**
+
+- **Deep learning at scale.** Batches introduce noise into the gradients; the secant condition (which assumes exact gradients) breaks down. Stochastic L-BFGS exists but is unstable in practice.
+- **Non-differentiable losses.** L-BFGS assumes smoothness; ReLU + max-pooling + discrete operations violate this.
+
+<RunnableCode title="L-BFGS via scipy — the default for sklearn's LogisticRegression" code={lbfgsScipyCode} packages={["numpy", "scipy"]} />
+
+## Natural gradient descent
+
+Gradient descent has an implicit choice: it uses **Euclidean geometry** — the direction of steepest descent depends on how you parameterize the model. Reparameterize your model (e.g., `w' = 2w`) and the same "step of size 0.1 in the gradient direction" moves you differently through the model.
+
+**Natural gradient** fixes this by measuring distance in the space of **output distributions**, not parameters. For a probabilistic model, the **Fisher information matrix**:
+
+$$
+F(\theta) = \mathbb{E}_x [\nabla \log p_\theta(x) \nabla \log p_\theta(x)^\top]
+$$
+
+is the (metric) matrix that induces a coordinate-invariant "distance between distributions." The natural gradient step is:
+
+$$
+\theta_{k+1} = \theta_k - \eta \cdot F(\theta_k)^{-1} \cdot \nabla \mathcal{L}(\theta_k)
+$$
+
+**Why this matters:** the same LLM under natural gradient trains identically regardless of whether you parameterize with logits, sigmoid outputs, or exp of logits. Under standard GD, these are three different training runs.
+
+<RunnableCode title="Natural gradient vs standard GD on a Bernoulli model" code={naturalGradientCode} packages={["numpy"]} />
+
+**Practical instantiations for deep learning:**
+
+- **K-FAC (Martens & Grosse 2015).** Approximates the Fisher as a **Kronecker product** per layer. Cheap to invert. Used in some RLHF training pipelines and by DeepMind's optimizer research.
+- **Shampoo (Gupta et al. 2018).** Kronecker-factored curvature approximation, more scalable than K-FAC.
+- **Sophia (Liu et al. 2024).** Uses a cheap diagonal Hessian estimate as a scaling factor. Claimed 2x speedup over AdamW at pretraining scale — actively being validated.
+
+## Cost vs benefit at LLM scale
+
+Why doesn't every LLM lab use K-FAC or L-BFGS? The bottleneck at scale is **not** iteration count — it's **memory and per-step compute**. AdamW's per-parameter state (two extra tensors: m and v) already costs 2x parameter memory. K-FAC adds Kronecker factors that cost O(√n) more. Shampoo requires SVD-like operations per layer. At GPT-scale, these overheads multiply the training cost by a factor that hasn't yet been shown to be worth it in most head-to-head comparisons.
+
+**Where second-order methods are winning:**
+
+- **Convex ML (sklearn, statsmodels).** L-BFGS is the default choice.
+- **Small models / scientific problems.** BFGS + autodiff is the go-to combo.
+- **Fine-tuning (post-hoc).** L-BFGS is common for small-scale supervised fine-tuning where you can afford exact gradients.
+- **Some RL training loops.** K-FAC-based methods (ACKTR, etc.) are used in advanced policy-gradient RL.
+
+**Where they're not (yet):**
+
+- **LLM pretraining.** AdamW remains dominant. Sophia is the leading candidate for displacement.
+
+<RealWorldML title="Second-order optimizers in production ML pipelines">
+
+The map of where second-order methods actually run in industry, roughly:
+
+**Classical ML (sklearn, XGBoost, statsmodels):**
+- Logistic regression, SVM, GLM: L-BFGS or Newton-Raphson (LiblineaR).
+- These converge in tens of iterations on any dataset small enough to fit in memory; second-order methods dominate first-order methods here by a wide margin.
+
+**Deep learning (PyTorch, JAX, TF):**
+- Vanilla training: AdamW.
+- Adam is "diagonal quasi-second-order" — it approximates only the diagonal of the Fisher information matrix. That's already a partial second-order method.
+- For fine-tuning small parts of a big model (adapters, LoRA heads), L-BFGS is sometimes worth trying.
+
+**RLHF / policy optimization:**
+- TRPO (Trust Region Policy Optimization) uses natural gradient (Fisher-scaled) updates with a KL trust region — full second-order flavor.
+- Modern implementations (PPO) approximate TRPO with clipping to avoid the Fisher-inverse cost. PPO is now the default because it's cheaper.
+
+**Cutting-edge research (2024-2026):**
+- Sophia (diagonal Hessian estimate) claims 2x speedup over AdamW on transformer training. Under active adoption.
+- Shampoo/K-FAC hybrid methods for pretraining are actively researched.
+- LLM training is a natural target for these methods because a 2x speedup translates to hundreds of thousands of dollars saved per pretraining run.
+
+**Rule of thumb:** if your problem is convex and fits in memory, use L-BFGS or Newton. If it's non-convex with millions to billions of parameters, use AdamW (with cosine LR + warmup + weight decay) and watch the Sophia/Shampoo research for the next Adam replacement.
+
+</RealWorldML>
+
+<StudyDepth
+  drill={[
+    "Newton's step: x ← x − H⁻¹ · ∇f.",
+    "Newton converges in ONE step on quadratics; quadratic rate on smooth convex functions.",
+    "BFGS/L-BFGS builds up an approximate H⁻¹ from gradient differences — no explicit Hessian.",
+    "L-BFGS is the sklearn / statsmodels workhorse for small-to-medium convex ML.",
+    "Cost of Newton: O(n³) per step; L-BFGS: O(k · n) per step for k stored pairs.",
+    "For deep learning at scale, second-order methods are dominated by AdamW's cheaper per-step cost — for now.",
+  ]}
+  skim={[
+    "Full BFGS derivation via Sherman–Morrison.",
+    "K-FAC's Kronecker-factored Fisher approximation.",
+    "Trust-region methods (Levenberg-Marquardt, Dogleg).",
+    "Natural gradient's differential-geometric derivation (Amari).",
+    "Sophia and Shampoo implementation details.",
+  ]}
+/>
+
+<CodeItYourself title="Three drills — Newton by hand, BFGS on a hard problem, Adam is quasi-Newton">
+
+1. **Newton on a quadratic by hand.** For `f(x, y) = x² + 4y²`, compute the gradient and Hessian analytically. Start at `(2, 1)`. Do the Newton step by hand and verify you land at `(0, 0)` exactly.
+
+2. **BFGS on Rosenbrock, tuned.** Modify the BFGS code above with different starting points and line-search tolerances. Notice how sensitive convergence is to the line search (bad line search = huge slowdown).
+
+3. **Compare Adam to L-BFGS.** For a small logistic regression problem (10 features, 1000 examples), fit with both scipy's L-BFGS and a hand-coded Adam. Count iterations to reach the same loss. L-BFGS should win by a factor of 10-100x on this small convex problem.
+
+</CodeItYourself>
+
+<Summary>
+
+- **Newton's method:** x ← x − H⁻¹ · ∇f. Uses the exact Hessian; converges in ONE step on quadratics, quadratic rate on smooth convex functions.
+- **Cost of Newton:** O(n³) per step to invert the Hessian. Impractical for n ≥ 10⁴.
+- **Quasi-Newton (BFGS, L-BFGS):** build up an approximate H⁻¹ from consecutive gradient differences via the secant condition. Cost O(n²) or O(k·n) — practical for n up to 10⁶ or so.
+- **L-BFGS is the sklearn / statsmodels default** for logistic regression, LinearSVC, and other small-to-medium convex ML problems.
+- **Natural gradient:** use the Fisher information matrix as the metric instead of Euclidean geometry. Coordinate-invariant, principled step in "distribution space."
+- **K-FAC, Shampoo, Sophia:** modern approximations of second-order information for deep learning. Actively researched; not yet dominant in LLM pretraining.
+- **Adam is diagonal-Fisher-lite.** Its per-parameter 1/√v term is a cheap approximation of natural gradient. That's a big part of why Adam works so well as a "poor man's second-order method."
+
+</Summary>
+
+<ProblemSet
+  problems={[
+    {
+      difficulty: "easy",
+      q: <>Newton's method converges in one iteration on a quadratic function. Why?</>,
+      hint: <>Look at the Taylor expansion Newton uses to derive its step.</>,
+      answer: <>Newton's method minimizes a local quadratic approximation of f built from the current gradient and Hessian. When f itself is quadratic, that "approximation" is EXACT — it equals f everywhere. So the "minimizer of the approximation" is the true minimizer of f, reached in one step. On a non-quadratic function, the quadratic approximation is only locally accurate, so you need multiple steps.</>
+    },
+    {
+      difficulty: "easy",
+      q: <>Why isn't Newton's method used to train LLMs?</>,
+      hint: <>Think about the size of the Hessian for a model with 10⁹ parameters.</>,
+      answer: <>Two reasons: <br /> (1) <b>Computational cost.</b> Inverting an n × n Hessian is O(n³). For a 10⁹-parameter LLM, that's 10²⁷ FLOPs per step — many years per iteration on any modern GPU. <br /> (2) <b>Memory cost.</b> Even STORING the Hessian is O(n²) — 10¹⁸ floats for a 10⁹-param model, requiring ~10¹⁹ bytes = 10 million GB. No system can hold this. <br /> Adam-like methods approximate only the DIAGONAL of the Hessian (or Fisher) at cost O(n), making them ~10⁹ times cheaper per step. That's why Adam displaced Newton for large-scale training.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>What is BFGS's secant condition, and what problem does it solve?</>,
+      hint: <>Think about what you want the Hessian approximation to satisfy after each step.</>,
+      answer: <>The secant condition: <b>B_{"k+1"} · s_k = y_k</b>, where s_k = x_{"k+1"} − x_k is the step just taken and y_k = ∇f_{"k+1"} − ∇f_k is the corresponding gradient change. It requires the new Hessian approximation to be CONSISTENT with the observed relationship between step and gradient change (which for a quadratic would be exact). <br /><br /> BFGS finds the closest PSD matrix to the previous approximation that satisfies this — using only quantities computed during the gradient descent step. No second-derivative computation needed. That's the key innovation of quasi-Newton methods: <b>build up an approximate Hessian from gradients alone</b>.</>
+    },
+    {
+      difficulty: "medium",
+      q: <>The Adam optimizer has an update proportional to grad / √v where v is a running average of gradient squared. In what sense is this second-order-like?</>,
+      hint: <>The Fisher information matrix at the true parameter equals the Hessian of the negative log-likelihood. What is its diagonal, in expectation?</>,
+      answer: <>The diagonal of the Fisher information matrix is E[(∂ log p / ∂θᵢ)²] — the per-parameter variance of the score. Adam's `v_i` running-average approximates exactly this: E[g_i²] over recent mini-batches. So Adam divides each parameter's gradient by roughly the square root of that parameter's Fisher diagonal — a cheap, diagonal-only approximation of natural gradient descent. <br /><br /> This is why Adam is called "second-order-flavored" — it approximates the Fisher (which equals the Hessian for max-likelihood problems) but only along the diagonal. Full K-FAC or Shampoo would use non-diagonal information; Adam settles for the diagonal because it's O(n) instead of O(n²).</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Prove that on a quadratic f(x) = ½ xᵀ A x − bᵀ x + c with A positive-definite, Newton's method reaches the minimum in one step from any starting point.</>,
+      hint: <>Compute the Newton step for a general starting point x_0 and verify it lands at the minimizer.</>,
+      answer: <>Gradient: ∇f(x) = A x − b. Hessian: H = A (constant, since f is quadratic). <br /><br /> The Newton step from any x_0: <br /> x_1 = x_0 − H⁻¹ · ∇f(x_0) = x_0 − A⁻¹ · (A x_0 − b) = x_0 − x_0 + A⁻¹ b = <b>A⁻¹ b</b>. <br /><br /> The minimizer of f is where ∇f = 0, i.e., A x* − b = 0, so x* = A⁻¹ b. This EQUALS x_1. So Newton reaches the minimum in one step regardless of x_0. ∎ <br /><br /> This is the theoretical foundation of Newton's method: any smooth convex function looks quadratic in a small neighborhood of its minimum, so once you're close, Newton makes gigantic progress per step.</>
+    },
+    {
+      difficulty: "hard",
+      q: <>Why is natural gradient descent (Fisher-scaled) coordinate-invariant, but plain GD is not?</>,
+      hint: <>Consider what happens if you reparameterize your model from w to w' = 2w. How do the standard-gradient and natural-gradient updates compare?</>,
+      answer: <>Suppose we have a Bernoulli model with parameter θ, and reparameterize to θ' = 2θ. The negative log-likelihood in the new coordinates: <br /> L'(θ') = L(θ'/2). Gradient: ∂L'/∂θ' = (1/2) · ∂L/∂θ. <br /><br /> <b>Plain GD:</b> in original coords, step is θ - η · L'(θ). In new coords, step is θ' - η · L''(θ') = θ' - (η/2) · L'(θ'/2). Undo the reparam: the "same" step in θ-space is θ - (η/2) · L'(θ). So the same η produces DIFFERENT effective updates in θ! Standard GD depends on parameterization. <br /><br /> <b>Natural gradient:</b> the Fisher matrix transforms like a metric: F'(θ') = (∂θ/∂θ')² · F(θ) = F(θ) / 4. So the natural-gradient step: <br /> θ' - η · F'(θ')⁻¹ · ∂L'/∂θ' = θ' - η · [F(θ)/4]⁻¹ · [L'(θ)/2] = θ' - η · [4/F(θ)] · [L'(θ)/2] = θ' - 2η · L'(θ) / F(θ). <br /> Undoing the reparam (divide by 2 to get back to θ): θ - η · L'(θ) / F(θ). <br /><br /> That's IDENTICAL to the original natural-gradient step in θ-coords! Fisher's metric properties exactly cancel the parameterization scaling, so the update is coordinate-invariant. This is why natural gradient is "the right" step — it depends only on the MODEL (through Fisher), not the parameterization.</>
+    },
+  ]}
+/>
+
+<Quiz
+  items={[
+    {
+      q: "Newton's method updates x ← x − H⁻¹ · ∇f where H is the:",
+      choices: [
+        { text: "Gradient." },
+        { text: "Hessian (matrix of second partial derivatives).", correct: true },
+        { text: "Jacobian." },
+        { text: "Fisher information matrix." },
+      ],
+      explanation: <>H in Newton's method is the Hessian of f, containing the second partial derivatives that measure local curvature. Multiplying by H⁻¹ rescales the gradient so that flat directions get big steps and steep directions get small steps — the "curvature-corrected" descent. Natural gradient uses the Fisher matrix instead; the two coincide at max-likelihood points but differ elsewhere.</>
+    },
+    {
+      q: "BFGS's main innovation over Newton is:",
+      choices: [
+        { text: "Skipping the gradient calculation." },
+        { text: "Building an approximate Hessian from gradient differences instead of computing second derivatives.", correct: true },
+        { text: "Using a bigger learning rate." },
+        { text: "Only working on convex problems." },
+      ],
+      explanation: <>BFGS uses the secant condition — the observed relationship between gradient change y_k and step s_k — to update an approximate inverse Hessian at O(n²) per step (or O(kn) for L-BFGS with k stored pairs), without ever computing a Hessian. This trades exact Newton behavior for much lower per-step cost, still much cheaper than the O(n³) of full Newton.</>
+    },
+    {
+      q: "L-BFGS is the DEFAULT optimization method used by:",
+      choices: [
+        { text: "PyTorch when training large transformers." },
+        { text: "sklearn's LogisticRegression for the 'lbfgs' solver.", correct: true },
+        { text: "JAX's SGD implementation." },
+        { text: "Every RLHF training loop." },
+      ],
+      explanation: <>sklearn's LogisticRegression, LinearSVC, and other small-scale convex solvers default to L-BFGS. It converges to machine precision in tens of iterations on any dataset small enough to fit in memory. In deep learning at scale, AdamW is the default because gradient noise from mini-batches breaks BFGS's secant condition — but for exact-gradient convex optimization, L-BFGS is the workhorse.</>
+    },
+    {
+      q: "Natural gradient descent uses which matrix instead of the plain Hessian?",
+      choices: [
+        { text: "The identity matrix." },
+        { text: "The Fisher information matrix (expected outer product of the score).", correct: true },
+        { text: "The Jacobian of the loss." },
+        { text: "A random projection." },
+      ],
+      explanation: <>Natural gradient's key insight: use the Fisher information matrix F(θ) = E[∇log p_θ · ∇log p_θᵀ] as the metric. This makes the update coordinate-invariant — reparameterizing the model doesn't change the update. At max-likelihood parameters, Fisher ≈ Hessian, so natural gradient ≈ Newton there. Away from the optimum, they differ; the Fisher is always PSD (Hessian may not be on non-convex problems), which is a nice safety property.</>
+    },
+    {
+      q: "The main reason Sophia/Shampoo/K-FAC haven't displaced AdamW for LLM training is:",
+      choices: [
+        { text: "They require GPUs with more VRAM than exists." },
+        { text: "Their per-step cost isn't yet cheap enough to offset the fewer steps needed at LLM scale.", correct: true },
+        { text: "Adam is theoretically optimal." },
+        { text: "The mathematics doesn't work for transformers." },
+      ],
+      explanation: <>These modern second-order methods DO reduce the number of iterations needed. But at LLM scale (billions of parameters), per-step cost dominates: AdamW's O(n) update is much cheaper than K-FAC's Kronecker inversions or Shampoo's SVDs. So far, the extra per-step cost hasn't been proven to yield net speedups at frontier-model scale. Sophia (2024) is the leading contender; if its 2x speedup holds up at scale, it may become the new default. This is an active research frontier as of 2026.</>
+    },
+  ]}
+/>
+
+<MarkDone slug="mathematics/optimization/second-order-methods" title="Newton, quasi-Newton & natural gradients" />

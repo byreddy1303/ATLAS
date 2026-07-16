@@ -118,6 +118,14 @@ print("Q[0] recomputed as dot products:",
   { href: "/learn/mathematics/vectors-space/projections-orthogonality", label: "Projections & orthogonality", blurb: "Projections are a specific family of matrices — the ones that squash space onto a subspace." },
 ]} />
 
+<NewConcepts
+  concepts={[
+    { name: "transformer / attention", blurb: "the LLM building block. Its Q, K, V projections are all linear transformations — a matrix acting on token embeddings." },
+    { name: "LoRA (Low-Rank Adaptation)", blurb: "adds a rank-r update AB^T to a frozen weight matrix during fine-tuning. Deep-dive after the SVD chapter." },
+    { name: "softmax", blurb: "the exp(x_i) / Σ exp(x_j) function that turns logits into probabilities; the output of every attention layer." },
+  ]}
+/>
+
 <Motivation title="Every transformer layer is a matrix acting on vectors">
 
 Open the source of any GPT-style model and count the operations that actually shape the answer: **`x @ W`**, **`Q @ K.T`**, **`attn @ V`**, **`h @ W_out`**. That's it. Layer norm, softmax, and ReLU do the nonlinear seasoning — but the *shape* of an LLM's computation is a chain of matrix multiplications acting on batches of token vectors.

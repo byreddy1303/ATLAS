@@ -110,6 +110,12 @@ for i in np.argsort(-scores):     # best match first
   { href: "/learn/mathematics/vectors-space/dot-product-cosine-similarity", label: "Dot product & cosine similarity", blurb: "‖v‖ = √(v·v) and cos θ — both get connected to distance here." },
 ]} />
 
+<NewConcepts
+  concepts={[
+    { name: "transformer embeddings", blurb: "the vector representations of tokens inside a transformer; distances between them (cosine, L2) drive nearest-neighbor and retrieval systems." },
+  ]}
+/>
+
 <Motivation title="'Closest' is a design decision">
 
 Every RAG system answers one geometric question: *which stored embedding is closest to the query embedding?* But "closest" isn't one thing — it depends on the **ruler**. Measure with the L2 ruler and you get Euclidean distance; with L1, Manhattan distance; rank by cosine and you're not even using a true distance (we'll prove that). Vector databases let you pick, and picking wrong quietly degrades retrieval.
