@@ -174,42 +174,44 @@ print(f"Coverage: {coverage*100:.1f}% of true y are inside (should be ~90%)")`;
   ]}
 />
 
-<Motivation title="Different metrics reward different behaviors — pick the metric that matches your cost">
+<Motivation title="Regression metrics — pick the one that matches your actual cost">
 
-A regression model predicts a continuous value. But "how good is the prediction" doesn't have a single answer. Consider:
+A regression model predicts a continuous number. Simple to describe, but "how good is the prediction" doesn't have a single answer — it depends on *what you're going to do with the prediction*. A few examples that show why:
 
-- **You're forecasting inventory demand.** Missing 20 units when you predicted 100 (20% off) is worse than missing 5 units when you predicted 200 (2.5% off) — same absolute error, very different business impact. You want **percentage-based** metrics.
-- **You're pricing risk.** A single outlier of ±$1M matters much more than 100 small mistakes of ±$100. You want **squared-error** metrics that magnify big mistakes.
-- **You're predicting delivery time.** Being 2 hours late is much worse than being 2 hours early (customer complains vs happily surprised). You want **asymmetric** metrics.
-- **You're building a warehouse restocking system.** You need a 95th-percentile prediction ("worst-case demand this week"), not the average. You want **quantile** regression.
+- **Forecasting inventory demand.** Missing 20 units when you predicted 100 (20% off) is worse than missing 5 units when you predicted 200 (2.5% off), even though the absolute error is bigger in the second case. You care about *percentage* errors — a metric like **MAPE**.
+- **Pricing risk on financial positions.** A single outlier of ±$1M matters *much* more than 100 small mistakes of ±$100. You want a metric that *magnifies* big mistakes — one built on **squared error**, like MSE or RMSE.
+- **Predicting delivery time.** Being 2 hours late is much worse than being 2 hours early — angry customer vs. pleasant surprise. You want an **asymmetric** metric that penalizes over- and under-prediction differently.
+- **Warehouse restocking.** You don't need "average demand this week" — you need "worst-case demand this week" (say, the 95th percentile). You want **quantile regression**.
 
-For a GenAI engineer, choosing the right metric matters in several places:
+Same regression task, four completely different metrics. The metric you pick literally shapes what the model tries to be.
 
-1. **LLM eval benchmarks** (BLEU, ROUGE, BERTScore, LLM-as-judge) are all regression-like scores on a continuous quality scale.
-2. **Reward-model training** for RLHF fits scalar rewards from preference labels. The loss you choose (MSE vs. Bradley-Terry log-loss vs. cross-entropy on preference pairs) shapes the reward's calibration.
-3. **Latency prediction / capacity planning.** Quantile regression for "how long will this request take at the 99th percentile?" is a common ML-ops question.
-4. **Perplexity for language models** is exp(mean cross-entropy per token) — a specific transformation of a regression-like loss over token probabilities.
+For a GenAI engineer, this shows up in several concrete places:
 
-This chapter builds the core regression metrics (MSE, RMSE, MAE, MAPE, R²), the outlier-robust alternatives (Huber, quantile), and the residual-plot diagnostics that reveal when to switch.
+1. **LLM evaluation benchmarks** — BLEU, ROUGE, BERTScore, LLM-as-judge grades — are all regression-flavored continuous quality scores. Understanding regression metrics helps you read and interpret them.
+2. **Reward-model training for RLHF.** The reward model outputs a scalar reward from preference labels. The loss you choose (MSE vs. Bradley-Terry log-loss vs. cross-entropy on preference pairs) shapes what the reward actually captures.
+3. **Latency prediction / capacity planning.** "At the 99th percentile, how long will this request take?" is a quantile regression problem.
+4. **Perplexity for language models.** `exp(mean cross-entropy per token)` — a specific transformation of a regression-like loss over token probabilities. Yes, perplexity is a regression metric in a hat.
+
+This chapter builds the core regression metrics (**MSE**, **RMSE**, **MAE**, **MAPE**, **R²**), the outlier-robust alternatives (**Huber**, **quantile**), and the **residual plot** tricks that tell you when your model is misspecified.
 
 </Motivation>
 
-<Intuition title="Different losses penalize errors differently; the model minimizes what you optimize">
+<Intuition title="The loss you pick determines what the model becomes">
 
-The two most-basic regression losses:
+Here's a beautiful and consequential fact: **the loss function you choose to minimize shapes what your model actually is.** Same data, different loss → different optimal prediction. Let's see it with the two simplest losses:
 
-- **MSE (Mean Squared Error):** `(1/N) · Σ (ŷ − y)²`. Squares each error. Punishes big errors much more than small ones. The estimator that minimizes MSE with a constant predictor is the **MEAN** of y.
-- **MAE (Mean Absolute Error):** `(1/N) · Σ |ŷ − y|`. Uses absolute value. Punishes each error linearly, so outliers matter less. The estimator that minimizes MAE with a constant predictor is the **MEDIAN** of y.
+- **MSE (Mean Squared Error)** — `(1/N) · Σ (ŷ − y)²`. Squares each error. Punishes big errors *much* more than small ones. If you use MSE and fit a constant predictor (just one number for all inputs), the optimal constant is the **mean** of `y`.
+- **MAE (Mean Absolute Error)** — `(1/N) · Σ |ŷ − y|`. Uses absolute value. Punishes each error *linearly*, so outliers matter less. If you use MAE and fit a constant predictor, the optimal constant is the **median** of `y`.
 
-Same data, different losses, different optimal predictions. The METRIC you optimize shapes what the model becomes.
+That's not a coincidence — it's a direct consequence of the shape of each loss function. And it tells you what to expect: **MSE models chase averages** (which are pulled around by outliers). **MAE models chase typical values** (which shrug off outliers).
 
-**Rule of thumb by loss shape:**
+**Quick rule of thumb, by loss shape:**
 
-- **MSE / RMSE:** you care about big errors more (they're squared). Sensitive to outliers.
-- **MAE:** all errors matter equally per unit. Robust to outliers.
-- **Huber:** MSE for small errors, MAE for large — best of both when you have some outliers you don't want to fully ignore.
-- **MAPE:** scale-free (compares fractional error, not absolute). Good when scale varies wildly (predicting revenue from $10 startups to $10B companies).
-- **Quantile loss (pinball):** targets a specific percentile. Good for asymmetric costs and prediction intervals.
+- **MSE / RMSE** — you care more about big errors than small ones. Sensitive to outliers.
+- **MAE** — all errors matter equally per unit off. Robust to outliers.
+- **Huber** — quadratic near zero, linear far away. Best of both worlds when you have *some* outliers you don't want to fully ignore.
+- **MAPE** — scale-free (measures fractional error). Use when your target values span very different scales (predicting revenue from a $10 startup vs. a $10B company).
+- **Quantile loss (pinball)** — targets a specific percentile (say the 95th). Right choice for asymmetric costs and prediction intervals.
 
 </Intuition>
 
@@ -219,7 +221,7 @@ MSE(y, ŷ) = (1/N) · Σᵢ (ŷᵢ − yᵢ)². Same units-squared as y (multipl
 
 </Recall>
 
-## The four core metrics
+## The four metrics you'll reach for constantly
 
 **MSE (Mean Squared Error):**
 
@@ -227,7 +229,7 @@ $$
 \mathrm{MSE} = \frac{1}{N} \sum_i (\hat{y}_i - y_i)^2
 $$
 
-Units: y-squared (usually not directly interpretable — see RMSE). Punishes big errors quadratically. Best statistic when errors are Gaussian.
+Units: `y`-squared (dollars-squared, meters-squared — usually not directly interpretable, which is why we compute RMSE from it). Punishes big errors quadratically. It's the natural statistic when your errors are Gaussian — falls out of MLE. Default regression loss.
 
 **RMSE (Root Mean Squared Error):**
 
@@ -235,7 +237,7 @@ $$
 \mathrm{RMSE} = \sqrt{\mathrm{MSE}}
 $$
 
-Same units as y. Directly interpretable ("on average, off by X y-units"). Standard for reporting.
+Same units as `y`. Now you can read it as "on average, off by X units" — much more human-friendly than MSE. Standard for reporting.
 
 **MAE (Mean Absolute Error):**
 
@@ -243,7 +245,7 @@ $$
 \mathrm{MAE} = \frac{1}{N} \sum_i |\hat{y}_i - y_i|
 $$
 
-Robust to outliers (each error contributes linearly, not squared). Also in units of y.
+Robust to outliers because each error contributes *linearly* (not squared). Also in units of `y`. Useful whenever you don't want a few bad points to dominate your metric.
 
 **MAPE (Mean Absolute Percentage Error):**
 
@@ -251,13 +253,13 @@ $$
 \mathrm{MAPE} = \frac{1}{N} \sum_i \left| \frac{\hat{y}_i - y_i}{y_i} \right| \cdot 100\%
 $$
 
-Scale-free. Compare model performance across problems with different y scales. Watch for the y_i = 0 trap.
+Scale-free — measures error as a *percentage* of the true value. Great for comparing model performance across problems with different `y` scales. Big trap: undefined when any `yᵢ = 0`, and it goes wild when `y` is close to zero.
 
 <RunnableCode title="Core regression metrics side-by-side" code={coreMetricsCode} packages={["numpy"]} />
 
-**RMSE vs MAE comparison rule:** if RMSE >> MAE, you have outliers. If RMSE ≈ MAE, errors are roughly uniform. Report both.
+**A quick diagnostic — compare RMSE with MAE.** RMSE is always at least as large as MAE (mathematical fact from Jensen's inequality). If they're close, your errors are roughly uniformly distributed. If RMSE is *much* larger than MAE (say 3× or more), you have **outliers** — a few big misses are dragging RMSE up while leaving MAE steady. Always report both.
 
-## R² and adjusted R²
+## R² and adjusted R² — the "how much variance did I explain" story
 
 **R² (coefficient of determination):**
 
@@ -265,95 +267,107 @@ $$
 R^2 = 1 - \frac{\mathrm{RSS}}{\mathrm{TSS}} = 1 - \frac{\sum_i (y_i - \hat{y}_i)^2}{\sum_i (y_i - \bar{y})^2}
 $$
 
-Interpretation: fraction of the target's variance explained by the model. Ranges from 1 (perfect) down to 0 (baseline = predicting the mean) and can go NEGATIVE (worse than predicting the mean).
+**RSS** = residual sum of squares (how much error your model leaves). **TSS** = total sum of squares (how much variance `y` has around its mean — the "if I just predicted the average" error). R² is one minus their ratio: **the fraction of `y`'s variance that your model explains**.
 
-**R² for regression is like accuracy for classification** — a single number that summarizes model quality. But like accuracy, it hides details:
+Interpretation is nicely bounded:
 
-- Ignores the SCALE of errors (a model with R² = 0.9 could be off by 10% or 100% on average, depending on target variance).
-- Sensitive to outliers (RSS is squared).
-- Only makes sense on datasets with meaningful target variance.
+- **R² = 1** → perfect predictions.
+- **R² = 0** → your model is no better than always predicting the mean.
+- **R² < 0** → your model is actually *worse* than predicting the mean. This can happen when you evaluate on a shifted distribution, or your model is badly misspecified.
 
-**Adjusted R²** penalizes R² for the number of features (prevents it from artificially rising with irrelevant features):
+**R² for regression is like accuracy for classification** — a single summary number. And, like accuracy, it hides details:
+
+- Ignores the *scale* of errors. A model with R² = 0.9 could be off by 10% or 100% on average, depending on how variable `y` is.
+- Sensitive to outliers (because RSS uses squared errors).
+- Only meaningful on datasets where `y` has non-trivial variance to explain.
+
+**Adjusted R²** — a small correction that stops R² from artificially climbing when you throw in irrelevant features:
 
 $$
 \text{adj\_}R^2 = 1 - (1 - R^2) \cdot \frac{N - 1}{N - D - 1}
 $$
 
-where D is the number of features. Standard for model comparison — the model with the higher adjusted R² is preferred over one with more features but similar R².
+where `D` is the number of features. When you compare two models with different feature counts, prefer the one with higher *adjusted* R² — otherwise you'll pick the bigger model even when the extra features aren't really helping.
 
-## Robust regression — Huber loss
+## Huber loss — the outlier-robust compromise
 
-When your data has outliers, MSE penalizes them harshly (squared) — the model spends most of its capacity fitting the outliers instead of the bulk of the data. MAE is more robust but has issues at zero (non-differentiable, so gradient methods use subgradients).
+Here's the tension. MSE penalizes big errors quadratically, so if you have outliers, the model spends most of its capacity fitting the outliers instead of the bulk of the data. Bad. MAE is more robust — outliers only contribute linearly — but MAE has a sharp kink at zero (not differentiable there), which makes gradient-based training a bit awkward.
 
-**Huber loss** combines the two:
+**Huber loss** takes the best of both:
 
 $$
 L_\delta(r) = \begin{cases} \frac{1}{2} r^2 & \text{if } |r| \le \delta \\ \delta \cdot (|r| - \frac{\delta}{2}) & \text{if } |r| > \delta \end{cases}
 $$
 
-where r = ŷ − y is the residual. Quadratic near zero (differentiable, well-behaved), linear far away (outliers don't blow up gradients). Parameter δ (typically 1.35 for near-Gaussian noise) controls where the transition happens.
+where `r = ŷ − y` is the residual. Read this carefully: **inside a small window `[−δ, δ]` around zero**, the loss is quadratic (smooth, differentiable, well-behaved). **Outside that window** (i.e., for big errors), it becomes linear (outliers can't blow up the gradient). The parameter `δ` controls where the transition happens — typical value is `δ = 1.35` for data that's mostly Gaussian with some contamination.
 
-**In sklearn:** `HuberRegressor` fits with Huber loss. Robust to ~5-10% outliers without needing to remove them.
+The magic of Huber: the *gradient magnitude* is bounded by `δ`. No matter how big an outlier is, it can contribute at most `δ` to the gradient. So a small handful of outliers can no longer dominate training.
+
+**In sklearn:** `HuberRegressor` fits with Huber loss automatically. It's the standard tool when you suspect 5-10% of your data are outliers you'd rather not fully trust but also don't want to remove.
 
 <RunnableCode title="MSE vs MAE robustness — a single outlier" code={outlierRobustnessCode} packages={["numpy", "matplotlib"]} captureFig={true} />
 
-## Quantile regression
+## Quantile regression — predicting percentiles instead of means
 
-Standard regression predicts the CONDITIONAL MEAN E[y | x]. Sometimes you want a specific quantile — e.g., "the 95th percentile of delivery time given features x" for capacity planning.
+Standard regression predicts the **conditional mean** `E[y | x]`. Sometimes that's not what you want. Some examples:
 
-**Quantile regression** fits models to predict the q-th percentile. The loss is the **pinball loss** (asymmetric absolute error):
+- **Capacity planning.** "What's the 95th-percentile delivery time given features `x`?" You need to plan for the *worst-plausible* case, not the average one.
+- **Financial risk.** "What's the 1% worst-case loss on this portfolio tomorrow?" That's the 99th percentile of the loss distribution — a concept called **Value at Risk (VaR)**.
+- **Asymmetric costs.** Understocking loses sales (bad), overstocking wastes money (also bad, but differently). Predicting different percentiles for each side lets you optimize decisions.
+
+**Quantile regression** fits a model to predict any percentile you specify. The loss function is called the **pinball loss** (yes, really — it's shaped like a pinball paddle at zero):
 
 $$
 L_q(r) = \begin{cases} q \cdot r & \text{if } r \ge 0 \\ (q - 1) \cdot r & \text{if } r < 0 \end{cases}
 $$
 
-For q = 0.5, this reduces to MAE (median regression). For q = 0.95, over-predictions are penalized 19× more than under-predictions — the model learns to sit above 95% of the data.
+Read this: for the 50th percentile (`q = 0.5`), positive and negative errors are penalized equally — which reduces to MAE (median regression). For the 95th percentile (`q = 0.95`), under-predictions (`r < 0`) are penalized 19× more than over-predictions — the model learns to sit *above* 95% of the data, exactly what "95th percentile" means.
 
-**Uses:**
+**Common uses:**
 
-- **Prediction intervals.** Fit two quantiles (say 5% and 95%); the interval [q_0.05, q_0.95] contains 90% of the actual y values.
-- **Asymmetric costs.** Under-stocking (miss = lost sale) vs over-stocking (miss = waste). Different quantiles for each side.
-- **Value at risk in finance.** 99% VaR = "what's the 1% worst-case loss?" is a quantile regression problem.
+- **Prediction intervals.** Fit two quantiles (say `q = 0.05` and `q = 0.95`); the range between them is a 90% prediction interval — 90% of the actual `y` values should fall inside it.
+- **Asymmetric-cost decisions.** Under-stocking loses sales (cost = missed profit). Over-stocking wastes money (cost = storage + spoilage). Different quantiles for different sides of the decision.
+- **Finance.** 99% VaR is a quantile regression problem.
 
 <RunnableCode title="Quantile regression — 3 quantiles + coverage check" code={quantileCode} packages={["numpy", "sklearn", "matplotlib"]} captureFig={true} />
 
-## Residual analysis
+## Residual analysis — diagnosing what your model is missing
 
-Once you've fit a model, PLOT the residuals `y - ŷ` against various things:
+After fitting any regression model, **plot the residuals** (`y − ŷ`) against things — this is the fastest way to tell if your model is missing something. A few key plots:
 
-- **vs. predicted values ŷ:** should show scatter around zero with no pattern.
-  - **U-shape:** nonlinearity in the true relationship.
-  - **Fan-out (wider at extremes):** heteroscedastic noise.
-- **vs. each feature x_i:** should show scatter around zero with no pattern.
-  - **Linear pattern:** you're missing a term in x_i.
-  - **Curve:** you need polynomial or nonlinear features of x_i.
-- **Q-Q plot of residuals vs Gaussian:** should be a straight line if residuals are Gaussian.
-  - **S-shape at ends:** heavy tails (outliers matter more than Gaussian assumes).
-  - **Systematic curve:** residual distribution isn't Gaussian.
+- **Residuals vs. predicted values `ŷ`.** Should look like uniform scatter around zero. If instead you see:
+  - **A U-shape** — the true relationship is *nonlinear* and your model is missing it. Add polynomial features or use a nonlinear model.
+  - **A fan-out** (wider spread at extremes) — the noise variance depends on `x`. That's **heteroscedasticity**. Use weighted least squares or transform `y` (like fitting `log(y)` instead).
+- **Residuals vs. each feature `xᵢ`.** Same story — should be uniform scatter around zero.
+  - **Linear pattern** → you're missing a term involving `xᵢ`.
+  - **Curved pattern** → you need a polynomial or nonlinear transform of `xᵢ`.
+- **Q-Q plot** (quantile-quantile plot) of residuals vs. a Gaussian. Should be a straight diagonal line if residuals are Gaussian.
+  - **S-shape at the ends** → heavy tails, meaning outliers are more common than Gaussian would predict.
+  - **Systematic curve** → the residual distribution isn't Gaussian at all — worth investigating before doing statistical inference on the coefficients.
 
 <RunnableCode title="Residual plots reveal 3 model states" code={residualPatternsCode} packages={["numpy", "matplotlib"]} captureFig={true} />
 
-**Diagnostic algorithm:** always plot residuals after fitting. If they show structure, your model is misspecified. Fix by adding polynomial features (for nonlinearity), using WLS (for heteroscedasticity), or switching to a nonlinear model.
+**The diagnostic habit** — always plot residuals after fitting a regression model. Any structure you see means your model is misspecified. Fix by adding polynomial features (for nonlinearity), switching to weighted least squares or `log(y)` (for heteroscedasticity), or moving to a nonlinear model (if the structure is complex).
 
 <RealWorldML title="Regression metrics in LLM evaluation">
 
-LLM systems have several regression-flavored eval metrics:
+LLM systems have a whole zoo of regression-flavored evaluation metrics. Most of them are recognizable variations of the ones you just learned.
 
-**Perplexity (perp).** For a language model, `perp = exp(mean CE per token)`. Lower is better. It IS a regression metric — the model outputs a probability, cross-entropy compares to the one-hot label, exp makes the number more interpretable as "effective vocabulary size the model is uncertain over." A model with perplexity 2.7 says "on average, I'm uncertain over 2.7 tokens per position" — much sharper than a random model with perplexity = vocab_size.
+**Perplexity.** For a language model, `perplexity = exp(mean cross-entropy per token)`. Lower is better. This is a regression metric wearing a fancy hat: the model outputs a probability distribution over tokens, cross-entropy compares it to the one-hot true label, and `exp` makes the result more interpretable — "effective vocabulary size the model is uncertain over." A model with perplexity 2.7 is essentially "on average, uncertain between about 2.7 possible tokens per position," which is much sharper than a random model that would have perplexity equal to the full vocabulary size.
 
-**BLEU / ROUGE for translation and summarization.** N-gram overlap between generated and reference text. BLEU counts precision; ROUGE counts recall. Not a "true" regression — they're bounded in [0, 1] — but function similarly (higher = better). All modern LLM evals report these alongside human evaluations.
+**BLEU / ROUGE for translation and summarization.** Both measure n-gram overlap between generated and reference text. **BLEU** counts precision (how many n-grams in the generation appear in the reference); **ROUGE** counts recall (how many n-grams in the reference appear in the generation). Not "true" regression metrics — they're bounded in [0, 1] — but they function similarly (higher = better). Every modern LLM benchmark reports these alongside human evaluation scores.
 
-**BERTScore.** Uses BERT embeddings to measure semantic similarity between generated and reference. Continuous score, effectively a regression metric. More robust than BLEU/ROUGE for tasks where multiple valid outputs exist.
+**BERTScore.** Instead of counting n-gram overlap, use BERT embeddings to measure *semantic* similarity between generation and reference. Continuous score, effectively a regression metric. More robust than BLEU/ROUGE for open-ended tasks where multiple different-but-valid outputs exist.
 
-**LLM-as-judge grades.** GPT-4 rates outputs on a 1-10 scale. This is a regression score. Standard practice: report BOTH mean and standard deviation (some outputs are consistently rated, others high variance).
+**LLM-as-judge grades.** GPT-4 (or Claude) rates outputs on a 1-10 scale. That's a regression score. Standard reporting practice: mean *and* standard deviation — some outputs get consistent ratings, others have high variance and the mean alone hides that.
 
-**Reward models for RLHF.** Reward is a scalar. Metrics: how well the reward model's outputs correlate with human preference. Kendall tau or Spearman correlation on preference pairs.
+**Reward models for RLHF.** The reward model outputs a scalar. Standard metric: correlation between the reward's ordering and human preferences on held-out pairs (**Kendall tau** or **Spearman correlation**).
 
-**Latency prediction for capacity planning.** "Given features (prompt length, model, complexity), predict median vs 99th percentile latency." Straight quantile regression.
+**Latency prediction for capacity planning.** "Given features (prompt length, model, complexity), predict median *and* 99th-percentile latency." Straight quantile regression, exactly like the section above.
 
-**Cost prediction.** "For a workload, predict expected API cost." Standard regression, likely with MAPE as the primary metric (percentage errors matter for budgeting).
+**Cost prediction.** "For a workload, predict expected API cost." Standard regression — usually with MAPE as the headline metric, because percentage errors matter for budgeting.
 
-**Retrieval scores.** RAG retrieval sometimes reports "cosine similarity of retrieved chunks with query" as a diagnostic — that's a regression metric on the [-1, 1] scale.
+**Retrieval diagnostic scores.** RAG systems often report "average cosine similarity of retrieved chunks with the query" as a health metric. That's a regression score on the [−1, 1] scale.
 
 </RealWorldML>
 

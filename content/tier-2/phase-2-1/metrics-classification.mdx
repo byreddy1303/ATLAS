@@ -183,49 +183,55 @@ print("cost-sensitive decision-making where you want p(positive) to reflect real
   ]}
 />
 
-<Motivation title="Accuracy is almost never enough — every metric hides a story you'd rather see">
+<Motivation title="Accuracy lies — pick the right metric or ship the wrong system">
 
-Take a classifier for a rare disease with 1% base rate. A "model" that always predicts "no disease" achieves **99% accuracy** — while being completely useless. Take a fraud classifier with 0.1% base rate. Same story, 99.9% accuracy from a trivial baseline. Take LLM eval on a benchmark: a model that always answers "A" might score 25% on multiple-choice.
+Say you build a classifier for a rare disease. Base rate: 1% of people have it. You train a "model" that always predicts "no disease." Its accuracy: **99%**. That's not a great model. That's a useless one — it never catches a single sick person. But if all you look at is accuracy, you'd think you shipped a winner.
 
-**Accuracy hides too much.** Every ML system has cost structure: false positives cost X, false negatives cost Y, and X != Y. Every ML system has class imbalance in some direction. Every ML system provides a probability, not a hard label — and how well-calibrated that probability is matters more than which side of 0.5 it falls on.
+Same story with a fraud classifier at 0.1% base rate — a trivial "always negative" baseline scores 99.9%. Same story with an LLM guessing "A" on multiple-choice — 25% right just by luck.
 
-For a GenAI engineer, choosing the right metric determines what your system optimizes for:
+**Accuracy hides too much.** Real ML systems have three things that break the "accuracy is enough" story:
 
-1. **Safety classifiers** (hate speech, harmful requests). Very high recall (catch all bad requests) at the cost of some precision (some false alarms) — you'd rather review a legitimate request than let a bad one through.
-2. **Spam filters** (or RLHF reward models). Balance: high precision (don't quarantine real mail) with reasonable recall (still catch obvious spam). F0.5 or F1 as headline.
-3. **Retrieval / RAG** (search-relevance ranking). Precision-at-K, MRR, NDCG — none of them use "accuracy" directly. What matters is ordering.
-4. **Preference / reward modeling for RLHF.** Accuracy on preference pairs is standard — but calibration matters even more, because the reward signal drives policy updates.
-5. **Anomaly detection** (drift, unusual usage). Very rare positives; PR-AUC over ROC-AUC.
+- **Costs aren't symmetric.** False positives cost one thing (customer service call), false negatives cost another (undetected cancer). They're almost never equal.
+- **Classes aren't balanced.** Someone always outnumbers the others, often by a lot.
+- **Predictions are actually probabilities, not hard labels.** A model that says "60% positive" is meaningfully different from one that says "99% positive" — and neither one collapses cleanly into "yes" or "no."
 
-This chapter builds every classification metric from a single object — the confusion matrix — then adds ROC/PR curves, calibration, and cost-sensitive thresholding.
+For a GenAI engineer, choosing the right metric literally determines what your system will optimize for. Some concrete cases:
+
+1. **Safety classifiers** (hate speech, harmful requests). You want extremely high **recall** (catch essentially all bad stuff), even if it means some false alarms. Better to review a benign request than to let a bad one through.
+2. **Spam filters / RLHF reward models.** You want balance: high **precision** (don't quarantine real emails) *and* reasonable recall. `F1` or `F0.5` is the headline metric.
+3. **Retrieval / RAG.** You care about *ordering*, not classification. Metrics like **Recall@K**, **MRR** (mean reciprocal rank), and **NDCG** (normalized discounted cumulative gain) matter — accuracy doesn't apply.
+4. **RLHF preference modeling.** Accuracy on preference pairs is the standard headline — but **calibration** (do the predicted preference probabilities match reality?) matters even more, because the reward's magnitude directly drives policy updates.
+5. **Anomaly detection.** Very rare positives. Use **PR-AUC** over ROC-AUC.
+
+This chapter builds every classification metric from a single object — the **confusion matrix** — then layers on ROC/PR curves, calibration, and cost-sensitive threshold selection.
 
 </Motivation>
 
-<Intuition title="Everything comes from the confusion matrix — 4 numbers, 20 metrics">
+<Intuition title="One little 2×2 table — the confusion matrix — spawns every metric you need">
 
-A binary classifier's predictions can be tabulated in a 2×2 grid:
+Take any binary classifier's predictions and drop them into a 2×2 grid based on what the model said vs. what was true:
 
 |                   | actual **positive** | actual **negative** |
 |-------------------|-------------------|-------------------|
 | predicted **positive** | **True Positive (TP)** | **False Positive (FP)** |
 | predicted **negative** | **False Negative (FN)** | **True Negative (TN)** |
 
-From these 4 numbers, every classification metric follows:
+Four numbers. That grid is called the **confusion matrix** (it doesn't confuse *you* — it shows where the model is confusing classes with each other). From those four numbers you can compute every classification metric anyone has ever invented. The important ones:
 
-- **Accuracy** = (TP + TN) / total. What fraction did we get right?
-- **Precision** = TP / (TP + FP). Of my POSITIVE predictions, how many are actually positive?
-- **Recall (sensitivity, TPR)** = TP / (TP + FN). Of the actual positives, how many did I find?
-- **Specificity (TNR)** = TN / (TN + FP). Of the actual negatives, how many did I correctly identify?
-- **False Positive Rate (FPR)** = FP / (FP + TN) = 1 − specificity.
-- **F1 score** = 2 · P · R / (P + R). Harmonic mean of precision and recall.
+- **Accuracy** = `(TP + TN) / total` — "what fraction did I get right?"
+- **Precision** = `TP / (TP + FP)` — "when I said positive, how often was I right?"
+- **Recall** (also called **sensitivity** or **true positive rate, TPR**) = `TP / (TP + FN)` — "of the actual positives, how many did I catch?"
+- **Specificity** (or **TNR**) = `TN / (TN + FP)` — "of the actual negatives, how many did I correctly identify?"
+- **False positive rate (FPR)** = `FP / (FP + TN)` — "of the actual negatives, how many did I *wrongly* flag?" This equals `1 − specificity`.
+- **F1 score** = `2 · P · R / (P + R)` — the harmonic mean of precision and recall (a "balanced" summary).
 
-**Which one do you care about?** It depends on the cost:
+**Which one do you care about?** Depends on the *cost*:
 
-- **Precision matters** when FALSE POSITIVES are costly (arresting the wrong person, quarantining legitimate emails, false rare-disease diagnosis).
-- **Recall matters** when FALSE NEGATIVES are costly (missing a real disease case, missing an actual attack, letting spam through).
-- **F1 matters** as a balanced summary.
+- **Precision matters** when **false positives are expensive**. Examples: arresting an innocent person, quarantining a legitimate email, telling a healthy person they have cancer.
+- **Recall matters** when **false negatives are expensive**. Examples: missing a real cancer diagnosis, missing an actual security attack, letting spam or fraud through.
+- **F1 matters** when you want a single "how good, overall" number that punishes low performance on either axis.
 
-**But there's a hidden variable: the DECISION THRESHOLD.** A classifier usually outputs a probability p̂; the standard "predict positive if p̂ ≥ 0.5" threshold produces one confusion matrix. Move the threshold up (predict positive only if p̂ ≥ 0.8) and you get higher precision but lower recall. Move it down (p̂ ≥ 0.2) and vice versa. ROC and PR curves visualize the entire threshold sweep.
+**Now the twist — everything above assumes a specific threshold.** A classifier usually outputs a *probability*, not a hard label. The default "predict positive if p ≥ 0.5" is *a choice*, not a mathematical necessity. Move the threshold up to 0.8 and you get *higher precision* but *lower recall*. Move it down to 0.2 and vice versa. Every point along that trade-off gives you a different confusion matrix. **ROC and PR curves** are exactly the tools for visualizing that full trade-off across every possible threshold.
 
 </Intuition>
 
@@ -265,81 +271,84 @@ $$
 
 **Beware accuracy on imbalanced classes.** For a rare-disease classifier with 1% positive base rate, "always predict negative" achieves 99% accuracy. Use precision/recall/F1/PR-AUC/MCC in imbalanced settings — accuracy is misleading.
 
-## ROC and PR curves — the threshold sweep
+## ROC and PR curves — visualizing the full threshold trade-off
 
-**ROC curve:** for each possible decision threshold t ∈ [0, 1], compute (FPR, TPR). Plot TPR vs FPR. Perfect classifier goes through (0, 1); random classifier is the diagonal y = x.
+Instead of committing to one threshold, sweep every possible threshold from 0 to 1 and see how precision, recall, TPR, and FPR change. That gives you a whole *curve* of possible operating points — and lets you pick the one that fits your problem.
 
-**ROC-AUC:** area under the ROC curve. Interpretable as: given a random positive and a random negative, what's the probability that the classifier scores the positive higher? Value in [0.5, 1] (0.5 = random, 1 = perfect).
+**The ROC curve.** For every possible threshold `t`, compute `(FPR, TPR)` — the false positive rate and true positive rate at that threshold. Plot TPR against FPR. A **perfect classifier** hugs the top-left corner (high recall, no false alarms). A **random classifier** is the diagonal `y = x`.
 
-**PR curve:** for each threshold t, compute (recall, precision). Plot precision vs recall.
+**ROC-AUC** — the *area under the ROC curve*. Beautiful interpretation: given a random positive example and a random negative example, ROC-AUC is the probability the classifier scores the positive higher than the negative. Ranges from 0.5 (random) to 1 (perfect ranking).
 
-**PR-AUC (Average Precision, AP):** area under the PR curve. Similar interpretation but ranges from base-rate (random) to 1 (perfect).
+**The PR curve.** For every threshold `t`, compute `(recall, precision)`. Plot precision vs. recall. Different shape than ROC, useful in different situations.
+
+**PR-AUC** (also called **Average Precision** or **AP**) — the area under the PR curve. Ranges from the *base rate* (random guess) to 1 (perfect).
 
 <RunnableCode title="ROC and PR curves for the same classifier" code={rocPrCode} packages={["numpy", "sklearn", "matplotlib"]} captureFig={true} />
 
-**When to use each:**
+**When to prefer which:**
 
-- **Balanced data (roughly equal positive/negative):** ROC-AUC and PR-AUC give similar signals. Use ROC by convention.
-- **Imbalanced data (rare positives):** PR-AUC is more informative. ROC-AUC can be misleadingly high because most predictions are correctly negative.
+- **Balanced data** (roughly equal positives and negatives). ROC-AUC and PR-AUC give similar signals. ROC-AUC is the standard by convention.
+- **Imbalanced data** (rare positives — fraud, disease, anomaly detection). **Use PR-AUC.** ROC-AUC can look great even for a not-so-great classifier when negatives dominate — the huge negative pool makes FPR stay tiny with modest effort, inflating AUC. PR-AUC directly measures precision as recall varies, which is what you care about when positives are scarce.
 
 <RunnableCode title="ROC-AUC stays constant across imbalance; PR-AUC drops" code={imbalanceCode} packages={["numpy", "sklearn"]} />
 
-## Calibration — do the probabilities mean what they say?
+## Calibration — do the probabilities actually mean what they say?
 
-A well-calibrated classifier says "70% probability" for examples that are actually positive 70% of the time. Modern deep neural nets are famously **overconfident** — they might report 95% confidence for examples that are correct only 70% of the time.
+Here's a question people rarely ask: when your model says "90% probability," is it actually right 90% of the time? A model is **well-calibrated** if the answer is "yes" — its predicted probabilities match empirical frequencies. Modern deep neural nets are famously *not* well-calibrated. They're typically **overconfident** — they'll report 95% confidence for examples that are actually right only 70% of the time.
 
-**Diagnostic: reliability diagram.** Bin the predicted probabilities. For each bin, plot (bin midpoint, actual fraction of positives in that bin). A perfectly calibrated model lies on the diagonal.
+**How to check — the reliability diagram.** Bin the predicted probabilities (say into 10 equal-width bins). For each bin, plot the bin midpoint on the x-axis and the *actual* fraction of positives in that bin on the y-axis. A perfectly calibrated model's points lie on the `y = x` diagonal. A miscalibrated model's points wander off.
 
-**Summary metric: Expected Calibration Error (ECE).** Weighted average of |predicted − actual| across bins, weighted by bin size. ECE = 0 means perfect calibration.
+**How to summarize with one number — Expected Calibration Error (ECE).** For each bin, compute `|predicted probability − actual frequency|`, then average those gaps weighted by how many points are in each bin. `ECE = 0` = perfect calibration. Bigger `ECE` = worse.
 
 <RunnableCode title="Reliability diagram — visualize calibration" code={calibrationCode} packages={["numpy", "sklearn", "matplotlib"]} captureFig={true} />
 
-**Fixes for miscalibration:**
+**Common fixes for miscalibrated models:**
 
-- **Platt scaling:** fit a logistic function `p_cal = σ(a · p_raw + b)` to a held-out set. Popular for SVMs and boosted trees.
-- **Isotonic regression:** fit a non-parametric monotonic function from raw scores to calibrated probabilities. More flexible than Platt.
-- **Temperature scaling (deep learning):** divide logits by a scalar T fit on a held-out set: `p_cal = softmax(logits / T)`. Simple, single-parameter, works well for neural nets.
+- **Platt scaling** — fit a small logistic function `p_cal = σ(a · p_raw + b)` on a held-out set. Two parameters. Popular for SVMs and boosted trees.
+- **Isotonic regression** — fit a non-parametric monotonic function from raw scores to calibrated probabilities. More flexible than Platt (can bend more), but needs more data.
+- **Temperature scaling** — divide the raw logits by a single scalar `T` (fit on a held-out set): `p_cal = softmax(logits / T)`. `T > 1` spreads probabilities out (less confident), `T < 1` sharpens them. Single parameter, works remarkably well for neural nets, doesn't change the argmax (so accuracy stays the same, only confidences change). *This is the standard fix for overconfident deep models.*
 
-**Why calibration matters:**
+**Why calibration is worth caring about:**
 
-- **Cost-sensitive decisions.** If you decide based on "cost of FP vs cost of FN," the optimal threshold depends on the calibrated probability, not the raw score.
-- **Ensembling.** Combining probabilities across models only makes sense if each is calibrated.
-- **Downstream systems.** Any system that uses "confidence" from a classifier (routing, escalation, prioritization) will misbehave if confidences are wrong.
+- **Cost-sensitive decisions.** If you're picking a threshold based on FP vs FN cost, the optimal threshold assumes calibrated probabilities. Uncalibrated probs → wrong threshold → suboptimal decisions.
+- **Ensembling.** Averaging probabilities across models only makes sense if each model's probs are calibrated. Otherwise you're averaging apples and oranges.
+- **Downstream systems.** Anything that uses "confidence" from a classifier (routing, escalation, prioritization) will misbehave when the confidences are wrong.
 
-## Cost-sensitive thresholding
+## Picking the threshold based on cost — not defaulting to 0.5
 
-The default 0.5 threshold assumes equal cost of FP and FN. In reality:
+The default 0.5 threshold implicitly assumes false positives and false negatives cost the same amount. That's almost never true in practice.
 
-- **Fraud detection:** FN (missing fraud) costs $10,000 in losses; FP (blocking a legitimate transaction) costs $50 in customer service. Threshold should be MUCH LOWER than 0.5 (catch even weak signals).
-- **Medical screening (rare disease):** FN (missed diagnosis) is catastrophic; FP (unnecessary follow-up test) is inconvenient. Low threshold.
-- **Content moderation:** high volume, some FPs OK. Balance depends on the harm.
+- **Fraud detection.** Missing a fraud (FN) → $10,000 loss. Wrongly flagging a legitimate transaction (FP) → $50 customer service call. Threshold should be *much lower* than 0.5 — catch even weak signals.
+- **Medical screening (rare disease).** Missed diagnosis (FN) is catastrophic. Unnecessary follow-up test (FP) is inconvenient. Low threshold.
+- **Content moderation.** Very high volume. Some FPs are OK if they get human review. Threshold depends on the specific harm.
 
-**Cost-optimal threshold:** minimize expected cost `C(t) = cost_FN · P(FN | t) + cost_FP · P(FP | t)`. If the classifier is calibrated, this gives:
+**The formula for the cost-optimal threshold** (assuming a calibrated classifier):
 
 $$
 t^* = \frac{\text{cost}_{FP}}{\text{cost}_{FP} + \text{cost}_{FN}}
 $$
 
-In the fraud example: t* = 50 / (50 + 10000) ≈ 0.005. Predict positive whenever calibrated probability of fraud exceeds 0.5% — very sensitive.
+Fraud example: `t* = 50 / (50 + 10000) ≈ 0.005`. Predict fraud any time the calibrated probability exceeds 0.5%. That sounds aggressive, but the math backs it up — the cost of missing fraud so vastly outweighs the cost of a false alarm that you want to be very sensitive.
 
-**In practice**, pick threshold by minimizing empirical cost on a validation set. The ROC or PR curve gives you the trade-off; you pick the operating point.
+**In practice**, pick the threshold by minimizing empirical cost on a validation set. The ROC or PR curve gives you the trade-off; you pick the operating point that matches your business costs.
 
-<RealWorldML title="Classification metrics for LLM systems — safety, RLHF, LLM-as-judge">
+<RealWorldML title="Classification metrics for LLM systems — safety, RLHF, judges, retrieval">
 
-**LLM safety classifiers.** For content-moderation classifiers (harmful/unsafe requests), the target is very high **recall** (catch essentially all harmful requests) with acceptable precision. The threshold is set aggressively (predict "unsafe" at low probabilities). Standard reports: recall @ 95%, precision @ that recall, PR-AUC.
+**LLM safety classifiers** (hate speech, harmful requests). Very high **recall** is the target — you want to catch essentially all bad stuff, even if it means some benign requests get flagged for review. The threshold is set aggressively (predict "unsafe" at low probabilities). Standard reports: *"recall at 95% recall"*, precision at that operating point, and PR-AUC as the summary.
 
-**RLHF preference modeling.** The reward model learns from labels of the form "A is preferred over B." Metric: accuracy on held-out preference pairs. But **calibration matters more** — the RLHF loss depends on the reward's absolute value, not just the sign. A well-calibrated reward avoids "reward hacking" where the policy exploits regions of the reward function that don't match human preference.
+**RLHF preference modeling.** The reward model learns from human labels like "response A is preferred over response B." Headline metric: accuracy on held-out preference pairs. But **calibration matters even more** — the RLHF loss depends on the reward's *absolute value*, not just the sign. A miscalibrated reward creates a phenomenon called **reward hacking**, where the policy learns to exploit regions of the reward function that no longer match actual human preference. Careful calibration of the reward model is one of the guards against this.
 
-**LLM-as-judge.** GPT-4 grades outputs of GPT-3.5 (or similar). Standard practice: report agreement rate with human raters, along with per-category accuracy. Beware: the judge inherits the biases of the models it's evaluating (both were trained on similar data), so this is not a fully-independent evaluation.
+**LLM-as-judge.** GPT-4 (or Claude) grades outputs of GPT-3.5 (or another model). Standard practice: report *agreement rate with human raters* and per-category accuracy. Watch out — the judge inherits the biases of the models it's grading (they were trained on overlapping data), so this is not a fully independent evaluation.
 
 **Retrieval metrics for RAG.**
-- **Recall@K:** fraction of relevant documents in top-K retrieved. Standard RAG headline.
-- **MRR (Mean Reciprocal Rank):** 1 / (rank of first relevant document), averaged over queries.
-- **NDCG (Normalized Discounted Cumulative Gain):** more sophisticated, weights higher-ranked hits more.
 
-**LLM evaluation on multiple-choice benchmarks (MMLU, HellaSwag).** Reported metric is accuracy. But look at the confusion matrix: is the model systematically wrong on certain subject areas? Is the accuracy driven by lucky guessing vs. genuine reasoning?
+- **Recall@K** — fraction of relevant documents in the top `K` retrieved. Standard RAG headline: "we retrieve the relevant document in the top 5 90% of the time."
+- **MRR** (mean reciprocal rank) — `1 / (rank of the first relevant document)`, averaged over queries. Rewards putting relevant docs near the top.
+- **NDCG** (normalized discounted cumulative gain) — a more sophisticated ordering metric that weights higher-ranked hits more heavily and handles graded (not just binary) relevance.
 
-**Confidence-based abstention.** Modern eval setups let LLMs say "I don't know." Metric: accuracy conditional on the model choosing to answer, plus abstention rate. A well-calibrated model would abstain when its confidence is low. This is where ECE and reliability diagrams matter for LLMs directly.
+**LLM evaluation on multiple-choice benchmarks** (MMLU, HellaSwag, etc.). Reported metric is accuracy. But look at the confusion matrix — is the model systematically wrong on certain subject areas? Is the "accuracy" driven by lucky letter-guessing (e.g., always answering A) rather than actual reasoning?
+
+**Confidence-based abstention.** Modern eval setups increasingly let LLMs say "I don't know" instead of guessing. Metrics: *accuracy conditional on the model choosing to answer* + *abstention rate*. A well-calibrated model would abstain exactly when its confidence is low. This is where ECE and reliability diagrams matter directly for LLMs — an overconfident LLM abstains too rarely and gets penalized for confident wrong answers.
 
 </RealWorldML>
 

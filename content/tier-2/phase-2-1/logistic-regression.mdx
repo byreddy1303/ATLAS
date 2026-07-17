@@ -198,40 +198,65 @@ plt.tight_layout()`;
   ]}
 />
 
-<Motivation title="Logistic regression is the bridge from regression to classification — and to neural nets">
+<Motivation title="Logistic regression — the bridge from regression to classification (and to every neural net)">
 
-Take linear regression, but instead of predicting a continuous number, predict a **class label** (spam or ham, positive or negative review, click or no click). The natural first attempt — "fit a linear regression to 0/1 labels" — doesn't work well: predictions escape the [0, 1] range, the loss surface is bad-shaped, and there's no principled way to threshold.
+Take linear regression from last chapter, but change what we're predicting. Instead of a continuous number like "house price," predict a **class label** — a discrete category. Common examples:
 
-**Logistic regression fixes this** by passing the linear score through the **sigmoid** function `σ(z) = 1/(1+exp(-z))`, which squishes any real number into a probability. The training loss becomes **binary cross-entropy** (aka log-loss), which is convex, has a clean gradient, and corresponds exactly to maximum-likelihood estimation under a Bernoulli model.
+- Spam vs. not-spam (email filter)
+- Positive vs. negative review (sentiment)
+- Click vs. no-click (ad targeting)
+- Toxic vs. safe (content moderation)
 
-For a GenAI engineer, logistic regression is important because:
+Sounds easy — why not just fit linear regression to 0/1 labels? Turns out that doesn't work well. The predictions escape the [0, 1] range (you might predict a "probability" of 1.7 or −0.3), the loss surface has weird cliffs when you try to threshold, and the whole thing feels bolted together.
 
-1. **It's the last layer of every classifier.** Every softmax classifier — from ResNet to a transformer's next-token head — is logistic regression on top of learned features. Understanding LR gives you the mental model for every model output that's a distribution over classes.
-2. **The log-loss you'll optimize is EVERYWHERE.** Cross-entropy loss for classification, language modeling, RLHF reward modeling — all of them are logistic regression's log-loss, generalized. Understanding it well here means you understand it everywhere.
-3. **The softmax + cross-entropy pair is one of the most important formulas in DL.** Understanding why softmax is the "differentiable argmax" and why cross-entropy has clean gradients (`p - y`) unlocks the mechanics of how classification networks train.
-4. **Linear probing.** Same trick as linear regression: fit LR on top of frozen pretrained embeddings to evaluate representation quality. `sklearn.LogisticRegression` on top of a CLIP embedding IS how a lot of vision-language transfer research works.
+**Logistic regression** fixes this cleanly with two moves:
+
+1. Compute the same linear score `z = w · x + b` as before.
+2. Squish `z` through a special function called the **sigmoid** (a smooth S-curve — more soon) that maps *any* real number into the interval (0, 1). Now the output is a real probability.
+
+The training objective changes accordingly: instead of MSE, we minimize the **log-loss** (a.k.a. **binary cross-entropy** — both names refer to the same thing). It's convex, has a clean gradient, and — this is the pretty part — it's *exactly* the same objective you'd get from **maximum likelihood** if you assumed each label was a coin-flip with probability `σ(w · x)`.
+
+For a GenAI engineer, logistic regression is *insanely* important:
+
+1. **Every neural classifier ends with it.** The final layer of ResNet, of BERT's classification head, of every transformer producing next-token probabilities — is a linear layer followed by softmax (the multiclass sibling of sigmoid). That's literally softmax regression on top of learned features. If you understand this chapter, you understand what happens at the top of every classification model.
+2. **The log-loss shows up everywhere.** Cross-entropy loss for image classification, next-token prediction in LLMs, reward modeling in RLHF — all versions of logistic regression's log-loss. Understand it once here, understand it forever.
+3. **Softmax + cross-entropy is one of the most important pairings in deep learning.** Understanding *why* they cancel to give the beautiful gradient `p − y` (predicted minus true) is the key to how classification networks train.
+4. **Linear probing works here too.** Fit a logistic regression on top of frozen pretrained embeddings, see how well it separates the classes. That's how a lot of vision-language transfer research is evaluated.
 
 </Motivation>
 
-<Intuition title="Fit a linear score, squish it through sigmoid to get a probability, threshold at 0.5">
+<Intuition title="Score, squish, threshold — a three-step recipe">
 
-Given features `x`, compute a **linear score** `z = w · x + b`. Interpret z as "how much evidence do we have for class 1?" — positive z favors class 1, negative z favors class 0, and z near zero means "on the fence."
+Here's the entire logistic-regression pipeline in three moves:
 
-Now feed z through the **sigmoid** function to get a probability:
+**Step 1 — Score.** Compute `z = w · x + b`, exactly like linear regression. Think of `z` as an "evidence-for-class-1 meter": large positive `z` means "I'm confident it's class 1," large negative means "I'm confident it's class 0," `z` near zero means "I'm on the fence."
+
+**Step 2 — Squish.** Push `z` through the **sigmoid**, an S-shaped curve that squishes any real number into a probability in (0, 1):
 
 $$
 p = \sigma(z) = \frac{1}{1 + e^{-z}}
 $$
 
-`σ(z) → 0` as z → -∞, `σ(z) → 1` as z → +∞, and `σ(0) = 0.5`. The output is a valid probability, and a threshold of 0.5 (equivalent to z > 0) gives the discrete prediction.
+Behavior worth memorizing: `σ(z) → 0` as `z → −∞`, `σ(z) → 1` as `z → +∞`, and `σ(0) = 0.5`. So `p` is a valid probability, and it hits exactly ½ when the score is zero.
 
-**The training objective** picks weights that make each true label as likely as possible under this probabilistic model. If the true class is 1 and we predict p, the log-likelihood contribution is log(p). If the true class is 0, it's log(1 - p). Summed over the dataset and negated, this becomes the **log-loss** (or **binary cross-entropy**):
+**Step 3 — Threshold (for a hard prediction).** If `p ≥ 0.5`, predict class 1; otherwise class 0. That's equivalent to "predict 1 if `z > 0`."
+
+That's the prediction machinery. Now: how do we *train* it?
+
+**The training goal.** Pick `w` that makes each true label as *likely as possible* under our model. Concretely: for each example, we ask "how much probability did we assign to the actual answer?" We want that to be high for every example.
+
+- If the true class is 1 and we predicted `p`, our probability-of-being-right is `p`. Its `log` is our "score" (using log because probabilities multiply across independent examples, but logs add — much nicer to work with).
+- If the true class is 0, our probability-of-being-right is `1 − p`.
+
+Sum those log-probabilities across the dataset, flip the sign so we can *minimize* instead of maximize (a training convention), and divide by `N` for an average. Out pops the **log-loss** (equivalently, **binary cross-entropy**):
 
 $$
 \mathcal{L}(w) = -\frac{1}{N} \sum_i \left[ y_i \log p_i + (1 - y_i) \log (1 - p_i) \right]
 $$
 
-Optimize with gradient descent (loss is convex, so any GD converges). Softmax + cross-entropy generalizes the same recipe to multi-class classification.
+Read this: for each example, only one of the two terms is "on" (the other is multiplied by zero). If the true label `yᵢ` is 1, we penalize small `pᵢ`; if it's 0, we penalize large `pᵢ`. That's exactly what we want.
+
+Good news: this loss is **convex** (one big bowl, no local traps). So gradient descent from any starting point converges to the unique best answer. Same three-step recipe generalizes to multi-class prediction using **softmax** (later in the chapter).
 
 </Intuition>
 
@@ -241,81 +266,116 @@ The sigmoid is `σ(z) = 1 / (1 + exp(-z))`. Properties: (1) maps `R → (0, 1)`,
 
 </Recall>
 
-## The model and the sigmoid
+## The model, spelled out
 
-**Linear score:** for features `x ∈ R^D` with weights `w ∈ R^D` and bias `b`:
+Same building blocks as linear regression, plus one squish:
+
+**The linear score** — nothing new. Given features `x` (of length `D`), weights `w` (also length `D`), and bias `b`:
 
 $$
 z = w \cdot x + b
 $$
 
-**Probability via sigmoid:**
+**Pass through the sigmoid to get a probability:**
 
 $$
 \hat{p} = \sigma(z) = \frac{1}{1 + e^{-z}}
 $$
 
-**Prediction:** if `p̂ ≥ 0.5`, predict class 1; else class 0. This is equivalent to `z ≥ 0`, so the **decision boundary** is the hyperplane `w · x + b = 0` — the same as for the perceptron, the same as for SVMs. Everything logistic regression does downstream of picking that hyperplane is *probabilistic reasoning*, not a fundamentally different geometry.
+**Make a hard prediction (if you need one):** if `p̂ ≥ 0.5` predict class 1, otherwise class 0. That's the same as asking "is `z ≥ 0`?" — which means the boundary line between the two classes is exactly:
 
-**The bias trick:** absorb b into w by appending a column of 1s to X — same as in linear regression.
+$$
+w \cdot x + b = 0
+$$
+
+That's a **hyperplane** (line in 2D, plane in 3D, flat "surface" in higher dimensions). The perceptron uses the same hyperplane. So does an SVM. What makes logistic regression *different* isn't the boundary itself — it's that logistic regression gives you a *probability of being on the class-1 side*, not just a hard yes/no. That extra probability structure is what lets us do MLE, calibrate outputs, and combine predictions with other probabilistic models.
+
+**Bias trick — same as before.** Append a column of 1s to `X` so we can pretend `b` is just another weight. Every formula below assumes we've done this.
 
 <RunnableCode title="Sigmoid — the shape that maps a score to a probability" code={sigmoidCode} packages={["numpy", "matplotlib"]} captureFig={true} />
 
-## The log-loss and its MLE origin
+## The log-loss — where it comes from, why it's beautiful
 
-Given a dataset of `(x_i, y_i)` with `y_i ∈ {0, 1}`, we model each label as an **independent Bernoulli trial**: `y_i ~ Bernoulli(p_i)` where `p_i = σ(w · x_i)`. Likelihood:
+We've been calling it "log-loss" like it's a magic incantation, but it isn't. It falls out of one of the cleanest MLE derivations in ML. Let's walk through it.
+
+**Set up the story.** We have `N` examples `(xᵢ, yᵢ)` with each `yᵢ` either 0 or 1. We *model* each label as a coin flip whose bias depends on the input:
+
+$$
+y_i \sim \text{Bernoulli}(p_i), \quad p_i = \sigma(w \cdot x_i)
+$$
+
+("Bernoulli" is just the fancy name for a single coin flip — see the [random variables chapter](/learn/mathematics/probability/random-variables).)
+
+**Write the likelihood.** The probability that our model would produce the actual labels we saw, given weights `w`, is:
 
 $$
 L(w) = \prod_i p_i^{y_i} (1 - p_i)^{1 - y_i}
 $$
 
-The maximum-likelihood estimator picks w to maximize this. Taking log and negating gives the equivalent minimization:
+The trick with the exponents: when `yᵢ = 1`, only the `pᵢ` term survives; when `yᵢ = 0`, only `1 − pᵢ` survives. So each factor equals whichever probability was assigned to the correct answer.
+
+**Maximum likelihood says: pick `w` to make this as big as possible.** But products of many small probabilities go to zero fast. Take the log (which converts products to sums), flip the sign (so we can minimize a *loss* instead of maximizing a likelihood), and divide by `N` for an average:
 
 $$
 \mathcal{L}(w) = -\frac{1}{N} \sum_i \left[ y_i \log p_i + (1 - y_i) \log (1 - p_i) \right]
 $$
 
-**This is the binary cross-entropy** between the true (one-hot) label and the predicted probability. Two names for the same object: "log-loss" (ML tradition) and "binary cross-entropy" (information theory).
+That's the **log-loss**. It has two names — "log-loss" (from the ML tradition) and "binary cross-entropy" (from information theory, where cross-entropy measures how many bits it takes to encode true labels using the model's predicted distribution). Same object.
 
-**Convexity.** The log-loss is convex in w. Proof: the Hessian is `X^T · D · X` where `D` is a diagonal matrix with entries `p_i (1 - p_i) > 0`. This is a positive semi-definite matrix, so the loss is convex. Convex ⇒ every local minimum is global ⇒ gradient descent from any starting point converges to `w*`.
+**Why it behaves so nicely.** Two properties make training reliable:
 
-**Gradient — clean and identical in shape to linear regression:**
+- **Convex.** The log-loss is convex in `w` — one big bowl, no local minima to get stuck in. Gradient descent from any starting point lands at the same global best `w*`. Sketch of why: compute the Hessian (matrix of second derivatives). It works out to `Xᵀ · D · X`, where `D` is a diagonal matrix with positive entries `pᵢ(1 − pᵢ)`. Any matrix of this "sandwich" shape with positive middle is **positive semi-definite**, which is the linear-algebra way of saying "the loss is convex."
+- **Clean gradient.**
 
 $$
 \nabla_w \mathcal{L}(w) = \frac{1}{N} X^\top (\sigma(Xw) - y) = \frac{1}{N} X^\top (\hat{p} - y)
 $$
 
-This gradient has the same form as linear regression's gradient! `X^T · (predicted − actual)`. The only difference is that "predicted" here is σ(Xw), not Xw. This is a deep pattern: **for most classification losses paired with the "right" output activation, the gradient is X^T · (p - y).**
+Notice: this has *exactly the same shape* as linear regression's gradient `Xᵀ(Xw − y)/N`. The only difference: instead of `Xw` (raw prediction), we have `σ(Xw)` (squished prediction). And the residual `p̂ − y` is bounded in magnitude by 1, which keeps things numerically stable.
+
+This "predicted minus actual" pattern isn't a coincidence — it's a deep property that happens whenever you pair the "right" output activation with its matching loss. Cross-entropy loves sigmoid; MSE loves the identity. Break the pairing and you lose the beautiful gradient.
 
 <RunnableCode title="Train logistic regression from scratch on 2D data" code={trainLogRegCode} packages={["numpy", "matplotlib"]} captureFig={true} />
 
 <RunnableCode title="Log-loss = maximum likelihood — same optimum, three names" code={mleDerivationCode} packages={["numpy"]} />
 
-## Multiclass — softmax regression
+## Softmax regression — the multi-class version
 
-For K > 2 classes, generalize sigmoid to the **softmax function**. Each class gets its own weight vector `w_k ∈ R^D`, and the probability of class k is:
+Real-world problems usually have more than two classes. Image classification has 1,000 (ImageNet). Next-token prediction has 50,000+ (a full vocabulary). We need a way to scale up.
+
+**Enter softmax.** The **softmax function** is sigmoid's multi-class sibling. Give each class `k` its own weight vector `wₖ`, compute a score per class:
 
 $$
-p_k = \mathrm{softmax}(z)_k = \frac{e^{z_k}}{\sum_j e^{z_j}} \quad \text{where } z_k = w_k \cdot x
+z_k = w_k \cdot x
 $$
 
-Properties: `p_k > 0`, `Σ p_k = 1`. Multiclass log-loss (categorical cross-entropy):
+Now the vector `z = (z₁, z₂, …, zₖ)` holds one score per class. Softmax turns those scores into a probability distribution:
+
+$$
+p_k = \mathrm{softmax}(z)_k = \frac{e^{z_k}}{\sum_j e^{z_j}}
+$$
+
+Two things to notice: (1) every `pₖ > 0` (because `eˣ` is always positive), and (2) they sum to 1 (because the numerator is one term of the sum in the denominator). So it's a valid probability distribution over the classes. Bigger score → bigger probability. Same idea as sigmoid, just with more than two options.
+
+**The loss — categorical cross-entropy.** Same MLE story, generalized:
 
 $$
 \mathcal{L}(W) = -\frac{1}{N} \sum_i \log p_{y_i}(x_i)
 $$
 
-For a one-hot encoded label vector `y ∈ R^K`, this is `-Σ y_k log p_k`. Same "expected surprise" story as binary cross-entropy.
+Read this: for each example, take the probability the model assigned to the *actual* correct class, take its log, sum across examples, negate, and average. If you assigned high probability to the right class, `log p` is close to 0; if you assigned low probability, `log p` is a big negative number — and the loss (which is `−log p`) is a big positive number. The loss punishes confident wrong answers *hard*.
 
-**Gradient is stunningly clean:** for the categorical cross-entropy with softmax activation,
+If you write the label as a **one-hot vector** `y` (all zeros except a 1 at the true class), the loss can be written more compactly as `−Σₖ yₖ log pₖ` — same object, different notation.
+
+**The gradient is unreasonably clean.** With softmax outputs `p` and one-hot labels `y`, the gradient of the loss with respect to the *logits* `z` is:
 
 $$
 \frac{\partial \mathcal{L}}{\partial z_k} = p_k - y_k
 $$
 
-That is, the gradient with respect to the logits is just `(predicted probability - one-hot label)` — the same `p - y` pattern. This is why the softmax + cross-entropy pair is the standard classifier output: the gradient is trivial to compute and numerically well-behaved.
+That's it. **Predicted minus true.** Same `p − y` pattern as the binary case. This is why softmax + categorical cross-entropy is the standard classifier output combo — the gradient computation for the last layer of every classification network is one subtraction per class. It's the reason the last few lines of every classifier's backward pass are so short.
 
-**Numerical stability:** never compute softmax naively. Subtract the max first:
+**Numerical stability — the max-subtraction trick.** Never compute softmax the naive way — the `eᶻ` term will overflow to infinity if any `zₖ > ~700` in float64. Standard fix: subtract the max score from every entry before exponentiating.
 
 ```python
 def softmax(z):
@@ -324,36 +384,38 @@ def softmax(z):
     return e / e.sum(axis=-1, keepdims=True)
 ```
 
-Otherwise `exp(z_k)` overflows to `inf` for `z_k > 700` in float64. The max-subtraction is mathematically equivalent (cancels in the ratio) but keeps every exp argument non-positive.
+Why does this work? The subtraction cancels between numerator and denominator: `e^(zₖ − m) / Σ e^(zⱼ − m) = e^zₖ · e^(−m) / (e^(−m) · Σ e^zⱼ) = e^zₖ / Σ e^zⱼ`. Mathematically identical, but every `e^x` argument is now non-positive, so nothing overflows. Every well-implemented softmax uses this trick.
 
 <RunnableCode title="Softmax regression on 3-class data" code={softmaxCode} packages={["numpy", "matplotlib"]} captureFig={true} />
 
-## Decision boundary geometry
+## What the decision boundary looks like
 
-The decision boundary of binary LR is the hyperplane `w · x + b = 0`. On one side of this plane, `z > 0`, so σ(z) > 0.5, so predict class 1. On the other side, predict class 0. **Distance from x to the boundary** is `|w · x + b| / ‖w‖`.
+The **decision boundary** is the surface in feature space where the model is equally torn between two classes — the "line in the sand." Understanding its shape tells you what kinds of patterns logistic regression can and can't capture.
 
-For multiclass softmax regression, the boundary between class j and class k is the hyperplane `(w_j − w_k) · x + (b_j − b_k) = 0` — the set of points where the two classes have equal probability. K classes give K·(K−1)/2 pairwise boundaries; each point in feature space falls into whichever class has the highest logit.
+**Binary case.** The boundary is the hyperplane `w · x + b = 0`. On one side of it, `z > 0`, so `σ(z) > 0.5`, so we predict class 1. On the other side, class 0. The distance from any point `x` to the boundary is `|w · x + b| / ‖w‖` — bigger distance means more confident prediction.
 
-**Practical implications:**
+**Multi-class case.** The boundary between any two classes `j` and `k` is the hyperplane `(wⱼ − wₖ) · x + (bⱼ − bₖ) = 0` — the set of points where those two classes get *equal* score. With `K` classes there are `K · (K−1) / 2` such pairwise boundaries. In practice, each point in feature space just gets assigned to whichever class has the biggest score.
 
-- **LR only draws linear boundaries** in feature space. Nonlinear boundaries require nonlinear feature engineering (polynomial features, kernel trick) or a nonlinear model.
-- **LR's decision boundary is a global property** — it depends on all training data, not just "boundary points" like SVM does.
-- **Adding features shifts and reshapes the boundary.** Adding `x_1²` and `x_2²` as features lets LR draw ellipses. Adding `x_1 · x_2` lets it draw hyperbolas. This is the same feature-engineering idea as polynomial regression.
+**Three things to keep in mind:**
 
-<RealWorldML title="Logistic regression is the last layer of every classification network">
+- **Logistic regression can only draw straight boundaries** in the space you give it. Real-world class boundaries are often curved. To draw a curved boundary, either (a) add nonlinear features by hand (e.g., include `x²`, `x · y`, etc. — the **polynomial features** trick), (b) use the **kernel trick** (implicit high-dim mapping — the SVM tradition), or (c) switch to a nonlinear model (tree, neural net).
+- **The boundary depends on all training points, not just the ones near the margin.** SVMs only care about the "support vectors" (points at the margin); logistic regression takes every point into account. That's why you'll see different-looking boundaries for the two.
+- **Add features → change the boundary shape.** Adding `x₁²` and `x₂²` lets LR draw ellipses. Adding `x₁ · x₂` lets it draw hyperbolas. Same feature-engineering idea as polynomial regression — you can get any polynomial shape by adding enough features, but the fit is still "linear in the feature space" you constructed.
 
-The final layer of every neural-net classifier — from ResNet to CLIP's text head to a transformer's next-token logit head — is a **linear layer followed by softmax**. That's exactly softmax regression on the "features" (embeddings) produced by the encoder.
+<RealWorldML title="The last layer of every classifier — including every LLM — is softmax regression">
 
-- **Vision:** ResNet encodes an image into a 2048-dim embedding; then a `W ∈ R^{2048 × 1000}` linear layer + softmax over 1000 ImageNet classes.
-- **NLP:** A transformer encodes a token into a d_model-dim vector; then a `W ∈ R^{d_model × V}` (V = vocab size) linear layer + softmax gives next-token probabilities.
-- **CLIP-style multimodal:** encode image → image embedding; encode text → text embedding; the "classifier" is just cosine similarity, but that IS a linear-in-embeddings score followed by softmax over candidate texts.
+Here's a claim that ties this whole chapter to modern deep learning: **the final layer of every neural-net classifier is a linear layer followed by softmax.** No exceptions worth mentioning. That last layer *is* softmax regression, sitting on top of whatever "features" the network has learned. Concretely:
 
-**Why does this matter for a GenAI engineer?**
+- **Vision (ResNet-style).** The convolutional stack encodes an image into a 2048-dimensional **embedding** (a summary vector). Then a linear layer `W ∈ ℝ^(2048 × 1000)` followed by softmax gives probabilities over 1,000 ImageNet classes. That final head is softmax regression.
+- **Language (transformer).** The transformer encodes a token into a `d_model`-dimensional vector (typically 768 to several thousand). Then a linear layer `W ∈ ℝ^(d_model × V)` (where `V` is vocabulary size — 50,000+) followed by softmax gives you the probability distribution over the next token. Same head, different classes.
+- **Multi-modal (CLIP-style).** Encode image → image embedding. Encode text → text embedding. The "classifier" is cosine similarity between them, which is *literally* a linear-in-embeddings score, followed by softmax over candidate texts. Same story, just with two encoders.
 
-1. **Linear probing** (evaluating pretrained embeddings) really means: freeze the encoder, replace the final softmax head with a NEW softmax head, retrain just that head on a labeled task. If it fits well, the embeddings are good for that task.
-2. **Fine-tuning is 'linear probing PLUS updating the encoder.'** The gradient of the classification loss flows back through the softmax head, into the encoder, and updates its parameters. Every DL paper about "fine-tuning ImageNet" or "SFT for LLMs" is this.
-3. **Calibration.** The raw softmax outputs of a big classifier are often mis-calibrated — the model reports 90% confidence for events that happen 60% of the time. Techniques (temperature scaling, Platt scaling, isotonic regression) tweak the last logistic layer's output to fix this. Understanding logistic regression well is the foundation for calibration work.
-4. **Softmax's gradient p - y is the "backward pass" of every classification network.** Understanding this scalar identity here means you understand the last layer's backward pass in every model you'll ever train.
+**Why does this matter for a GenAI engineer?** Four practical reasons:
+
+1. **Linear probing is exactly what we just did.** When you evaluate a pretrained model by fitting `sklearn.LogisticRegression` on top of its frozen embeddings — that's replacing the softmax head with a new softmax head, trained only on the task you care about. If the probe fits well, the encoder already captures the target signal.
+2. **Fine-tuning = linear probing + also updating the encoder.** During fine-tuning, gradients flow from the classification loss back through the softmax head *and* into the encoder's parameters. Every SFT (supervised fine-tuning) run for an LLM, every ImageNet fine-tune, every RLHF reward-model training run — they're all "logistic regression, plus also update everything below."
+3. **Calibration matters and starts from here.** Big classifiers are usually **overconfident** — they'll report 90% confidence on things that actually happen 60% of the time. Fixing that (via **temperature scaling**, **Platt scaling**, or **isotonic regression**) means tweaking the logistic layer's output. Understanding logistic regression is the foundation for calibration work.
+4. **The `p − y` gradient is the "backward pass" of every classifier.** Every time PyTorch does `loss.backward()` on a classification model, the very first step it computes is `p − y` — the same predicted-minus-true residual we derived in this chapter. Understand this scalar identity and you understand the *first* step of the backward pass in every classifier you'll ever train.
 
 </RealWorldML>
 

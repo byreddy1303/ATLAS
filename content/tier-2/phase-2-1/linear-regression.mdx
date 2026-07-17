@@ -186,46 +186,59 @@ print("the pretrained model has 'learned' the signal without task-specific fine-
   ]}
 />
 
-<Motivation title="Linear regression — the one model to derive fully">
+<Motivation title="Linear regression — the one model worth deriving all the way down">
 
-Linear regression is the simplest possible supervised model. Given features `x` and a target `y`, predict:
+**Linear regression** is the simplest possible **supervised model** — meaning a model that learns from examples where you already know the right answer. You show it a bunch of `(input, output)` pairs and it learns to guess the output from a new input.
+
+The guess is a one-liner:
 
 $$
 \hat{y} = w \cdot x + b
 $$
 
-That is it. One dot product per prediction. Yet **every single idea in modern ML has a "linear regression version"** — regularization, gradient descent, MLE, feature engineering, cross-validation, bias-variance decomposition, model interpretability, uncertainty estimation. Understanding all of them fully in the linear-regression setting is the cheapest way to build intuition for their harder analogs.
+That's it. Given features `x` (a list of numbers describing one example), the prediction `ŷ` (read "y-hat") is a **dot product** with a weight vector `w`, plus a bias number `b`. If any of this sounds fuzzy, quick refresher:
 
-For a GenAI engineer, linear regression comes up in four specific places:
+- **Features** = the numbers describing one example. For predicting house price: square footage, bedroom count, neighborhood score.
+- **Target** = what you're predicting. Here, price.
+- **Dot product** = multiply matching entries and add them all up. `w · x = w₁x₁ + w₂x₂ + …`.
+- **Bias** = a constant offset. Without it, every prediction would have to pass through zero.
 
-1. **Debugging.** When a big model is misbehaving, one of the fastest sanity checks is "does a linear regression on the same features do reasonable things?" If YES, the signal is there and the big model is broken. If NO, the features themselves don't capture what you need.
-2. **Linear probing.** Modern LLM/vision research evaluates pretrained representations by fitting a linear model on top of frozen embeddings. If the linear probe's accuracy is high, the pretrained model already "understands" the target without task-specific fine-tuning.
-3. **The last layer of everything.** Almost every neural net ends with a linear layer (`W · h + b` where h is the last hidden state). That's a linear regression (or classification) whose weights are learned jointly with the encoder.
-4. **Baseline you must beat.** Before deploying a fancy model, always compare it to linear regression. It's free, fast, and often surprisingly close in accuracy on tabular data — a paper reporting a 5% improvement over a linear baseline on some task is trivial; a paper reporting a 50% improvement is real.
+One dot product per prediction. That's genuinely all it is. And yet: **every big idea in modern ML has a "linear regression version"** — regularization, gradient descent, maximum likelihood, feature engineering, cross-validation, bias-variance decomposition, interpretability, uncertainty. Learning them once here — where the math is clean and you can solve everything by hand — is the fastest way to understand their harder cousins later.
 
-This chapter covers:
+For a GenAI engineer, linear regression shows up in four surprisingly practical places:
 
-- The **model** and its squared-error loss (why squared, and why the classical alternatives lose).
-- The **closed-form solution** (the normal equations) — derived by hand.
-- The **gradient descent path** to the same answer, and when to prefer it.
-- The **four classical assumptions** and how their violations manifest in residual plots.
-- **Interpretability of coefficients** — the real reason linear regression is still central to statistics.
+1. **Debugging a big model.** When your fancy model is misbehaving, one of the fastest sanity checks is: "does plain linear regression on the same features give sensible answers?" If yes → the signal is there and the big model is buggy. If no → the features themselves are the problem.
+2. **Linear probing.** LLM and vision-model research measures how good a pretrained model's **embeddings** (its internal number-summaries of each input) are by freezing the model and fitting a linear regression on top. If the linear model can predict the target well from those embeddings, the pretrained model already "gets it" — no fine-tuning needed.
+3. **The last layer of almost every neural net.** Almost every deep model ends with a linear layer: `W · h + b`, where `h` is the last hidden vector. That final layer *is* linear regression (or its classification cousin), trained jointly with the rest.
+4. **The baseline you have to beat.** Before deploying anything fancy, compare it to linear regression. It's free, fast, and often shockingly close on tabular data. A paper claiming a 5% win over a linear baseline is trivial; a 50% win is the real deal.
+
+Here's what we'll do in this chapter:
+
+- The **model** and its **squared-error loss** — what "best fit" actually means, and why we square the errors.
+- The **closed-form solution** — derived by hand. Yes, this model has an exact formula for the optimal weights.
+- The **gradient-descent path** to the same answer, and when it's worth using instead of the formula.
+- The **four classical assumptions** and how their violations show up as tell-tale shapes in the residual plots.
+- **Interpreting the coefficients** — the real reason linear regression is still the backbone of statistics.
 
 </Motivation>
 
-<Intuition title="Fit the best line through the points — but 'best' means smallest total squared error">
+<Intuition title="Draw the line that misses the points the least — 'least' measured by squared distance">
 
-Given a scatterplot of `(x_i, y_i)` points, the goal is to draw a line (or a hyperplane in higher dimensions) that "best" passes through them.
+Picture a scatterplot of `(x, y)` points on a page. Your job: draw a straight line through the cloud that misses the points as little as possible. That line's slope and intercept are your `w` and `b`.
 
-**Best = smallest squared error.** For each data point i, the model predicts `ŷ_i = w · x_i + b`. The error is `ŷ_i − y_i`. Squaring the errors (before summing) turns positive and negative errors into "how far off?" and penalizes big errors much more than small ones:
+But what counts as "misses the least"? We need a number to compare candidate lines. Here's the recipe:
+
+1. For each point, the line predicts a `ŷᵢ`. The **residual** — how much we missed — is `ŷᵢ − yᵢ`.
+2. **Square it.** Squaring does two useful things: it makes negatives positive (missing high or missing low both count as "missing"), and it *punishes big misses way more than small ones*. A miss of 4 counts as 16; a miss of 1 counts as 1.
+3. **Average across all points.** The final number is called **MSE** (mean squared error):
 
 $$
 L(w, b) = \frac{1}{N} \sum_{i=1}^N (\hat{y}_i - y_i)^2 = \frac{1}{N} \sum_i (w \cdot x_i + b - y_i)^2
 $$
 
-The line that minimizes this is unique (under mild conditions). And crucially, it has a **closed-form solution** — you can write down the optimal `w` and `b` in matrix form, no iterative training needed.
+The line that makes MSE smallest is the answer. Under mild conditions there's exactly one — no ties — and (this is the magical part) there's an **exact formula** for it. No iterative training, no learning rate, no waiting. Just linear algebra.
 
-The story extends to multiple features. If x has D dimensions, we're fitting a hyperplane in (D + 1)-space (D features + 1 for the bias). The picture is the same: minimize total squared error, get a unique optimum.
+The same picture works in higher dimensions. If each `x` has 5 features, you're fitting a flat 5-dimensional surface (a **hyperplane** — the flat generalization of a line and a plane) that best passes through your 6-dimensional cloud of points. Same rule: minimize squared error, get a unique answer.
 
 </Intuition>
 
@@ -241,134 +254,159 @@ For two vectors `a` and `b` of the same length, the dot product is `a · b = Σ_
 
 </Recall>
 
-## The model and its loss
+## The model, spelled out carefully
 
-**Model.** For a single example with features `x ∈ R^D`:
+Let's write everything down once so nothing surprises us later.
+
+**One example at a time.** If a single example has `D` features (imagine `D = 3` — square footage, bedrooms, neighborhood score), the prediction is:
 
 $$
 \hat{y} = w_1 x_1 + w_2 x_2 + \dots + w_D x_D + b = w \cdot x + b
 $$
 
-For a batch of N examples with feature matrix `X ∈ R^{N × D}` and targets `y ∈ R^N`:
+Every feature gets its own weight; the weights say how much that feature pulls the prediction up or down.
+
+**A whole batch at once.** For `N` examples at once, stack the feature vectors as rows of a matrix `X` (shape `N × D`) and stack the true targets in a vector `y` (length `N`):
 
 $$
 \hat{y} = X w + b \mathbf{1}
 $$
 
-**The bias trick.** Absorb `b` into `w` by appending a column of 1s to X: `X_aug = [X | 1]`, `w_aug = [w; b]`. Then `ŷ = X_aug · w_aug` and the bias drops out of every subsequent formula. In code:
+The `𝟏` is just "a vector of all 1s" — the way we add the same bias to every prediction.
+
+**The bias trick — a tidy shortcut.** Carrying `b` around separately is annoying. So we pull a small trick: tack an extra column of 1s onto `X`, and treat `b` as one more entry of `w`. Now the bias magically disappears from every formula because it's just weight number `D+1` multiplied by the constant 1:
 
 ```python
 X_aug = np.hstack([X, np.ones((N, 1))])
 ```
 
-**Squared-error loss (halved for clean derivative):**
+From here on, when we write `X`, assume the bias column is already there and `w` includes the bias slot.
+
+**The loss function, made pretty.** We square the errors and average — that's MSE. Convention: throw a `1/2` in front so the derivative later comes out clean:
 
 $$
 L(w) = \frac{1}{2N} \|Xw - y\|^2 = \frac{1}{2N} \sum_{i=1}^N (\hat{y}_i - y_i)^2
 $$
 
-Halving isn't necessary — it just makes the gradient prettier. Any positive scalar multiple gives the same optimizer.
+The `1/2` doesn't change the optimum — you can scale a loss by any positive number and the same `w` still minimizes it.
 
-**Why squared and not absolute error?** Three reasons:
+**Why square the error instead of just taking the absolute value?** Fair question. Three reasons:
 
-1. **Differentiable everywhere.** Absolute error `|ŷ - y|` has a kink at zero; MSE is smooth. Gradient methods work directly on MSE.
-2. **Closed-form solvable.** MSE gives linear equations for the optimum; MAE requires linear programming or iteratively-reweighted-least-squares.
-3. **Statistically justified.** Under Gaussian noise assumption `y = w·x + ε` with `ε ~ N(0, σ²)`, the MLE for w minimizes exactly the MSE. Different noise models give different losses (Laplace noise → MAE, etc.).
+1. **Smooth everywhere.** Absolute value `|ŷ − y|` has a sharp kink at zero, where the derivative jumps. Squared error curves smoothly through zero, which means gradient methods work without hitting weird cliffs.
+2. **You can solve it with a formula.** MSE leads to a system of linear equations — solvable in one shot with matrix algebra. Absolute error leads to linear programming, which is much fiddlier.
+3. **It matches a real story about noise.** If you assume the true relationship is `y = w · x + ε` where `ε` (the noise) is Gaussian ("bell-curve") noise, then finding the `w` that minimizes MSE is *literally the same thing* as **maximum likelihood** — the most-probable answer under that noise model. Different noise assumptions give different losses. If you thought the noise was Laplace-shaped (heavier tails) you'd use absolute error instead — that's called **median regression**.
 
-## The normal equations — closed-form solution
+## The normal equations — the exact formula
 
-Set the gradient of the loss to zero:
+Here's where we cash in on all the setup. To find the best `w`, take calculus's most basic move: **compute the gradient of the loss and set it to zero.** Any minimum of a smooth function has to sit at a zero-gradient point.
+
+The gradient works out to:
 
 $$
 \nabla_w L(w) = \frac{1}{N} X^\top (X w - y) = 0
 $$
 
-Solve for w:
+Rearrange:
 
 $$
 X^\top X w = X^\top y \quad \Longrightarrow \quad w^* = (X^\top X)^{-1} X^\top y
 $$
 
-This is **the normal equations**. Two remarks:
+That formula is called the **normal equations**. Two things to keep in mind:
 
-- **Uniqueness requires rank(X) = D** (X has full column rank). Then `X^T X` is invertible. If features are perfectly correlated (multicollinearity), `X^T X` is singular and the solution is not unique.
-- **Numerical stability.** Never actually compute `inv(X^T X)`. Instead use `np.linalg.solve(X.T @ X, X.T @ y)` or better `np.linalg.lstsq(X, y)` — both are far more numerically stable than explicit inversion.
+- **The formula only works cleanly if `Xᵀ X` is invertible.** That in turn requires `rank(X) = D` — i.e., no feature is a perfect linear combination of the others. If two features are strongly correlated (a situation called **multicollinearity** — "multiple features carrying the same information"), `Xᵀ X` is nearly singular and the answer becomes unstable. More on that in the pitfalls section.
+- **Never actually compute the inverse.** Even though the formula has `(Xᵀ X)⁻¹` in it, computing that inverse explicitly is numerically wasteful and unstable. In code, use `np.linalg.solve(X.T @ X, X.T @ y)` (a specialized solver that skips inverting anything) or, even better, `np.linalg.lstsq(X, y)` (which uses **QR** or **SVD** — matrix factorizations that are even more robust). Sklearn uses `lstsq` under the hood.
 
 <RunnableCode title="Fit linear regression via normal equations" code={closedFormCode} packages={["numpy", "matplotlib"]} captureFig={true} />
 
-**Cost of closed form:** computing `X^T X` is O(N·D²). Solving the D×D system is O(D³). For small D (say D under 10,000) this is instant. For D ≥ 10⁶, it becomes prohibitive — that's when GD wins.
+**How expensive is this?** Computing `Xᵀ X` costs roughly `N · D²` operations; solving the `D × D` system costs another `D³`. For small `D` (say fewer than 10,000 features), that's *instant* on a laptop. For `D` in the millions (rare, but happens in some genomics or huge-vocab problems), it becomes prohibitive — that's when gradient descent wins.
 
-**Geometric picture.** The normal equations say `X^T (Xw* - y) = 0` — the residual `Xw* - y` is **orthogonal to every column of X**. Geometrically, `Xw*` is the orthogonal projection of `y` onto the column space of X. Any other `w` gives predictions that miss orthogonally in a suboptimal way. This is why linear regression is also called "least squares projection."
+**One last picture — a satisfying geometric one.** The normal equations say `Xᵀ (Xw* − y) = 0`. Read that literally: the **residual vector** `Xw* − y` (the leftover after your best fit) is **perpendicular to every column of `X`**. Geometrically, `Xw*` is the *orthogonal projection* of `y` onto the space of vectors reachable by combining X's columns. That's the deep reason people call linear regression **least-squares projection**: you're literally projecting `y` onto the "space of predictable things."
 
-## Gradient descent gets the same answer
+## Gradient descent lands at the same answer
 
-For large D or streaming data, GD is preferable. The update rule:
+Sometimes the closed-form formula isn't practical — maybe you have so many features that `Xᵀ X` won't fit in memory, or new data keeps arriving in a stream. In that case, use **gradient descent**: take a bunch of small steps, each downhill on the loss surface.
+
+The update rule is exactly what you'd expect from the gradient we already computed:
 
 $$
 w \leftarrow w - \eta \cdot \nabla L(w) = w - \eta \cdot \frac{1}{N} X^\top (X w - y)
 $$
 
-Because L is **convex** (Hessian = X^T X / N is PSD), any local minimum is global. GD from any starting point converges to `w*` (the normal-equations solution) — no worry about initialization.
+Here `η` (Greek "eta") is the **learning rate** — how big a step to take. Small = safe but slow; big = fast but risks overshooting.
+
+Here's the lovely part: the loss surface for linear regression is a big bowl (**convex** — meaning any straight line between two points on the surface stays above the surface). No local minima to get trapped in. Gradient descent from *any* starting point winds up at the same `w*` the formula would give you. No initialization worries, no random restarts.
 
 <RunnableCode title="Gradient descent converges to the closed-form solution" code={gdVsClosedFormCode} packages={["numpy", "matplotlib"]} captureFig={true} />
 
-**Choosing between closed form and GD:**
+**Which method should you actually use?** Quick decision tree:
 
-- **Small D (< 10k features), plenty of RAM, no streaming:** closed form. Fastest, exact, no hyperparameters.
-- **Large D, streaming, or an already-existing pipeline:** GD (or SGD with mini-batches). Same optimum, more flexible.
-- **Regularization needed (L2 = ridge):** either — closed form for ridge is `w* = (XᵀX + λI)⁻¹ X^T y`, still one equation.
+- **Few features (< 10k), data fits in RAM, no streaming:** the closed-form formula. Fastest, exact, no hyperparameters to tune.
+- **Lots of features or streaming data:** gradient descent (or **SGD** = stochastic gradient descent — GD on small random batches). Same answer, more flexible.
+- **Need regularization?** Both work. The formula version for **ridge regression** (linear regression with an L2 penalty — coming next chapter) is just `w* = (XᵀX + λI)⁻¹ Xᵀy`. Adding one term to the matrix, still one equation.
 
-## Assumptions — and how their violations look
+## What linear regression secretly assumes — and how you spot violations
 
-The classical statistical treatment of linear regression rests on four assumptions:
+Linear regression comes with fine print. Four **assumptions** — things about your data that need to be true for the fit to be trustworthy. They're not always obvious, and violations show up as visible patterns in the **residuals** (the leftover errors after your best fit).
 
-1. **Linearity.** The true relationship is `y = X w_true + ε`. If the true relationship is quadratic or oscillatory, LR is misspecified.
-2. **Independent errors.** `ε_i` for different examples are independent. Violated by time series (correlated shocks) or grouped data.
-3. **Homoscedasticity.** The noise variance is the same for every example. Violated when variance grows with x (e.g., higher-income individuals have more variable spending).
-4. **Normality of errors.** `ε_i ~ N(0, σ²)`. Needed for classical CI / hypothesis-test theory; not needed for a *point estimate* of w.
+Here's the fine print, translated:
 
-**Coefficient estimation itself only needs (1) and (2)** — the Gauss-Markov theorem says under linearity + independent errors + finite variance, OLS is the Best Linear Unbiased Estimator (BLUE). Confidence intervals and p-values need the other assumptions.
+1. **Linearity.** The real relationship between `x` and `y` actually *is* a straight line (or hyperplane) — not a curve, not a wiggle. If reality is quadratic and you fit a line, you're bringing a ruler to a curve.
+2. **Independent errors.** One example's noise doesn't tell you anything about another example's noise. Violated by things like time series (today's stock error is correlated with yesterday's) or measurements from the same person (repeated readings share person-level quirks).
+3. **Homoscedasticity** — long word, simple idea: "same-sized noise everywhere." The size of the wobble in `y` shouldn't depend on `x`. Violated when, say, high-income spending is much more variable than low-income spending. The Greek roots literally mean "same-scatter."
+4. **Normally-distributed errors.** The noise follows a bell curve. This one you only need if you want **confidence intervals** (how sure am I about this coefficient?) or **p-values** — not for the point estimate itself.
+
+Small side note: for just *finding* the best `w` (the point estimate), only assumptions 1 and 2 matter. There's a famous result called the **Gauss-Markov theorem** that says: under just linearity + independent errors + finite noise variance, the least-squares answer is the best possible answer among a broad class of methods. That class-winning property is called **BLUE** — **Best Linear Unbiased Estimator**. (Unbiased = "on average, gives back the true answer.") For confidence intervals though, you need the normality piece too.
+
+**How do you check if the assumptions hold?** Look at the residuals. Plot them against `x` (or against the predictions `ŷ`) and see if you can spot a pattern. If residuals scatter uniformly around zero → you're fine. If they show shape → the assumption is broken.
 
 <RunnableCode title="Residual plots diagnose assumption violations" code={assumptionsCode} packages={["numpy", "matplotlib"]} captureFig={true} />
 
-**Fixes for common violations:**
+**Common violations and what to do:**
 
-- **Nonlinearity** (residuals show a U-shape): add polynomial features (x², x·y, etc.), or use a nonlinear model.
-- **Heteroscedasticity** (residual variance grows with x): use weighted least squares, or transform the target (`log(y)` if y is always positive).
-- **Autocorrelated errors** (time-series): use ARIMA-family models or add lagged features.
-- **Non-normal residuals for CIs**: bootstrap the coefficient estimates.
+- **Residuals form a U (or upside-down U)** → the real relationship is *curved*, not straight. Fix: add polynomial features like `x²`, `x · y`, or switch to a nonlinear model (tree, neural net, etc.).
+- **Residuals fan outward** (small near the middle, big at the extremes) → *heteroscedasticity* — non-constant noise size. Fix: **weighted least squares** (give bigger-variance points less say), or transform the target (a common trick: fit to `log(y)` instead of `y`, if `y` is always positive).
+- **Residuals correlated over time** (typical in time-series data) → use time-series models like **ARIMA** (autoregressive integrated moving average) or add lagged features (`x` at time `t-1`, `t-2`, …).
+- **Non-normal residuals but you still need CIs** → use the **bootstrap**: resample your data many times, refit each time, and use the spread of resulting `w` estimates as your confidence intervals.
 
-## Interpretability of coefficients
+## Reading the coefficients — the real reason statisticians love linear regression
 
-Once you fit `ŷ = w · x + b`, each `w_i` has a specific interpretation:
+Once you've fit `ŷ = w · x + b`, each weight `wᵢ` has a *specific, clean* meaning:
 
 $$
-w_i = \text{expected change in } y \text{ per one-unit increase in } x_i, \text{ holding other features constant}
+w_i = \text{how much } y \text{ changes when you bump } x_i \text{ up by one unit, holding every other feature fixed}
 $$
 
-This "holding other features constant" is the CETERIS PARIBUS interpretation. It's why linear regression is central to statistics: no other ML model gives such a clean per-feature effect estimate.
+That "holding every other feature fixed" is called **ceteris paribus** — a Latin phrase from economics meaning "all else equal." It's why linear regression is still a workhorse of statistics and social science: **no other ML model gives you such a clean per-feature story.** A random forest or neural net can be more accurate, but ask "how much does one more bedroom cost?" and you get a shrug. Ask a linear regression and you get: "\$12,400, holding square footage and neighborhood fixed."
 
-**Practical rules:**
+Three practical warnings:
 
-- **Standardize features before comparing coefficients.** If `x_1` is in dollars and `x_2` is in years, their coefficients are on wildly different scales. Standardize (subtract mean, divide by std) so all coefficients are per-standard-deviation changes.
-- **Check for multicollinearity.** If two features are strongly correlated, individual coefficient values become unstable (one can be huge positive, the other huge negative, canceling). VIF above 10 is a red flag.
-- **Beware causal interpretation.** The coefficient is the association given the model + observed data. Whether X causes Y is a separate question that no regression can answer alone — but a well-designed regression can be evidence.
+- **Standardize before comparing coefficients across features.** If `x₁` is in dollars and `x₂` is in years, their raw coefficients are on wildly different scales — you can't directly say "years matters more." Standardizing (subtract the mean, divide by the standard deviation, per feature) puts everything on the same footing: each coefficient now says "change in `y` per one-standard-deviation change in this feature."
+- **Watch out for multicollinearity.** When two features carry the same information (say, one column is "years of experience" and another is "months of experience"), individual coefficients become unstable — one can be +2,000 and the other −1,990, canceling out. The predictions are fine, but the per-feature story is nonsense. A diagnostic called **VIF** (variance inflation factor) flags this: any feature with VIF above ~10 is at risk.
+- **Correlation is not causation.** The coefficient tells you the *association* between `xᵢ` and `y` in your data given the model. Whether changing `xᵢ` would *cause* `y` to change is a separate question no regression can settle by itself. A carefully-designed regression (with proper controls) can be *evidence* for a causal claim, but only alongside domain knowledge and study design.
 
-<RealWorldML title="Linear probing on pretrained embeddings">
+<RealWorldML title="Linear probing — how researchers check if an LLM 'gets it'">
 
-A modern LLM or vision model produces **embeddings** — dense vectors that summarize an input. For evaluating whether these embeddings capture some target property, researchers use **linear probing**: freeze the encoder, extract embeddings on a labeled dataset, fit a linear regression (or logistic regression for classification) on top.
+A modern LLM or vision model turns each input into an **embedding** — a dense vector of numbers (usually 512, 768, or several thousand entries) that summarizes what the input is "about." How do you tell whether these embeddings actually capture some property you care about — say, sentiment, or topic, or safety-relevance?
 
-If the probe fits well (high R² for regression, high accuracy for classification), the embeddings ALREADY encode the target signal — the pretrained model has "learned it" without task-specific supervision. If the probe fits poorly, either the target is more subtle than the embedding captures, or the embedding is bad.
+The standard trick is called **linear probing**:
+
+1. Freeze the pretrained model (don't touch its weights).
+2. Feed it a labeled dataset and collect the embeddings.
+3. Fit a *linear regression* (or logistic regression for yes/no labels) on top of those embeddings, predicting your target.
+4. Check how well the linear model does.
+
+If the linear model does well → the pretrained embeddings already encode the target. The big model "figured out" this property just from pretraining, without ever being told to. If the linear model does badly → either the target is too subtle for a straight line to pick out, or the embeddings aren't capturing it.
 
 <RunnableCode title="Linear probing on 64-dim frozen embeddings" code={linearProbingCode} packages={["numpy"]} />
 
-**Why linear probing is important for LLM evaluation:**
+**Why researchers reach for linear probing all the time:**
 
-1. **Cheap.** Fitting linear regression on 64-1024 dim embeddings takes seconds. Fine-tuning the full model can take hours or days.
-2. **Interpretable.** The probe weights say WHICH embedding dimensions carry the target signal. On a large labeled task, a linear probe with high R² is convincing evidence that the pretrained model captures the concept.
-3. **Standard.** Papers report linear-probe results on downstream tasks (STS, Sentence-BERT eval, ImageNet linear evaluation, etc.). Beating a linear probe by a small margin with fine-tuning tells you the model's marginal capability is limited; beating it by a lot suggests real task-specific learning.
+1. **Cheap.** Fitting a linear model on 768-dim embeddings takes seconds. Fine-tuning a whole 7B-parameter LLM takes hours and a lot of GPU money.
+2. **Interpretable.** The probe's weights tell you *which* embedding dimensions carry the signal. On a big labeled task, a high probe score is strong evidence that the pretrained model has genuinely captured the concept.
+3. **Standard.** Papers routinely report linear-probe results as a benchmark — you'll see terms like "**ImageNet linear evaluation**" (image models) or "**STS**" (semantic-similarity tasks for language models). Beat a linear probe by a small margin with fine-tuning and you've barely added anything; beat it by a lot and there's real task-specific value.
 
-**Fun connection:** the last layer of any classifier is itself a linear probe on the previous layer's embeddings. So "linear-probe accuracy" and "final-layer accuracy" are the same thing when the earlier layers are frozen. Fine-tuning is just "linear-probing PLUS updating the encoder."
+**One clean connection to sit with:** the *last layer* of every neural classifier is itself a linear layer sitting on top of the previous layer's embeddings. So "linear-probe accuracy" and "final-layer accuracy" are the same thing when the earlier layers are frozen. **Fine-tuning is just "linear probing, but you also let the encoder learn."**
 
 </RealWorldML>
 
