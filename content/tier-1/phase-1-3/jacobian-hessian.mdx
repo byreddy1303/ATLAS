@@ -154,19 +154,24 @@ print("Newton got there in ONE step. That's what curvature information buys.")`;
   ]}
 />
 
-<Motivation title="Curvature is why Adam works and gradients aren't enough">
+<Motivation title="Curvature — why Adam works and plain gradients aren't enough">
 
-Vanilla gradient descent uses one number per parameter — the gradient. It ignores *how the slope is changing*. Consider a loss surface that's a stretched bowl: steep in one direction, gentle in the other. Gradient descent oscillates wildly on the steep direction (learning rate too big) and crawls on the gentle direction (learning rate too small). Any single learning rate is wrong for both directions.
+Vanilla gradient descent uses one number per parameter (the gradient — the slope). It completely ignores *how the slope is changing as you move*. Picture a loss surface shaped like a stretched bowl: super steep in one direction, gentle in the other. Gradient descent with a fixed learning rate will oscillate wildly on the steep direction (steps too big) *and* crawl on the gentle direction (steps too small). No single learning rate is right for both.
 
-The **Hessian** encodes exactly the information missing from the gradient: how much the slope changes as you move. It's the second-derivative matrix — the derivative of the gradient with respect to the parameters. Its eigenvalues tell you the curvature along each principal direction; large eigenvalues = steep, small = flat.
+The fix is **curvature** — information about how the slope is bending. Two objects capture curvature:
 
-For a GenAI engineer:
+- **Jacobian** = a matrix of first derivatives for a *vector-valued* function (a function whose output is a vector, not a single number).
+- **Hessian** = a matrix of second derivatives for a *scalar* function (like a loss). Also written as "the derivative of the gradient."
 
-- **Adam, RMSprop, and Adagrad** all use running estimates of the *diagonal* of the Hessian (or approximations of it) to adaptively rescale the per-coordinate learning rate. Steep directions get smaller effective learning rates; flat directions get larger ones. This adaptive rescaling is the reason these optimizers work so much better than SGD on transformer training.
-- **Second-order optimizers** (K-FAC, Shampoo, Sophia) explicitly use Hessian information — usually block-approximated, since the full n×n Hessian for n = 10^9 parameters is uncomputable. They win big on convex-ish loss surfaces and are gaining ground in LLM pretraining.
-- **The Jacobian** — the vector-valued generalization of the gradient — is what backprop actually computes at every non-scalar node in the graph. Every layer of a neural network is a vector-in/vector-out function; the layer's Jacobian is what the chain rule multiplies against the upstream gradient.
+Their eigenvalues tell you the curvature along different directions. Big eigenvalues = super steep direction. Small eigenvalues = gentle direction.
 
-This chapter builds both tools. Jacobian first (backprop's real currency), then Hessian (curvature and its optimizer implications). Nothing here is beyond calculus you already have; we're just stacking gradients into matrices.
+For a GenAI engineer, three payoffs:
+
+- **Adam, RMSprop, Adagrad** — the workhorse optimizers of modern ML — all use running estimates of the *diagonal* of the Hessian to adaptively rescale each parameter's learning rate. Steep directions get smaller effective steps; flat directions get bigger ones. This adaptive rescaling is a huge chunk of why these optimizers crush plain SGD on transformer training.
+- **Second-order optimizers** (K-FAC, Shampoo, Sophia — names you'll see in papers) explicitly use Hessian information, usually as block approximations since the full Hessian for a billion-parameter model would need a billion-by-billion matrix. They win big on convex-ish loss surfaces and are gaining traction in LLM pretraining.
+- **Jacobians in backprop.** Every neural network layer is a vector-in / vector-out function. Its Jacobian is what the chain rule multiplies against the upstream gradient. Backprop is *really* about Jacobian-vector products, one layer at a time.
+
+This chapter builds both tools. Jacobian first (backprop's real currency), then Hessian (curvature and its optimizer consequences). Nothing here is beyond the calculus you already have — we're just stacking gradients into matrices.
 
 </Motivation>
 

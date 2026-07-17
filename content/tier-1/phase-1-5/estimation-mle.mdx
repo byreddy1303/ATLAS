@@ -171,137 +171,183 @@ print("Every regression loss you write in ML is a Gaussian log-likelihood.")`;
   ]}
 />
 
-<Motivation title="Every ML training loop is maximum likelihood estimation">
+<Motivation title="Every ML loss function is the same idea in a costume">
 
-Maximum likelihood is the single most important idea in Phase 1.5. Almost every loss function you meet in ML is a negative log-likelihood in disguise:
+Here's a wild fact. Almost every "loss function" you'll ever meet in machine learning — the number the model tries to make smaller during training — is secretly the same idea wearing different costumes. That idea has a name: **maximum likelihood**, or MLE for short (the "E" is for "estimation"). Once you see it, huge chunks of ML stop looking like a pile of unrelated recipes and start looking like variations on one theme.
 
-- **MSE regression** = MLE assuming Gaussian noise with fixed variance. Minimizing Σ (yᵢ − ŷᵢ)² *is* maximizing the log-likelihood of the data under y_i ~ 𝒩(ŷ_i, σ²).
-- **Cross-entropy classification** = MLE assuming Categorical outputs. Minimizing −Σ log p(y_i) *is* maximizing the log-likelihood of the labels under the model&rsquo;s Categorical distribution over classes.
-- **VAE ELBO** = a lower bound on the marginal log-likelihood of the data. Diffusion models are trained with a related bound. Both are MLE-in-spirit.
-- **Language-model pretraining** = MLE. Next-token cross-entropy is the negative log-likelihood of each token under the model&rsquo;s Categorical over the vocabulary. GPT&rsquo;s objective is `L = -sum log P(x_t | x_<t)` — a direct chain-rule log-likelihood.
-- **Contrastive losses (InfoNCE, SimCLR)** = MLE of a classifier that distinguishes positive from negative pairs. Reformulate and you find likelihood underneath.
+Here's the honest list of what turns out to be MLE in disguise:
 
-Understanding MLE means understanding *why* these losses are the right objectives — not just accepting them as recipes. It also tells you the properties you get for free: consistency (with enough data, the estimator finds the truth), efficiency (near-optimal use of the samples), and asymptotic normality (predictable error bars).
+- **Mean-squared-error regression** (predicting a number and measuring how far off you were). This is MLE if you assume the true value is your prediction plus a bit of bell-curve-shaped random noise.
+- **Cross-entropy classification** (predicting which class something belongs to). This is MLE if you assume the model's output is a probability over classes and the true label came from that distribution.
+- **VAEs and diffusion models** (the image generators). Both train by pushing up a number that's essentially "how probable is the real data under my model" — that's likelihood.
+- **Language model pretraining** (how GPT learns from text). At every position, GPT predicts the next word as a probability distribution over the vocabulary, and the training loss is `−sum log P(next word | previous words)` — again, likelihood.
+- **Contrastive losses** like SimCLR (self-supervised learning). Reformulate them and they turn into "which of these pairs actually go together?" — a classification likelihood.
 
-This chapter derives MLE for the two most-used distributions (Bernoulli, Gaussian) by hand, shows why MLE is what every gradient step in ML is climbing, and gives you the vocabulary to spot MLE hiding inside a research paper you read next month.
+Two quick vocabulary unpacks before we go further, so nothing feels scary:
+
+- **Distribution**: a rule that assigns probability (or density) to every possible outcome. Rolling a fair die is a distribution over &#123;1,…,6&#125;.
+- **Parameter**: the "knob" that shapes the distribution. For a coin, the knob is the probability of heads. For a bell curve, the knobs are the center (μ, "mu") and the width (σ, "sigma").
+
+Understanding MLE means understanding *why* all those losses are the right objectives — not just accepting them as recipes handed down from on high. You also get three properties for free: with enough data the estimator lands on the truth, it uses the data about as well as any estimator possibly could, and its errors follow a predictable bell-curve shape so you can put error bars on your answer.
+
+This chapter derives MLE by hand for the two most-used distributions (coin flip and bell curve), shows why every gradient step your model takes is really climbing a likelihood hill, and gives you the vocabulary to spot MLE hiding inside a paper you'll read next month.
 
 </Motivation>
 
-<Intuition title="MLE = 'pick the parameter that makes the data you actually saw the least surprising'">
+<Intuition title="MLE = 'pick the setting that makes what you actually saw the least surprising'">
 
-Concrete first. You flip a coin 10 times and see 7 heads. What&rsquo;s a reasonable guess for the true probability of heads?
+Let's start with a real question, no math. You flip a coin 10 times and get 7 heads. What's a reasonable guess for the coin's true probability of heads?
 
-Try a few candidates. If the true probability were p = 0.5, then P(7 heads in 10 flips) = C(10, 7) · 0.5⁷ · 0.5³ ≈ 0.117. If instead p = 0.7, P(same outcome) = C(10, 7) · 0.7⁷ · 0.3³ ≈ 0.267. That&rsquo;s more than 2× more likely under p = 0.7 than under p = 0.5. Now try p = 0.9: P = C(10, 7) · 0.9⁷ · 0.1³ ≈ 0.057. So among &#123;0.5, 0.7, 0.9&#125;, the observation is most probable under p = 0.7.
+Try a few candidates and just see which fits best.
 
-The **maximum likelihood estimator** is the p that maximizes this &ldquo;probability of the data.&rdquo; If we search over every p in [0, 1] instead of just three values, we&rsquo;ll find that p̂ = 7/10 = 0.7 exactly. That&rsquo;s the MLE — the value under which the observed data was least surprising.
+- If the coin were fair (p = 0.5), the probability of seeing 7-out-of-10 heads is about 12%.
+- If the coin were biased toward heads at p = 0.7, the same 7-out-of-10 outcome has probability about 27%. More than twice as likely.
+- If p = 0.9, the outcome has probability about 6% — less likely, because 0.9 usually gives even more heads than 7.
 
-Generalizing: you&rsquo;ve chosen a distribution family (Gaussian, Bernoulli, Categorical, etc.) — that&rsquo;s the *model*. Its shape depends on a parameter θ. Different values of θ predict different amounts of probability (or density) for the specific data D you observed. **Maximum likelihood picks the θ that assigns highest probability to the observed data.**
+So of the three, p = 0.7 makes the thing you actually saw feel least surprising. If we sweep across every p from 0 to 1, the winner is exactly p̂ = 7/10 = 0.7 — the "hat" (^) just means "estimated from data." That's the whole idea of MLE in one line: **pick the knob setting that gives your actual observation the highest probability**.
 
-Formally, the *likelihood function* L(θ) = P(D | θ) is a function of θ with D fixed. The MLE is
+Zooming out. You've picked a family of distributions — coin flips, bell curves, whatever — and it has a knob called θ (theta, the Greek letter for "the parameter to figure out"). Different settings of θ give the data D (that's just "the data you saw") different amounts of probability. MLE says: pick the θ that assigns the highest probability to your data.
+
+We write this as:
 
 $$
 \hat\theta_{\text{MLE}} \;=\; \arg\max_{\theta}\; L(\theta) \;=\; \arg\max_\theta \sum_i \log p(x_i \mid \theta).
 $$
 
-We work with the **log-likelihood** because it turns a product over samples into a sum, which is numerically stable (products of tiny probabilities underflow to zero) and easier to differentiate. The log is monotonic, so the argmax is unchanged. Almost everything downstream operates on log-likelihood.
+Two symbols to unpack so this doesn't look scary:
 
-The picture: L(θ) plotted as a function of θ has a peak somewhere; MLE finds that peak. Statistical properties of the estimator (variance, bias, uncertainty) come from how *sharp* that peak is (its second derivative, formally called the *Fisher information*).
+- **L(θ)** is the **likelihood** — a fancy name for "probability of the data, as a function of the knob θ." Different θ, different likelihood.
+- **arg max** just means "the value of θ that makes L biggest." (arg max = "argument that maximizes.")
+
+You'll notice we switched to summing the **log** of probabilities. That's a computational trick, not a conceptual one. Multiplying thousands of tiny numbers (like 0.001 × 0.002 × …) crashes to zero on a computer; adding their logs stays sane. And the log doesn't move the peak — whatever θ was biggest for L is still biggest for log L. So we almost always work with log-likelihood.
+
+Here's the mental picture. Plot L(θ) as a curve over θ. There's a peak somewhere — MLE is you pointing at the peak. How *sharp* that peak is tells you how certain you are: a sharp peak = "the data pinned θ down tightly"; a flat peak = "many θ values look about equally good." The sharpness has a name (Fisher information, discussed later) but you don't need it right now.
 
 </Intuition>
 
 <Recall term="Estimator">
 
-An estimator T is a function of the data (T = T(X_1, …, X_n)) that produces a guess for a population parameter θ. It is itself a random variable — its value depends on which sample you happened to draw. The distribution of T over hypothetical resamples is called its **sampling distribution**. Bias = E[T] − θ. Variance = Var(T). Mean squared error = Bias² + Variance.
+An **estimator** is any rule that turns raw data into a guess about some hidden number. If you have samples X₁, …, Xₙ and you want to guess the population's true mean, "just compute the average" is an estimator. So is "pick the middle value" (median). Because the data you got is random, your guess is random too — get a different sample, get a different guess. The pattern of guesses you'd get across many hypothetical resamples is called the estimator's **sampling distribution**. Three numbers describe how good the estimator is: **bias** (how far off on average from the truth), **variance** (how jumpy the guess is), and **mean squared error** (bias² + variance — total badness).
 
 </Recall>
 
-## Estimators: bias, variance, consistency, efficiency
+<Recall term="Population vs sample">
 
-An **estimator** is a rule for turning data into a guess about an underlying parameter. Different estimators can target the same parameter — they have different quality characteristics:
+**Population** = the whole thing you want to know about (e.g., "all users of the app"). **Sample** = the small random slice you actually observed (e.g., "the 200 users we surveyed"). The population has a true parameter (like a true average revenue per user) — we can't see it directly. All estimation is about using the sample to guess about the population.
 
-- **Bias** = E[T] − θ. An estimator is *unbiased* if its expected value equals the true parameter. Sample mean is unbiased for μ; sample variance with denominator N is biased-low (needs N − 1 to be unbiased).
-- **Variance** = Var(T). How much does the estimator swing across resamples? Smaller = more precise.
-- **Consistency** = as N → ∞, T converges in probability to θ. All useful estimators are consistent; inconsistent ones are broken.
-- **Efficiency** = ratio of your estimator&rsquo;s variance to the minimum-possible variance (the *Cramér–Rao lower bound*). An estimator is *efficient* if it achieves the bound. MLEs are asymptotically efficient — they achieve the Cramér-Rao lower bound in the large-N limit.
-- **Robustness** = how much bad data (outliers) breaks the estimator. Median is robust; mean is not.
+</Recall>
 
-**Mean squared error decomposition**: MSE(T) = Bias(T)² + Var(T). This is the same identity from the expectation-variance chapter, now applied to estimators. Reducing bias often increases variance and vice versa — a classical bias-variance trade-off.
+## What makes a good estimator?
+
+An **estimator** is just a rule for turning data into a guess. "Compute the mean" is an estimator. "Compute the median" is a different estimator. Both can be aimed at the same target (say, the true average of a population), but they behave differently. Five things people care about:
+
+- **Bias.** If you ran the same estimator on infinitely many independent samples and averaged the answers, would you land on the truth? If yes, the estimator is *unbiased*. The sample mean is unbiased for the population mean. Sample variance with N in the denominator is slightly *biased low* — it tends to underestimate the true spread. That's why textbooks use N − 1 for the "unbiased" version (this is called **Bessel's correction**, just a name for the "use N − 1" trick).
+
+- **Variance.** How jittery is the estimator? If your sample changes a bit, does your guess bounce around a lot or barely move? Lower variance = more reliable.
+
+- **Consistency.** As your sample gets bigger and bigger, does the estimator get closer and closer to the truth? Any useful estimator has to be consistent. If it doesn't shrink onto the truth with unlimited data, it's broken.
+
+- **Efficiency.** Given the sample you have, is your estimator wringing out as much information as theoretically possible? There's a lower bound on how small any estimator's variance can be (called the **Cramér–Rao lower bound**, or CRB for short — that's just its historical name, don't be scared by it). An estimator that hits this bound is called *efficient*. Good news: MLE hits this bound when you have lots of data.
+
+- **Robustness.** If a few data points are garbage (a sensor glitched, someone typed in a wrong number), how badly does that mess up your estimate? The median is robust — a few outliers barely move it. The mean is not — one huge outlier drags it a lot.
+
+**A key identity you'll use forever**: MSE = Bias² + Variance. Total error breaks cleanly into "how far off on average" plus "how jittery." You can often trade one for the other. Adding a tiny bias can shrink variance so much that MSE drops — this is exactly what regularization does (next chapter), and it's why real-world estimators are often deliberately biased.
 
 <RunnableCode title="Compare estimators: sample mean vs sample median for a Gaussian population" code={estimatorCode} packages={["numpy"]} />
 
-## The likelihood function
+## The likelihood function, unpacked
 
-Fix a parametric family (Bernoulli(p), Gaussian(μ, σ²), Categorical(π), …) and iid data D = (x_1, …, x_n). The **likelihood function** is
+Now let's make "likelihood" concrete instead of scary. Pick a family of distributions — say bell curves 𝒩(μ, σ²), or coin flips Bernoulli(p) — and imagine you got data D = (x₁, …, xₙ). Two words to unpack up front:
+
+- **iid** is a three-letter acronym for **independent and identically distributed**. "Independent" = one sample doesn't affect the next. "Identically distributed" = every sample came from the same underlying process. Basically: n clean draws from the same jar.
+- **Parametric family** is fancy for "a distribution with a knob." Coin flips have one knob (probability of heads). Bell curves have two knobs (center and width).
+
+Given a knob setting θ, the **likelihood** is just the probability the model assigns to the data you actually saw:
 
 $$
 L(\theta) \;=\; p(D \mid \theta) \;=\; \prod_{i=1}^n p(x_i \mid \theta).
 $$
 
-*L is a function of θ, with D fixed.* When p is a PDF (continuous case), L can be greater than 1 — remember, densities aren&rsquo;t probabilities. What matters is *comparing* L across values of θ.
+Read this out loud: "L of θ equals the product, over all your samples, of the probability of each sample given θ." The product is there because with iid samples, joint probability = product of individual probabilities.
 
-The **log-likelihood** is
+One warning before we go further. When your data is continuous (like weights, heights, pixels), p(xᵢ | θ) is a **density** — the height of a probability curve — not a probability. Densities can be bigger than 1 (they only need to integrate to 1). That's fine. All you care about is *comparing* L(θ) across different θ, not the raw number.
+
+The **log-likelihood** is what we actually optimize:
 
 $$
 \ell(\theta) \;=\; \log L(\theta) \;=\; \sum_{i=1}^n \log p(x_i \mid \theta).
 $$
 
-Three reasons we work in log-space:
+The lowercase ℓ (script "l") is just "log-likelihood." The reason to take the log is practical, not deep:
 
-1. **Numerical stability.** Multiplying n densities produces astronomically small numbers that underflow to zero. Adding n log-densities produces a finite number.
-2. **Simple derivatives.** Log of a product = sum of logs. Derivative of a sum = sum of derivatives.
-3. **Additivity across iid samples.** ℓ(θ) is a sum of per-sample contributions, matching the mini-batch structure of stochastic gradient descent.
+1. **Numbers stop crashing to zero.** Multiplying a million probabilities of 0.01 gives you 10⁻²⁰⁰⁰, which any computer rounds to zero. Adding a million values of log(0.01) gives you a big negative number — sane and finite.
+2. **Derivatives get easier.** log of a product = sum of logs. Sum of logs → sum of derivatives → much cleaner algebra.
+3. **The math matches how we train models.** Log-likelihood is a sum over samples, which is exactly how mini-batch training works (you sum the loss over a batch and take a step).
 
 <RunnableCode title="Likelihood and log-likelihood of Gaussian μ with known σ" code={likelihoodCode} packages={["numpy", "scipy", "matplotlib"]} />
 
-## Deriving MLE for Bernoulli — by hand
+## Doing the math: MLE for a coin flip
 
-Data: n coin flips with outcomes x_i ∈ &#123;0, 1&#125;. Let k = Σ x_i be the number of heads. Model: X_i ~ Bernoulli(p) iid.
+Time to actually turn the crank. Data: n coin flips, each xᵢ is either 0 (tails) or 1 (heads). Let k = x₁ + … + xₙ = the total number of heads. Model: each flip is a **Bernoulli(p)** — a fancy name for "coin flip with heads-probability p." So p(x=1) = p and p(x=0) = 1 − p, or written more compactly: p(x) = p^x · (1−p)^(1−x).
+
+The likelihood is the product of these per-flip probabilities:
 
 $$
 L(p) \;=\; \prod_{i=1}^n p^{x_i} (1-p)^{1-x_i} \;=\; p^k (1-p)^{n-k}.
 $$
 
-Take log:
+That collapse in the middle happens because Σ xᵢ = k (heads) and n − k = tails.
+
+Take the log to make life easier:
 
 $$
 \ell(p) \;=\; k \log p + (n - k) \log(1 - p).
 $$
 
-Differentiate with respect to p and set to zero:
+Now we find the peak. **Differentiate** (compute the slope) with respect to p and set it to zero — because the top of a hill has zero slope:
 
 $$
 \frac{d \ell}{d p} \;=\; \frac{k}{p} - \frac{n - k}{1 - p} \;=\; 0
 $$
 
-Cross-multiplying: k(1 − p) = (n − k) p, so k = np, and
+Move things around to solve: k(1 − p) = (n − k)p, then expand: k − kp = np − kp, then the kp's cancel: k = np, so:
 
 $$
 \boxed{\;\hat p_{\text{MLE}} \;=\; \frac{k}{n}\;}
 $$
 
-— just the empirical frequency of heads. Obvious in hindsight; but the MLE derivation is your check that "obvious" is actually correct. **This is also the naive Bayes classifier&rsquo;s per-class word probability, and the standard n-gram counts in language modeling** — same MLE, different context.
+— just the fraction of heads you observed. Which is what any beginner would guess before knowing calculus. But now you know *why* that guess is optimal, not just intuitive.
+
+Why does this matter? Because this exact same formula shows up all over ML:
+
+- **Naive Bayes classifier** (a simple spam filter): each word's per-class probability is estimated as "how often that word appears in class-emails / total class-emails" — that's k/n.
+- **N-gram language models** (predicting the next word from raw counts): P(word | previous words) = "how many times we saw this word after that context / total times we saw that context" — again k/n.
+
+Different application, same MLE.
 
 <RunnableCode title="MLE for Bernoulli(p): closed-form + numerical verification + CRB variance" code={mleBernoulliCode} packages={["numpy", "scipy"]} />
 
-## Deriving MLE for Gaussian — the ML regression foundation
+## Doing the math: MLE for a bell curve (and why MSE loss exists)
 
-Data: n samples x_i ~ 𝒩(μ, σ²) iid. Log-likelihood:
+Same routine, harder distribution. The **Gaussian** 𝒩(μ, σ²) is the bell curve: μ (mu) is the center where the peak sits, σ² (sigma-squared, the "variance") is how wide the curve is. Data: n samples drawn iid from this bell curve. The log-likelihood works out to:
 
 $$
 \ell(\mu, \sigma^2) \;=\; -\frac{n}{2} \log(2\pi \sigma^2) - \frac{1}{2\sigma^2} \sum_i (x_i - \mu)^2.
 $$
 
-Take partial derivatives.
+Don't panic at the expression — it comes from taking log of the standard bell-curve density formula. The 2π constant is just the constant inside the density.
 
-**MLE for μ**:
+We need two derivatives now, one for each knob. When you have multiple knobs, "partial derivative" is the fancy term: take the derivative with respect to one knob while pretending the other is frozen. Notation: ∂ instead of d.
+
+**Finding μ̂:** take ∂ℓ/∂μ, set to zero.
 
 $$
 \frac{\partial \ell}{\partial \mu} \;=\; \frac{1}{\sigma^2} \sum_i (x_i - \mu) \;=\; 0 \;\Rightarrow\; \boxed{\;\hat \mu_{\text{MLE}} \;=\; \bar x\;}
 $$
 
-The sample mean. Independent of σ² — even if you don&rsquo;t know σ², the MLE for μ is still the sample mean.
+That last symbol x̄ (x-bar) is just the sample mean — average all your x's. Neat detail: the answer doesn't involve σ² at all. Even if you don't know how wide the bell is, the best guess for its center is still just the average.
 
-**MLE for σ²**:
+**Finding σ̂²:** take ∂ℓ/∂σ², set to zero.
 
 $$
 \frac{\partial \ell}{\partial \sigma^2} \;=\; -\frac{n}{2\sigma^2} + \frac{1}{2\sigma^4} \sum_i (x_i - \hat\mu)^2 \;=\; 0
@@ -313,75 +359,86 @@ $$
 \boxed{\;\hat \sigma^2_{\text{MLE}} \;=\; \frac{1}{n} \sum_i (x_i - \hat \mu)^2\;}
 $$
 
-**The MLE for variance uses N, not N − 1.** So the MLE for σ² is biased-low; the *unbiased* estimator uses (N − 1) (Bessel&rsquo;s correction). MLE is asymptotically unbiased but small-N biased for variance.
+In English: the MLE for spread is the average squared distance from the sample mean. Reasonable.
 
-**The ML connection**: linear regression via least squares is *exactly* MLE assuming Gaussian noise. If y_i = f(x_i, w) + ε_i with ε_i ~ 𝒩(0, σ²), then the log-likelihood is
+**Watch out for one thing.** That formula divides by n. The classical "unbiased" formula divides by n − 1 (that's Bessel's correction we mentioned earlier). So MLE for variance is biased-low — it slightly underestimates how spread out the data really is. For small samples this matters; for large ones it washes out.
+
+**And here's the payoff.** If you fit a line (or any function) to data by "least squares" — minimizing the sum of squared errors — you are secretly doing MLE, assuming the true value is your prediction plus bell-curve noise. Here's the math: if yᵢ = f(xᵢ, w) + εᵢ where εᵢ is small bell-curve-shaped random noise, the log-likelihood is:
 
 $$
 \ell(w) = -\frac{n}{2} \log(2\pi\sigma^2) - \frac{1}{2\sigma^2} \sum_i (y_i - f(x_i, w))^2.
 $$
 
-Maximizing over w is equivalent to *minimizing* Σ (y_i − f(x_i, w))² — the squared-error loss. Every MSE loss you write down is quietly assuming Gaussian noise around your predictions.
+Maximizing this over the weights w is the same as *minimizing* Σ (yᵢ − f(xᵢ, w))² — the squared-error loss. So every time you write MSE loss in PyTorch, you are quietly telling the model "I assume your errors are bell-curve-shaped." Often that's fine. When it isn't (e.g., heavy-tailed errors), you might want a different loss.
 
 <RunnableCode title="MLE for Gaussian(μ, σ²) — closed-form + connection to least squares" code={mleGaussianCode} packages={["numpy"]} />
 
-## MLE properties for large N
+## What MLE gives you for free when N is big
 
-MLEs have three beautiful asymptotic properties, all of which are why we use them:
+The word **asymptotic** just means "in the limit of lots of data" — think "what happens when n gets huge." MLE has three lovely asymptotic properties. These are why it's the default in statistics and ML:
 
-1. **Consistency**: $\hat\theta_{\text{MLE}} \to \theta$ in probability as n → ∞. Given enough data, MLE finds the truth.
-2. **Asymptotic normality**: $\sqrt{n} (\hat\theta_{\text{MLE}} - \theta) \to \mathcal{N}(0, I(\theta)^{-1})$, where I(θ) is the **Fisher information**. So for large n, $\hat\theta$ is approximately Gaussian around the true value, with variance approximately 1 / (n · I(θ)).
-3. **Asymptotic efficiency**: MLE achieves the Cramér–Rao lower bound in the limit. No other consistent estimator has smaller variance.
+1. **Consistency** — with enough data, MLE lands on the truth. Formally: as n grows, θ̂ gets arbitrarily close to the real θ. So more data = better answer, always.
 
-The **Fisher information** is the expected curvature of the log-likelihood: $I(\theta) = -E[\partial^2 \ell / \partial \theta^2]$. Intuitively, a sharply-peaked log-likelihood has high curvature → high Fisher information → low estimator variance (we&rsquo;re very certain about θ). Flat log-likelihood → low Fisher information → high variance.
+2. **Bell-curve error** — the estimate's error follows a predictable bell curve. Specifically: √n · (θ̂ − θ) becomes bell-curve-shaped with width 1/√(Fisher info). Translation: your error bars shrink as 1/√n, and you can compute them.
 
-For engineering purposes, this justifies the practice of using MLE and reporting error bars using estimated Fisher information (or its equivalent, the Hessian at the MLE). Every optimizer in `scipy.optimize` and every deep-learning training loop is implicitly finding this peak.
+3. **Best-possible precision** — for large n, MLE hits the Cramér–Rao lower bound, meaning no other consistent estimator can do better. You are extracting all the information the data has.
 
-## The traps that matter
+Two vocabulary unpacks:
 
-**Likelihood is not probability.** L(θ | D) is a function of θ, not a probability distribution over θ. Sums or integrals over θ don&rsquo;t equal 1. You cannot say &ldquo;this θ has probability 0.9 of being right&rdquo; from L alone — that&rsquo;s a Bayesian statement requiring a prior.
+- **Fisher information** I(θ) is the "sharpness of the peak" of the log-likelihood at the true θ. Sharp peak → high Fisher info → low variance in your estimate (you're pinning θ down). Flat peak → low Fisher info → high variance (θ is hard to pin down from this data). The formal formula is `I(θ) = −E[∂²ℓ/∂θ²]` — the expected second derivative (curvature) of the log-likelihood — but you don't need to compute it by hand day-to-day.
+- **Cramér–Rao lower bound** (CRB): the theoretical floor for how small an unbiased estimator's variance can be. Reaching this floor means "you couldn't possibly have done better."
 
-**MLE can be sensitive to model misspecification.** If your assumed distribution family doesn&rsquo;t contain the true distribution, MLE finds the θ that&rsquo;s closest (in KL sense) — but that&rsquo;s not the same as the truth. Real data usually violates our model assumptions; check the fit.
+For a practicing engineer, all of this justifies two habits: (1) use MLE (or an approximation of it, like SGD on a loss function) as your default; (2) if you need error bars, get them from the shape of the log-likelihood near the peak (or from bootstrap resampling — see the next chapter). Every optimizer in `scipy.optimize` and every training loop in PyTorch is quietly hunting for the top of a likelihood hill.
 
-**Zero-probability observations kill MLE.** If your model assigns zero density to any observed x_i, log-likelihood → −∞. In practice: use additive smoothing (Laplace, add-α) for count models, ensure your distribution family covers all possible observations, or use a mixture that has global support.
+## Things that trip people up
 
-**MLE for variance is biased.** As shown, MLE uses N in the denominator; unbiased uses N − 1. For small N (say &lt; 30) this matters. Deep-learning training often uses MLE variance (or a fixed variance) without concern because N is large.
+**"Likelihood is not the same as probability."** L(θ) tells you how well each θ explains the data — but it is *not* the probability that θ is correct. You cannot say "there's a 90% chance the true p is 0.5" from L alone. Doing that requires adding a prior belief and switching to Bayesian language (that's the next chapter, on MAP and priors).
 
-**MLE can overfit.** For flexible models (deep nets), MLE alone will fit training data too well. Regularization (next chapter: MAP with priors) or early stopping restrains this.
+**"MLE assumes the model shape is right."** If you assume Gaussian noise but reality is heavy-tailed (occasional huge errors), MLE will do its best under the wrong assumption. It won't yell — it'll just quietly give you a biased answer. So always sanity-check: do the residuals look bell-curve-ish? If not, either change the model or accept the caveat.
 
-**Numerical implementation matters.** Working in log-space isn&rsquo;t optional. `log_softmax` + `nll_loss` is more stable than `softmax` + `log`. `logsumexp` is more stable than `log(sum(exp(...)))`. Modern libraries have these built-in for a reason.
+**"Zero-probability observations blow everything up."** If your model says "this outcome is impossible" but you observed it once, log-likelihood becomes log(0) = −∞, and the whole optimization crashes. Real fix: **additive smoothing** (also called Laplace smoothing) — pretend you saw every outcome one extra time. In language models this shows up as "add α to every count." In deep learning, softmax outputs never hit zero, which is one reason it's used.
 
-<RealWorldML title="Every ML training objective is a maximum-likelihood problem in disguise">
+**"MLE for spread is biased low."** The formula we derived divides by n, but the classical "unbiased" version divides by n − 1. For small samples this matters (say n &lt; 30). For big deep-learning batches nobody cares — n is huge, the difference vanishes.
 
-Take three canonical setups and unpack the likelihood:
+**"MLE alone can overfit."** With flexible models (like deep networks), MLE will happily contort the model until it memorizes the training data — including the noise. That's called **overfitting**. Fix: add a **prior** (see the MAP chapter next) or use **regularization** (a soft penalty on how weird the weights get). Both are ways to say "MLE, but stay reasonable."
 
-**Cross-entropy classification.** Model outputs π(x, w) = softmax(logits), a Categorical over K classes. Given labeled data (x_i, y_i) with y_i ∈ &#123;1, …, K&#125;, likelihood is:
+**"Log-space isn't optional."** Whenever you see `log_softmax` + `nll_loss` in PyTorch (instead of `softmax` + `log`), or `logsumexp` instead of `log(sum(exp(...)))`, that's the library saving you from underflow. Use the built-ins.
+
+<RealWorldML title="Three ML losses that are secretly MLE">
+
+Let's take three losses you'll actually meet in ML and show that each is MLE in disguise. If you get this, you can decode almost any paper you read for the rest of your career.
+
+**1. Cross-entropy classification.** Your model outputs π(x, w) — a probability distribution over K classes, produced by softmax on the logits. **Softmax** is just "turn a vector of raw scores into probabilities that sum to 1." **Logits** are the raw scores before softmax. Given labeled data (xᵢ, yᵢ) — inputs with their true class — the likelihood of your labels under the model is:
 
 $$
 L(w) = \prod_i \pi_{y_i}(x_i, w).
 $$
 
-Log-likelihood:
+That subscript π_(y_i) means "the probability the model assigned to the *true* class for example i." Take log, get:
 
 $$
 \ell(w) = \sum_i \log \pi_{y_i}(x_i, w).
 $$
 
-Negative log-likelihood is the standard *cross-entropy loss*. Minimizing it *is* MLE for the parameters w of the classifier under the assumption that outputs are Categorical.
+Flip the sign, get the cross-entropy loss you've seen a hundred times. Minimizing cross-entropy *is* doing MLE, assuming your model outputs a valid probability distribution over classes.
 
-**Language model pretraining.** Model outputs a Categorical over the vocabulary V given the preceding tokens. Chain-rule joint over a sentence x = (x_1, …, x_T):
+**2. Language model pretraining (how GPT trains).** The model looks at the tokens so far and predicts the next one. A **token** is roughly a word or word-piece. The **vocabulary** V is all possible tokens. For each sentence x = (x₁, …, x_T):
 
 $$
 L(w) = \prod_t P(x_t \mid x_{<t}, w).
 $$
 
-Log-likelihood: L_LM = Σ_t log P(x_t | x_&lt;t, w). Negating gives the token-level cross-entropy. Every LLM pre-training run is MLE on trillions of tokens.
+The subscript `<t` means "everything before position t." Log it, get log-likelihood = Σ_t log P(x_t | x_&lt;t, w). Negate, get the token-level cross-entropy — the exact objective GPT and every other decoder-only LLM trains on. So when you hear "GPT is trained to predict the next token," what's really happening is MLE on trillions of tokens.
 
-**Diffusion model score matching.** For a noisy image x_t (produced by forward diffusion), the model learns to predict the noise ε. The training loss is E[|ε − ε_θ(x_t, t)|²] = squared-error, which is MLE for Gaussian noise around the prediction. So diffusion training is *also* MLE — a specific parameterization of the Gaussian likelihood on the noise variable.
+**3. Diffusion models (image generators).** Diffusion models learn to un-noise images. During training, you take a clean image, add a controlled amount of random noise (call it ε, "epsilon"), and train a network εθ to predict what noise was added. The loss is E[||ε − εθ(noisy image, timestep)||²] — squared error between true and predicted noise. That's the same MSE-as-MLE-under-Gaussian-noise story from earlier: minimizing this loss is MLE, assuming the noise is bell-curve-shaped (which it is, by construction).
 
-Recognizing MLE inside a paper unlocks a lot: you can predict properties of the trained model (asymptotically unbiased, low variance), understand why the loss function looks the way it does, and know what happens as you scale data (LLN, CLT applied to the score).
+Once you can spot MLE in a loss function, three things get easier:
 
-Every ML training loop is a numerical optimization on a log-likelihood surface. Understanding that is the difference between "here&rsquo;s the loss function they gave me" and "here&rsquo;s the likelihood assumption they made."
+- You can predict properties of the trained model (with enough data, it lands on the truth; error bars shrink as 1/√n).
+- You understand *why* the loss looks the way it does (it's the log-probability of the data under some assumed model).
+- You know what breaks if the assumption is wrong (heavy tails → don't use MSE; extremely imbalanced classes → cross-entropy might need reweighting).
+
+That's the difference between "here's the loss function the paper handed me" and "here's the probabilistic assumption that loss encodes."
 
 </RealWorldML>
 

@@ -214,15 +214,20 @@ print(f"Relative reconstruction error: {err:.4f}")
   ]}
 />
 
-<Motivation title="Compressing a 1,024-dim embedding to 32 dimensions while keeping 95% of the signal">
+<Motivation title="Squeeze a 1,024-dim embedding into 32 dims — keep 95% of the signal">
 
-Every embedding-based system in modern ML has the same shape: represent an object (a word, an image, a user, a molecule) as a d-dimensional vector, where d is 512, 1024, 1536, or more. Storage and compute grow with d. Downstream models train faster if d is small. Interpretability improves if you can compress to 2 or 3 dimensions for a plot.
+Every embedding-based system in modern ML looks the same at the top level: turn each object (a word, an image, a user, a molecule) into a d-dimensional vector where d is 512, 1024, 1536, or more. Storage and compute both scale with d. Downstream models train faster if d is smaller. And you can only *plot* a dataset if you can somehow shrink it to 2 or 3 dimensions.
 
-But most of that d-dimensional space is *wasted*. Real embedding matrices have a small number of directions that account for most of the variance in the data; the rest is either noise or nearly-constant. If you find the right d′ &lt; d directions and project onto them, you keep most of the signal at a fraction of the cost.
+Here's the fun secret: most of that d-dimensional space is *wasted*. Real embeddings have a small number of directions that account for most of the interesting variation; the rest is either noise or nearly-constant filler. If you find the right d′ < d directions and project onto them, you keep most of the signal at a fraction of the cost.
 
-That's PCA. Principal Component Analysis is the *canonical* algorithm for finding those directions — and, remarkably, it's just linear algebra: an eigendecomposition of the covariance matrix (or equivalently, an SVD of the centered data matrix). No optimization loop, no hyperparameters beyond "how many components to keep." Once you've built the intuition for eigenvectors and SVD, PCA falls out in one page.
+That's **PCA — Principal Component Analysis**. Two quick vocabulary unpacks:
 
-This chapter brings everything from Phase 1.2 together — vectors, matrices, eigenvectors, SVD, positive-definite covariances — into one workflow: how to compress data while preserving what matters.
+- **Principal components** = the "natural axes" of your data — directions along which the data varies the most.
+- **Variance** = the spread of the data along a direction. High variance = interesting; low variance = boring.
+
+The magic is that PCA is just linear algebra. Compute the covariance matrix of your data, find its eigenvectors (with the biggest eigenvalues), and those are your principal components. Numerically-preferred alternative: compute the SVD of the (centered) data matrix and use its top singular vectors. Either way, no optimization loop, no hyperparameters except "how many components to keep."
+
+This chapter brings everything from Phase 1.2 together — vectors, matrices, eigenvectors, SVD, positive-definite covariance matrices — into one workflow: **how to compress data while preserving what matters.**
 
 </Motivation>
 

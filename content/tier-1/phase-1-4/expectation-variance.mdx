@@ -118,30 +118,45 @@ print("Correlation only measures LINEAR dependence; nonlinear deps can hide.")`;
   ]}
 />
 
-<Motivation title="Expectation is the summary; variance is the honesty">
+<Motivation title="Expectation is 'what you'd get on average'; variance is 'how much it wobbles'">
 
-Every quantity in ML that "averages" over something is an expectation: the mean squared error loss averages squared residuals, the log-likelihood averages log probabilities, the entropy averages -log p, the KL divergence averages log(p/q). Every "sample many, take the mean" trick relies on this machinery.
+You've been computing averages since middle school. **Expectation** is just a fancy math word for "the average, weighted by probability." Every quantity in ML that "averages over something" is really an expectation:
 
-But knowing the mean is only half the story — you also need to know **how much things vary**. A model whose mean prediction is right but whose predictions swing wildly is far worse than one whose predictions cluster tightly around the truth. **Variance** captures this spread. Together, expectation and variance are the minimum vocabulary for reasoning about any probabilistic quantity: the model's outputs, the loss over batches, the gradient estimates in SGD, the sample averages used in evaluation.
+- **Mean squared error loss** averages the squared prediction errors.
+- **Log-likelihood** (from the estimation chapter) averages log probabilities.
+- **Entropy** averages −log p (uncertainty of a distribution).
+- **KL divergence** averages log(p/q) (how different two distributions are).
+
+Every "sample many, take the mean" trick — every SGD step, every Monte Carlo estimate, every RL policy evaluation — is standing on this idea.
+
+But the mean is only half the story. You also need to know **how much your quantity wobbles around that mean**. A model that gets 87% accuracy on average is very different from one that gets 87% ± 2% versus 87% ± 20%. That's what **variance** captures — the spread around the mean.
+
+Together, expectation and variance are the minimum vocabulary for reasoning about anything probabilistic in ML: the model's outputs, batch-averaged losses, gradient noise, evaluation error bars.
 
 For a GenAI engineer, this chapter unlocks:
 
-- **Loss decomposition**: MSE = variance + squared bias (the bias-variance tradeoff of classical ML).
-- **Gradient noise reasoning**: SGD's noise variance depends on batch size — smaller batches, noisier gradients, more regularization from the noise.
-- **Sample complexity**: how many samples you need to estimate a mean depends on the variance of what you're estimating (standard error = std / sqrt(N)).
-- **Linearity tricks**: expectation is linear even without independence, so you can decompose complicated averages into simpler ones.
+- **Loss decomposition**: MSE = squared bias + variance. This is the famous **bias-variance tradeoff** of classical ML (whole chapter on it in Tier 2).
+- **Gradient noise**: SGD's noise variance depends on batch size. Smaller batches → noisier gradients → more implicit regularization from the wobble.
+- **Sample complexity**: to estimate an average precisely, you need enough samples that the standard error (= standard deviation / √N) is small enough for your use case.
+- **Linearity of expectation**: even when random variables aren't independent, their expected values add cleanly. Huge algebraic shortcut.
 
-The formulas are trivial — one sum. The mental model is what pays off.
+The formulas are simple — one sum. The mental picture is what really pays off.
 
 </Motivation>
 
-<Intuition title="Expectation is the balance point; variance is the moment of inertia">
+<Intuition title="Expectation is the balance point; variance is how far things scatter">
 
-Imagine the outcomes of a distribution as weights placed on a number line, with each weight proportional to the probability of that outcome. **The expectation E[X] is the balance point** — the location where the number line would balance if you put a fulcrum there. For symmetric distributions, this is the center; for skewed distributions, it's pulled toward the heavier side.
+Here's a picture that makes both concepts concrete.
 
-**The variance Var(X) is the "moment of inertia"** — how hard it would be to rotate the distribution around its balance point. Concentrated distributions have low variance (weights close to center, easy to spin). Spread distributions have high variance (weights far from center, hard to spin). **The standard deviation σ = √Var** is variance in the original units, easier to interpret ("outputs are 5 ± 2" makes intuitive sense; "5 with variance 4" less so).
+Imagine you spread little weights along a number line, one weight per possible outcome, sized in proportion to how likely each outcome is. So a fair die would put six equal weights at positions 1, 2, 3, 4, 5, 6. A loaded die would put bigger weights where the probabilities are higher.
 
-Both are single-number summaries of a distribution. Two distributions with the same mean but different variances are qualitatively different: one is predictable, the other is a wild ride. Reporting a mean without a variance (or standard deviation) is often misleading.
+**The expectation E[X] is the balance point** — the spot where you'd put a pivot to keep the line balanced. For symmetric distributions (like a fair die), this is the middle. For skewed ones, it's dragged toward the heavier side.
+
+**Variance Var(X) is "how spread out the weights are from the balance point."** Weights all clumped near the pivot → low variance (predictable). Weights scattered far to the sides → high variance (wildly unpredictable).
+
+**Standard deviation σ = √Var** is variance in the original units — much easier to interpret. "Outputs are 5 ± 2" makes intuitive sense. "5 with variance 4" is the same thing, but harder to picture. Always convert to standard deviation when talking to humans.
+
+Both are single-number summaries. Two distributions can have the same mean but wildly different variances — one is predictable, the other is a rollercoaster. Reporting a mean without a standard deviation is often misleading.
 
 </Intuition>
 
@@ -229,19 +244,23 @@ Correlation ranges from −1 (perfectly anti-linear) to +1 (perfectly linear), w
 
 **The trap**: uncorrelated does NOT mean independent. Correlation only measures *linear* dependence. Two variables can be perfectly deterministically related (e.g., Y = X² for X centered at 0) and still have correlation 0. This limitation is why we sometimes need mutual information (from the entropy chapter) instead — it captures non-linear dependence too.
 
-## The traps that matter
+## Things that trip people up
 
-**E[g(X)] ≠ g(E[X]) in general** (Jensen's inequality gives one direction: E[g(X)] ≥ g(E[X]) for convex g). This is why we can't just plug the mean into a loss function and expect the right answer — we have to average the loss over samples. "The expected loss of the mean prediction" is different from "the mean of the per-sample losses."
+**"E[g(X)] is not the same as g(E[X])."** You can't just plug the mean into a nonlinear function and expect the right answer. In fact, **Jensen's inequality** tells you which direction it goes for a convex g: E[g(X)] ≥ g(E[X]). (Convex just means "curves upward, like a bowl." Squaring, exponential, negative log are all convex.) Practical consequence: "the expected loss of the mean prediction" is *not* the same as "the mean of the per-sample losses." You have to average the loss over samples.
 
-**Variance is not linear.** Var(X + Y) ≠ Var(X) + Var(Y) in general. You need the covariance correction. For independent X and Y (or even just uncorrelated), it simplifies — but assumptions of independence are often violated in ML data.
+**"Variance doesn't add unless you're independent."** Var(X + Y) ≠ Var(X) + Var(Y) in general. There's an extra term called covariance that has to be included:
 
-**Sample variance uses N-1, not N** (Bessel's correction). The sample mean uses one degree of freedom, so the residuals sum to zero — this means only N-1 residuals are "free." Dividing by N-1 gives an unbiased estimator of the true variance. `np.var(x, ddof=1)` uses N-1; `np.var(x)` uses N. For large N the difference vanishes; for small N it matters.
+$$\mathrm{Var}(X+Y) = \mathrm{Var}(X) + \mathrm{Var}(Y) + 2\,\mathrm{Cov}(X, Y).$$
 
-**Uncorrelated ≠ independent.** The classic counterexample: X ~ Uniform(-1, 1) and Y = X². Corr(X, Y) = 0 (by symmetry), but Y is a deterministic function of X — they're maximally dependent. Correlation only sees the linear part of the relationship. For fully nonlinear dependence, use mutual information.
+For **independent** X and Y (or even just **uncorrelated** ones), Cov(X, Y) = 0 and the extra term vanishes — but independence assumptions are often wrong in real data.
 
-**Central moments beyond variance exist**: the third central moment is skewness (asymmetry), the fourth is kurtosis (heavy-tailedness). Rarely used in ML directly, but they appear in some financial / risk contexts.
+**"Sample variance uses N − 1, not N."** This is called **Bessel's correction**. The math reason: because you used the sample mean itself to compute the deviations, one "degree of freedom" is spent, so only N − 1 residuals are free to vary. Dividing by N − 1 gives an unbiased estimator. In NumPy: `np.var(x, ddof=1)` uses N − 1 (correct); `np.var(x)` uses N (biased-low). For large N the difference is negligible.
 
-**Expectation of a random function is a Bayes posterior mean.** If f is a random function (say, a Bayesian neural network) and you want a "best" prediction, E[f(x)] over the distribution of f is often that prediction. This connects expectation to model averaging and Bayesian inference.
+**"Uncorrelated does not mean independent."** The classic counterexample: X uniform on [−1, 1] and Y = X². By symmetry, Corr(X, Y) = 0 — but Y is *completely determined* by X. They're not independent at all. Correlation only sees the linear part of a relationship. For fully nonlinear dependence, you need **mutual information** (covered in the entropy chapter).
+
+**"Higher moments exist but usually don't matter."** The third **central moment** measures **skewness** (is the distribution lopsided?), the fourth measures **kurtosis** (are the tails heavy?). Rarely used directly in mainstream ML — mostly show up in finance and risk modeling.
+
+**"Averaging a random model gives you Bayesian inference."** If your model f is itself uncertain (say, you have multiple training runs, or a Bayesian neural network), then E[f(x)] averaged over the model's uncertainty is a natural best prediction. This is exactly what **deep ensembles** and MC Dropout compute.
 
 <RealWorldML title="Mean squared error decomposes into bias-squared plus variance">
 

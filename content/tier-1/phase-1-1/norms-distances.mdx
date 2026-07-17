@@ -116,13 +116,26 @@ for i in np.argsort(-scores):     # best match first
   ]}
 />
 
-<Motivation title="'Closest' is a design decision">
+<Motivation title="'Closest' is a design choice — pick your ruler carefully">
 
-Every RAG system answers one geometric question: *which stored embedding is closest to the query embedding?* But "closest" isn't one thing — it depends on the **ruler**. Measure with the L2 ruler and you get Euclidean distance; with L1, Manhattan distance; rank by cosine and you're not even using a true distance (we'll prove that). Vector databases let you pick, and picking wrong quietly degrades retrieval.
+Every RAG system boils down to one geometric question: **"which stored embedding is closest to the query embedding?"** But here's the thing: "closest" isn't a single well-defined idea. It depends on the **ruler** you use to measure distances.
 
-The same letters follow you everywhere else in ML: **L2** appears in weight decay and gradient clipping, **L1** in lasso regularization (it's what creates sparsity — the norm-ball picture below shows why), **L∞** in adversarial robustness ("no pixel changed by more than ε"). The choice of norm is a modeling decision, not a formality.
+Different rulers you'll meet in ML — the letters are just historical names, don't panic at them:
 
-This chapter gives you the three rulers, one identity that welds distance to the dot product (the identity vector databases are built on), and the traps — including why "cosine distance" breaks the rules real distances obey.
+- **L2 (Euclidean)** = the "straight-line" ruler. Uses Pythagoras. Standard for most geometry.
+- **L1 (Manhattan)** = the "walking on a grid" ruler. Only lets you move along axes.
+- **L∞ (infinity norm / Chebyshev)** = the "biggest single component" ruler. Just takes the max.
+- **Cosine similarity** = ignores length entirely, only cares about direction. (Technically not a distance — we'll unpack why.)
+
+Vector databases let you pick which one. Picking wrong quietly degrades retrieval quality. So the choice matters.
+
+The same letters show up all over ML:
+
+- **L2** appears in weight decay ("keep the weights small in the straight-line sense") and gradient clipping.
+- **L1** shows up in Lasso regularization — its funny geometry is exactly what creates **sparsity** (mostly-zero weights).
+- **L∞** shows up in adversarial robustness: "no single pixel changes by more than ε."
+
+So the choice of ruler ("norm") is a modeling decision, not a formality. This chapter gives you the three main rulers, one identity that connects distance to the dot product (the identity every vector database is built on), and the traps — including why "cosine distance" doesn't quite behave like a real distance.
 
 </Motivation>
 

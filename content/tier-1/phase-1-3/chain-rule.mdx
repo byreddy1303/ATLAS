@@ -148,13 +148,13 @@ print(f"loss after one step: {loss2:.4f}  (should be smaller than {loss:.4f})")`
   ]}
 />
 
-<Motivation title="Every layer of an LLM is a link in one giant chain">
+<Motivation title="Every LLM layer is a link in one giant chain — and the chain rule tells us how to train it">
 
-A transformer with 96 layers is a composition of 96 functions: the token embedding is transformed by layer 1, whose output feeds layer 2, whose output feeds layer 3, all the way to the final softmax logits. From the perspective of a single loss value at the top, the model is one enormous nested function of every learnable weight.
+A 96-layer transformer is a composition of 96 functions stacked on top of each other. The token embedding gets transformed by layer 1, whose output feeds layer 2, whose output feeds layer 3, all the way up to the final scores. From the perspective of a single loss number at the top, the whole model is one enormous nested function of every learnable weight.
 
-Training that model means adjusting every weight to shrink the loss. To do that we need one number per weight: how much would the loss change if we nudged this specific weight by a tiny amount? That's a derivative. And computing derivatives through a composition of 96 functions is exactly what the **chain rule** does. Backprop, the algorithm that trains every neural network in the world, is nothing more than the chain rule applied to a computation graph with clever bookkeeping.
+Training means adjusting every weight to make the loss smaller. To do that, we need one number per weight: **"if I nudge this specific weight by a tiny amount, how much does the loss change?"** That's a derivative. And computing derivatives *through 96 layers of composition* is exactly what the **chain rule** does. Backprop — the algorithm that trains every neural network in the world — is really just the chain rule applied to a computation graph, plus some clever bookkeeping.
 
-For a GenAI engineer, "chain rule" is not the school-book equation for compound function derivatives — it's the geometric fact that **local slopes multiply along a chain**, and it's the reason gradients flow (or vanish, or explode) through deep networks. This chapter gives you the one identity you need, three visual pictures for what it means, and the smallest possible neural network's backprop worked out entirely by hand — the same math autograd is doing when you call `loss.backward()`.
+For a GenAI engineer, "chain rule" isn't the textbook formula for the derivative of a compound function. It's the geometric fact that **local slopes multiply along a chain**. That's also why gradients "flow" nicely through some architectures and "vanish" or "explode" in others. This chapter gives you the one identity you need, three visual pictures for what it means, and the smallest possible neural network's backprop worked out by hand — exactly what your autograd library is doing when you call `loss.backward()`.
 
 </Motivation>
 

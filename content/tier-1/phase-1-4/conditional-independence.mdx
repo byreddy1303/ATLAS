@@ -158,23 +158,31 @@ print(f"Empirical P(win | stay)   = {wins_stay:.4f}   (theory 1/3 = 0.3333)")
   ]}
 />
 
-<Motivation title="Conditioning is how every ML model reasons about context">
+<Motivation title="Conditioning is how models use context — from GPT to RAG to diffusion">
 
-Conditioning is the operation "restrict attention to the subset of the world where B is known to be true, then re-measure." Every "in-context" claim in ML — every &ldquo;the model uses the previous tokens to predict the next one,&rdquo; every &ldquo;we retrieve the top-k documents relevant to this query,&rdquo; every &ldquo;we condition the diffusion model on the class label&rdquo; — is a conditional-probability statement.
+**Conditioning** is a fancy word for something really simple: "given that I know X, what do I now believe about Y?" It's the operation of updating your view of the world when new information arrives.
 
-For a GenAI engineer, three deep uses:
+Every "the model uses context" phrase you've heard in ML is really about conditioning. The three big ones:
 
-- **Autoregressive language models compute a chain-rule factorization.** P(sentence) = P(x₁) · P(x₂ | x₁) · P(x₃ | x₁, x₂) · … · P(xₜ | x_&lt;t). Every next-token distribution is a *conditional* probability. Log-probabilities of sequences add up because logs turn products of conditionals into sums.
-- **Conditional generation.** Class-conditional image generation, prompt-conditioned text, style-conditioned diffusion, retrieval-augmented generation — all of them are learning P(output | condition) instead of P(output). The condition changes the probability measure; conditioning is the mechanism.
-- **Feature reasoning.** &ldquo;This feature is independent of that one, given the class label&rdquo; is the Naive-Bayes assumption. &ldquo;These two documents are independent, given the query&rdquo; is what RAG re-rankers assume. Independence assumptions are wrong more often than you'd hope, and understanding *when* independence holds vs *why* it fails is the difference between a model that works and one that leaks.
+- **Autoregressive language models** (like GPT). "Autoregressive" means "predict the next thing given the previous things." At every position, the model computes P(next token | all previous tokens). That's a **conditional probability** — the probability of the next word, given what came before. The whole sentence's probability is built up as a product:
 
-Two operators (conditioning, independence) plus one identity (the chain rule) do more work in ML than any other three pieces of probability. This chapter is the payoff for the sample-space vocabulary from the previous chapter.
+$$P(\text{sentence}) = P(x_1) \cdot P(x_2 \mid x_1) \cdot P(x_3 \mid x_1, x_2) \cdot \dots$$
+
+This is called the **chain rule** of probability. Every LLM you use is quietly computing this product.
+
+- **Conditional generation.** Class-conditional image generation ("generate a cat"), prompt-conditioned text ("write a haiku about spring"), style-conditioned diffusion ("in Van Gogh style") — all of them are learning P(output | condition) instead of just P(output). The condition changes what the model produces.
+
+- **Feature reasoning.** "This feature is independent of that one, given the class label" is the assumption behind Naive Bayes (a simple classifier). "These two documents are independent, given the query" is what a simple RAG system assumes. **Independence** — the topic of this chapter — is a really strong claim, and it's wrong more often than you'd hope. Knowing *when* it's OK to assume, and *why* it fails, is a huge part of ML engineering.
+
+Two operators (conditioning, independence) and one identity (the chain rule) do more work in ML than any other three pieces of probability combined. This chapter is the payoff for the sample-space vocabulary from the previous chapter.
 
 </Motivation>
 
-<Intuition title="Conditioning = zoom in on the sub-universe where B is true; re-measure areas relative to that">
+<Intuition title="Conditioning = 'zoom in on the part where B is true, and re-measure'">
 
-Go back to the rectangle picture. The whole rectangle Ω has area 1. Event B is a shape inside it. **Conditioning on B** means throwing away everything outside B and rescaling so B itself has total area 1 — the new sample space *is* B. Event A's conditional probability P(A | B) is the fraction of the new sample space (which is B) that A occupies.
+Grab the rectangle picture from the last chapter. Sample space Ω is a rectangle with area 1; event B is a shape inside it.
+
+**Conditioning on B** means: erase everything outside B, then blow up what's left so it has area 1 again. That new smaller universe (which is B itself, rescaled) is now your world. Event A's conditional probability P(A | B) is the fraction of *this new universe* that A takes up.
 
 Formally:
 
@@ -182,9 +190,19 @@ $$
 P(A \mid B) \;=\; \frac{P(A \cap B)}{P(B)}
 $$
 
-The numerator is the overlap of A and B (before rescaling). The denominator is the total mass of B (before rescaling). Divide, and you get the fraction of B taken up by A. If B has probability zero, conditioning on B is undefined — you can't zoom in on a zero-area region.
+The vertical bar "|" is read "given." So P(A | B) is "the probability of A, given B." The formula says:
 
-**Independence** is when conditioning on B leaves A unchanged: P(A | B) = P(A). Knowing B tells you nothing about A. Rearranging gives the multiplicative form: P(A ∩ B) = P(A) · P(B). That's the version that generalizes to arbitrary events.
+- Numerator P(A ∩ B) — the overlap of A and B before rescaling. (The ∩ means "and," or "both.")
+- Denominator P(B) — the total size of B before rescaling.
+- Divide, and you get "the fraction of B that's also A."
+
+One warning: if B has probability zero, conditioning on B is undefined — you can't zoom into an empty space. (Continuous distributions have a fix for this using densities.)
+
+**Independence** is the special case where knowing B tells you nothing new about A. Mathematically: P(A | B) = P(A). Rearranging gives the multiplicative form:
+
+$$P(A \cap B) = P(A) \cdot P(B).$$
+
+Read that as "the probability of both A and B happening equals the two individual probabilities multiplied." This form is nicely symmetric — either A being independent of B, or B being independent of A, gives the same equation. Independence is a two-way street.
 
 </Intuition>
 
@@ -290,19 +308,23 @@ The point isn&rsquo;t the paradox, it's the *lesson*: conditioning on a piece of
 
 **Selection effects induce spurious dependence.** If you only look at data where B has been selected (survivorship bias, publication bias), the observed correlations between other variables are conditional-on-B correlations — often very different from the true marginal correlations. In ML this shows up as data-leakage bugs and cherry-picking artifacts.
 
-<RealWorldML title="The independence assumption behind Naive Bayes — and why RAG re-rankers exist">
+<RealWorldML title="Where independence quietly powers ML — and where it breaks">
 
-Naive Bayes classifies a document by computing
+Two case studies where "assume independence" makes ML work — and where reality bites back.
+
+**Case 1: Naive Bayes classifier.** A Naive Bayes classifier decides which class (spam vs not-spam, sports vs politics) a document belongs to. Its formula:
 
 $$
 P(\text{class} \mid w_1, \ldots, w_n) \propto P(\text{class}) \prod_i P(w_i \mid \text{class}).
 $$
 
-The product form is only valid if the words are **conditionally independent given the class label**. In real text, they aren&rsquo;t — seeing &ldquo;New&rdquo; makes &ldquo;York&rdquo; hugely more likely, and both are correlated with the class &ldquo;travel article.&rdquo; Naive Bayes ignores this and multiplies anyway. It works well as a *classifier* — the ordering of classes is often preserved despite bad probability estimates — but its output probabilities are usually way off from true posteriors (usually over-confident).
+That product form is only correct if the words are **conditionally independent given the class**. Which they aren't! Seeing "New" makes "York" hugely more likely — they're not independent. Naive Bayes cheerfully ignores this and multiplies anyway. Somehow it still works well as a *classifier* — the correct class is usually ranked highest even when the probabilities are wrong — but the actual probability numbers are often way off (usually way too confident).
 
-A parallel story runs through RAG systems. The retriever scores each document independently against the query, producing a similarity score s(query, doc_i). Ranking documents by s pretends the documents' relevance is independent given the query. But when the top documents cover overlapping content, they're *not* independent — retrieving 5 near-duplicates gives you no more information than retrieving 1. This is why production RAG systems add a **re-ranker** or **diversifier** as a second stage: the re-ranker looks at documents *jointly* and models P(doc_i is useful | query, doc_1, …, doc_&lt;i&gt;) — a chain-rule factorization that gives up the independence assumption for a more expensive but accurate model.
+**Case 2: RAG retrieval.** In a simple **RAG** (Retrieval-Augmented Generation) system, the retriever scores each document independently against the user's query. Ranking documents by that score assumes their relevance is independent given the query — which is fine in theory, but fails hard in practice when your top-5 documents are near-duplicates. Retrieving 5 versions of the same Wikipedia paragraph gives you no more information than retrieving 1.
 
-The pattern: **independence assumptions buy you speed and simplicity; dropping them buys accuracy at a cost.** The engineering skill is knowing which independence assumptions are close to true, which are wrong-but-cheap, and which need to be dropped altogether. Every layer of a modern GenAI stack — tokenization, attention, retrieval, decoding — makes some independence assumption and pays a specific cost for it.
+That's why production RAG systems have a second stage called a **re-ranker** or **diversifier**. It looks at documents *jointly* — modeling something more like P(doc_i is useful | query, docs_1..i-1) — a chain-rule factorization that gives up the independence assumption for more accuracy at the cost of more compute.
+
+The pattern to internalize: **independence assumptions buy you speed and simplicity; dropping them buys accuracy at a cost.** The engineering skill is knowing which independence assumptions are close to true, which are wrong but useful, and which need to be dropped. Every layer of a modern GenAI stack — tokenization, attention, retrieval, decoding — makes some independence assumption and pays a specific price for it.
 
 </RealWorldML>
 

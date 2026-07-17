@@ -184,100 +184,130 @@ print("\\nThe two intervals ARE NOT the same object -- one is Bayesian, one is f
   ]}
 />
 
-<Motivation title="Uncertainty you can defend — the difference between 'my model got 87% accuracy' and '87% ± 2%'">
+<Motivation title="Why '87% accuracy' isn't good enough — the missing ± bit">
 
-Every ML measurement is a point estimate with unknown uncertainty around it. Reporting only the point estimate is bad science and bad engineering — a 87% accuracy that&rsquo;s really 84–90% is very different from one that&rsquo;s really 86.5–87.5%. Confidence intervals and their Bayesian cousin, credible intervals, quantify that uncertainty.
+Say your model got 87% on a benchmark. Great! But here's the honest question: is that really 87%, or could it be as low as 84% or as high as 90%? If you ran the eval again with fresh data, would you get 87% again — or 85%?
 
-Two related but *conceptually distinct* tools:
+That "wobble" around your reported number is called **uncertainty**. Every single measurement in ML has it. Reporting just the point estimate without the wobble is bad science and bad engineering, because:
 
-- **Frequentist confidence interval**: an interval built from the data such that, if you repeated the experiment many times, 95% of the intervals would contain the true parameter. The 95% is a *coverage guarantee over hypothetical repetitions*.
-- **Bayesian credible interval**: an interval that, given your prior and observed data, has 95% posterior probability of containing the true parameter. The 95% is a *statement about the parameter itself*.
+- 87% accuracy that's really 84–90% is a very different claim from 87% that's really 86.5–87.5%.
+- Comparing two models where one got 87% and the other 87.4% is meaningless if both have ±2% wobble.
+- Product decisions ("ship model A or model B?") based on tiny differences are just noise unless you know the uncertainty.
 
-The distinction is subtle but non-negotiable for anyone who works with probability. Papers, product-launch decisions, and model-comparison arguments hinge on interpreting them correctly.
+The tools for making that wobble explicit are called **intervals**. There are two flavors, and yes, they're annoyingly different despite sounding similar:
 
-For a GenAI engineer, three payoffs:
+- **Confidence interval (CI)** — the frequentist tool. Built from the data such that "if you re-ran the whole experiment many times, 95% of the intervals you'd build this way would contain the true value." The 95% is a promise about your *procedure*, not this specific interval.
+- **Credible interval** — the Bayesian tool. An interval where "given the data and your prior beliefs, there's a 95% probability the true value is inside." The 95% is a statement about the *parameter itself*.
 
-- **Every &ldquo;X% accuracy&rdquo; number needs an interval**. A benchmark result without an SE bar is not a scientific claim; it&rsquo;s a marketing number. Learn to insist on error bars.
-- **The bootstrap is your Swiss Army knife**. It works when CLT-based CIs are inappropriate (small N, weird statistics, non-Gaussian data) and lets you get uncertainty around anything you can compute from a sample.
-- **Bayesian credible intervals show up in RLHF, uncertainty estimation, and MC dropout**. When someone says &ldquo;the model is 90% confident,&rdquo; ask if that&rsquo;s a Bayesian posterior probability or a frequentist confidence — the two have different meanings and different requirements.
+Yes, these sound almost the same. They're not, and the distinction matters when writing a paper or defending a product launch. We'll unpack both.
 
-This chapter builds three intervals (parametric CIs, bootstrap CIs, credible intervals), explains when to use each, and drills the interpretation traps.
+Three payoffs for a GenAI engineer:
+
+- **Every "X% accuracy" number needs a ± after it.** A benchmark result without an error bar is a marketing number, not a scientific claim. Learn to insist.
+- **The bootstrap is your Swiss Army knife.** It's a resampling trick that gets you a CI around basically anything — median, correlation, model accuracy, RL return — when the standard formulas either don't exist or don't apply.
+- **Credible intervals show up in RLHF, uncertainty estimation, and MC dropout.** When someone claims "the model is 90% confident," ask if that's a Bayesian posterior probability or a frequentist coverage number. They have different meanings and different requirements.
+
+This chapter builds three intervals (formula-based CIs, bootstrap CIs, credible intervals), explains when to use each, and drills the interpretation traps that trip everyone up.
 
 </Motivation>
 
-<Intuition title="Two ways to quantify uncertainty: the CI (about the procedure), the credible interval (about the parameter)">
+<Intuition title="Two flavors of interval — one about your procedure, one about the truth">
 
-The **frequentist CI** answers: &ldquo;if I ran this experiment many times, drawing fresh data each time, and constructed a CI each time using my procedure, what fraction of those CIs would contain the true parameter?&rdquo; For a 95% CI, the answer is 95%. Any specific CI (the one you built from your data) *either contains the true parameter or doesn&rsquo;t* — but you don&rsquo;t know which. The 95% is a property of the *procedure*, not of the specific interval.
+Let's make the CI-vs-credible distinction click with a real story.
 
-The **Bayesian credible interval** answers: &ldquo;given the prior and the data, what interval do I believe (with 95% probability) contains the true parameter?&rdquo; This is a probability about the parameter itself — a direct answer to the question &ldquo;where is the parameter likely to be?&rdquo; It requires a prior, and different priors give different intervals.
+Imagine you're a factory manager checking the true rate of defective widgets. You measure 100 widgets, 4 come out defective, and someone hands you a "95% CI: 1% to 8%".
 
-The **bootstrap** is a computational trick that works for both frameworks. By resampling the data with replacement and computing the statistic on each resample, you approximate its sampling distribution — and from that, either frequentist CIs (percentile, pivot, BCa) or Bayesian credible intervals (via posterior samples from Bayesian bootstrap variants).
+**Frequentist reading (the CI).** The 95% is a property of *the procedure that made this interval*, not this specific interval. Imagine repeating the whole thing — measuring 100 fresh widgets and recomputing an interval — hundreds of times. About 95% of those intervals would contain the true defect rate. This specific one from today either contains it or doesn't (a fixed fact, unknown to you), but the *long-run track record* of the procedure is 95%.
 
-For most engineering purposes, the intervals will agree numerically at large N. The interpretation matters most when N is small, when priors are informative, or when writing papers where reviewers care about the framework.
+**Bayesian reading (credible interval).** Now imagine the same interval, but built as a credible interval instead. Then "there's a 95% probability the true defect rate lies between 1% and 8%, given the data and my prior beliefs." That IS a probability about the parameter — the direct answer you actually wanted.
+
+The obvious question: "why can't the CI just say that?" Answer: because in frequentist statistics, the parameter is a fixed unknown number, not a random one. You can't put a probability on a fixed number that's either in the interval or isn't. So the frequentist puts the probability on their *procedure* instead. Bayesians allow the parameter itself to be uncertain (represented by a distribution), which lets them make direct probability statements.
+
+Both are useful. Both are correct within their framework. The two intervals will usually be numerically close for large N with weak priors, so in practice this feels like a philosophy debate more than an engineering one. But if you write a paper or defend a decision, the interpretation matters.
+
+There's also a third thing worth introducing:
+
+**The bootstrap.** It's not a fourth interval — it's a *technique for building intervals*. Here's the idea: resample your data with replacement many times, compute your statistic on each resample, and use the wobble of those results to estimate an interval. It works with almost any statistic (median, correlation, AUC, whatever), and it's often the only realistic way to get error bars on complicated ML measurements.
 
 </Intuition>
 
-<Recall term="Standard error">
+<Recall term="Standard error (SE)">
 
-The standard error (SE) of an estimator is the standard deviation of its sampling distribution. For the sample mean X̄ of n iid observations with variance σ², SE(X̄) = σ / √n. In practice we don&rsquo;t know σ, so we plug in s (the sample standard deviation): estimated SE = s / √n.
+The **standard error** is how much your estimator wobbles across hypothetical fresh samples. Formally, it's the standard deviation of the estimator's sampling distribution. Do not confuse it with the standard deviation of the *data* — SE is about your *estimate*, not your data. For the sample mean X̄ of n iid observations from a population with standard deviation σ: SE(X̄) = σ/√n. That 1/√n shrinkage is why more data → tighter estimates. In practice σ is unknown, so we plug in the sample standard deviation s and call the result the "estimated SE."
 
 </Recall>
 
-## Frequentist CIs from the CLT
+<Recall term="Coverage">
 
-For iid data X_1, …, X_n with mean μ and variance σ², the CLT says X̄ is approximately 𝒩(μ, σ²/n) for large n. Rearranging: (X̄ − μ) / (σ/√n) is approximately 𝒩(0, 1). So
+**Coverage** is the fraction of hypothetical experiment repetitions in which the CI captures the true value. A well-built 95% CI has coverage around 95%. If yours has coverage of 85%, your interval is too narrow — probably because n is too small, or the data isn't Gaussian, or the samples aren't independent. When people say "the CI is broken," they usually mean it has bad coverage.
+
+</Recall>
+
+## Formula-based CIs — the bell-curve trick
+
+The most-used CI formula in existence comes straight from the **Central Limit Theorem (CLT)**. Vocab first, then formula.
+
+- **CLT** says: no matter what your data looks like (as long as it has finite variance), the sample mean X̄ of a lot of independent samples is approximately bell-curve-shaped around the true mean μ, with a spread of σ/√n. See the CLT chapter for the full story.
+- **σ (sigma)** is the true population standard deviation. Unknown in practice.
+- **s** is the sample standard deviation, which we compute from our data as a stand-in for σ.
+
+Rearrange the CLT statement, and for large n:
 
 $$
 P\left( -1.96 < \frac{\bar X - \mu}{\sigma / \sqrt{n}} < 1.96 \right) \approx 0.95.
 $$
 
-Rearranging inside gives a **95% CI for μ**:
+Read this as: "the standardized error is within ±1.96 of zero, 95% of the time." Why 1.96? Because for a standard bell curve, that's the range where 95% of the probability lives. If you want a different confidence level, use a different number (e.g., 2.58 for 99%).
+
+Solve for μ inside the inequality and you get a **95% CI for μ**:
 
 $$
 \bar X \pm 1.96 \cdot \frac{\sigma}{\sqrt{n}}.
 $$
 
-Since σ is unknown, replace by the sample s. For small n (say n &lt; 30), the ratio (X̄ − μ) / (s/√n) is *not* exactly standard normal — it&rsquo;s **Student&rsquo;s t distribution** with n − 1 degrees of freedom, slightly heavier-tailed. Use `t_{n-1}.ppf(0.975)` instead of 1.96 to get correct coverage.
+Since σ is unknown, plug in s. But there's a catch: when n is small (say under 30), the "plug in s" trick actually widens the distribution — it becomes something called the **Student's t distribution** (heavier tails than a normal bell curve, but same overall shape). To get correct coverage you use a slightly bigger multiplier — `t_(n-1).ppf(0.975)`, which is about 2.20 for n = 12 and 2.09 for n = 20. For n > 30 the difference basically vanishes and you're back to 1.96.
 
-**Coverage** is the fraction of experiments in which the CI contains the true parameter. A well-calibrated 95% CI has ~95% coverage. Systematic under-coverage (say 85%) is a sign of misspecification: too-small n, non-Gaussian data, dependent samples, or wrong variance model.
+**Degrees of freedom** = n − 1 in this formula. It's roughly "how many independent pieces of information you have left after you've used one to estimate the mean." Don't panic at the term — it's just an accounting number that comes with the t distribution.
 
 <RunnableCode title="Frequentist CIs from CLT — z vs t, with empirical coverage check" code={frequentistCiCode} packages={["numpy", "scipy"]} />
 
-**Common parametric CIs**:
+**A few common CI formulas you'll see:**
 
-- **Mean, unknown σ**: X̄ ± t_(n-1) · s/√n.
-- **Proportion (Wald)**: p̂ ± 1.96 · √(p̂(1 − p̂)/n). Poor coverage near p = 0 or 1; better formulas exist (Wilson score, Agresti–Coull).
-- **Variance**: uses χ² distribution. (n − 1) s² / σ² ~ χ²_(n−1), giving CI (n−1) s² / χ²_upper and (n−1) s² / χ²_lower.
-- **Difference of means**: two-sample t-interval. Central to A/B testing.
+- **CI for a mean** (unknown σ): X̄ ± t_(n−1) · s/√n. The everyday CI.
+- **CI for a proportion** (Wald formula): p̂ ± 1.96 · √(p̂(1 − p̂)/n). *Warning:* this one breaks near p = 0 or p = 1 (can go below 0 or above 1). Better alternatives are called **Wilson score** and **Agresti–Coull** — statsmodels has them under `proportion_confint`.
+- **CI for a variance**: uses the chi-squared distribution (χ², "chi-squared" — another distribution shape used for variance stuff). Rarely computed by hand.
+- **CI for the difference between two means**: this is the workhorse of A/B testing. Covered in detail in the A/B testing chapter.
 
 ## The bootstrap — resample your way to an interval
 
-The bootstrap generates an empirical sampling distribution by **resampling the observed data with replacement**. The idea, due to Efron (1979), is that resampling from the empirical distribution approximates the process of drawing fresh samples from the true population.
+Here's the idea in one sentence: **treat your observed sample as a mini-universe and draw fresh "samples" from it, with replacement, thousands of times.** The wobble across those pseudo-samples estimates the wobble your real statistic would have across fresh data from the real world. This trick is called the **bootstrap** (Efron, 1979).
 
-Algorithm:
+The recipe:
 
-1. Given original sample $X_1, \ldots, X_n$, and a statistic θ̂ = f(X_1, …, X_n).
-2. For b = 1 to B: draw n samples with replacement from the original sample, compute θ̂_b on the resample.
-3. The empirical distribution of &#123;θ̂_b&#125; approximates the sampling distribution of θ̂.
+1. You have your original sample of size n. Compute your statistic once, call it θ̂ (e.g., the median, the AUC, the accuracy — whatever).
+2. Now do this B times (typically B = 1000 or 5000):
+   - Draw n items with replacement from the original sample. "With replacement" means the same item can appear multiple times in a resample.
+   - Compute the statistic on this resample. Call it θ̂_b.
+3. You now have B pseudo-versions of your statistic. Their spread is your estimated sampling distribution.
 
-**Three common ways to build a CI from bootstrap samples**:
+Three common ways to turn those B pseudo-versions into a 95% CI:
 
-- **Percentile method**. 95% CI = &#40;2.5th percentile, 97.5th percentile&#41; of the bootstrap distribution.
-- **Basic (pivot) method**. 95% CI = &#40;2·θ̂ − θ̂*_{97.5}, 2·θ̂ − θ̂*_{2.5}&#41;.
-- **BCa (bias-corrected accelerated)**. Adjusts percentiles for skewness and bias. More accurate but harder to derive.
+- **Percentile method** — the simplest. CI = (2.5th percentile, 97.5th percentile) of the B values. Great when the pseudo-distribution looks roughly symmetric.
+- **Pivot method** — a symmetric-reflection trick that centers on your original θ̂ rather than on the pseudo-distribution's center.
+- **BCa (bias-corrected accelerated)** — a smarter percentile method that adjusts for skew and bias. More accurate, more setup. Look this up when you need it; `scipy.stats.bootstrap` implements it.
 
-**When to bootstrap over parametric CI**:
+**Reach for the bootstrap when:**
 
-- Small n or non-Gaussian sampling distribution → CLT approximation is bad.
-- Complicated statistic (median, correlation, quantile, ROC AUC, …) → no closed-form SE formula.
-- You don&rsquo;t want to make distributional assumptions.
+- Your sample size is small, or your data isn't bell-curve-shaped, so the formula-based CIs give bad coverage.
+- Your statistic is complicated — median, correlation, ROC AUC (a common ML metric — see the metrics chapter), quantile — and there's no clean formula for its standard error.
+- You don't want to assume a specific distribution shape.
 
-**When bootstrap breaks down**:
+**Bootstrap can mislead when:**
 
-- Order statistics (min, max) — bootstrap tends to underestimate tail variability.
-- Data with heavy tails — bootstrap can be highly variable itself.
-- Very small n (say n &lt; 20) — resamples are too similar to the original sample.
-- Dependent data (time series) — need block bootstrap variants.
+- You're computing an **order statistic** like the max or min. The bootstrap resample max can't exceed the observed max, so the CI's upper end is artificially capped.
+- Your data has heavy tails (occasional huge outliers). The bootstrap itself becomes jittery.
+- Your sample size is really tiny (n < 20). Resamples are too similar to the original to give useful variation.
+- Your data isn't independent (e.g., time series with correlated points). You'd need a variant called the **block bootstrap**.
 
 <RunnableCode title="Bootstrap CI for the mean of an exponential sample" code={bootstrapCode} packages={["numpy"]} />
 
@@ -285,65 +315,77 @@ Algorithm:
 
 ## Bayesian credible intervals
 
-A **credible interval** is an interval [a, b] such that
+A **credible interval** is the Bayesian answer. It's an interval [a, b] such that:
 
 $$
 P(\theta \in [a, b] \mid \text{data}) = 0.95
 $$
 
-under the posterior distribution p(θ | data) = p(data | θ) p(θ) / p(data). Two common variants:
+Read this as: "given the data (and my prior), the probability that θ sits inside this interval is 95%." That "given the data" is what a frequentist CI can't say — for a frequentist, θ isn't random. For a Bayesian, θ has a distribution called the **posterior**, and the credible interval is just a slice of it.
 
-- **Equal-tail (percentile) credible interval**: interval between the 2.5 and 97.5 percentiles of the posterior.
-- **Highest posterior density (HPD) interval**: the shortest interval that contains 95% of the posterior mass. For symmetric unimodal posteriors, equal-tail = HPD; for skewed ones, HPD is asymmetric.
+Two common ways to build a credible interval:
 
-**Fundamental difference vs frequentist CI**: the credible interval is a probability statement about θ. You can say &ldquo;there is a 95% probability that the true CTR is between 0.19 and 0.28.&rdquo; A frequentist CI cannot say this; it can only say &ldquo;the procedure I used produces intervals that contain the truth 95% of the time.&rdquo;
+- **Equal-tail credible interval** — chop off 2.5% from each end of the posterior. Easy to compute. This is what most software gives you by default.
+- **Highest posterior density (HPD)** — the *shortest* interval containing 95% of the posterior. For symmetric bumps, HPD = equal-tail. For skewed posteriors, HPD is asymmetric and hugs the peak more tightly.
 
-**For conjugate priors** (Beta–Bernoulli, Dirichlet–Multinomial, Gaussian–Gaussian, Gamma–Poisson), the posterior is closed-form and credible intervals reduce to a percentile computation on a named distribution.
+**Fundamental difference vs frequentist CI:** the credible interval is a probability statement *about θ*. You can say "there's a 95% probability the true click-through rate is between 19% and 28%." A frequentist CI cannot say that; it can only say "my procedure produces intervals that contain the truth 95% of the time." Both are useful — just don't confuse the two.
 
-**For non-conjugate posteriors**, use MCMC (Hamiltonian, No-U-Turn, variational inference) to sample from the posterior, then take percentiles. This is the workflow of `pyro`, `pymc`, `numpyro`, and `stan`.
+**Nice case: conjugate priors** (see the MAP chapter). If your prior + likelihood is a conjugate pair like Beta + Bernoulli, the posterior is closed-form and you just compute percentiles of a named distribution. Two lines of code.
+
+**Harder case: non-conjugate posteriors.** When the math gets messy, you use approximation techniques. Two names to recognize:
+
+- **MCMC** = **Markov Chain Monte Carlo** — algorithms that draw samples from the posterior even when you can't write it down. Two flavors people mention: **Hamiltonian Monte Carlo (HMC)** and **NUTS** (No-U-Turn Sampler, a fancy HMC variant). Libraries: pyro, pymc, numpyro, stan.
+- **Variational inference (VI)** — fit a simple, tractable distribution to approximate the true posterior. Faster than MCMC but less accurate.
+
+Once you have posterior samples (from MCMC) or a fitted approximation (from VI), you compute a credible interval by taking percentiles just like the bootstrap case.
 
 <RunnableCode title="Credible interval for a Bernoulli p with a Beta prior; contrast with frequentist CI" code={credibleIntervalCode} packages={["numpy", "scipy"]} />
 
-**When frequentist and Bayesian intervals disagree**:
+**When the two intervals disagree:**
 
-- Small n with informative prior → credible interval is pulled toward the prior; CI ignores prior information.
-- Highly skewed sampling distribution → equal-tail CI is symmetric around the estimator; credible interval reflects the true skew.
-- Different definitions of "the parameter" — Bayesian requires you to be explicit about what θ *is*.
+- Small n with a strong prior. Credible interval is pulled toward the prior; frequentist CI ignores it.
+- Highly skewed sampling distribution. Formula-based CI stays symmetric around the estimator; credible interval bends with the skew.
+- Different definitions of "the parameter." Bayesian analysis forces you to be explicit about what you're estimating; frequentist analysis can duck this.
 
-Modern applied stats and ML often quotes both intervals; they usually agree to two decimal places for well-designed studies with moderate n. The disagreement matters when it does.
+In modern practice with moderate sample sizes, the two intervals typically agree to two decimal places. The disagreement matters when it matters (small n, strong prior, tight decision).
 
-## The traps that matter
+## Things that trip people up
 
-**A 95% CI does NOT mean &ldquo;95% probability the true value is in this interval.&rdquo;** For a specific CI, the true value is either in it (with probability 1) or not (with probability 0) — the &ldquo;95%&rdquo; is about repetitions of the procedure, not the specific interval. This is the single most common misinterpretation of a CI.
+**"A 95% CI does NOT mean '95% probability the truth is here.'"** This is the number-one misconception. For a specific CI, the truth is either in it or not — no probability left. The 95% is about the *procedure* over hypothetical repetitions, not about your specific interval. Say it out loud and it sinks in eventually.
 
-**A credible interval CAN say &ldquo;95% probability the true value is in this interval.&rdquo;** That&rsquo;s the whole point of the Bayesian framing.
+**"A credible interval CAN say that."** That's actually the whole point of Bayesian framing. If you want to say "95% probability the true value is in this range," build a credible interval.
 
-**Bootstrap is an approximation, not magic.** It can be biased for order statistics, break with heavy tails, and be worse than parametric methods when the parametric assumptions are actually met.
+**"The bootstrap is not magic."** It's an approximation. It can be biased for order statistics like the max, break with heavy-tailed data, and be worse than a formula-based CI when the formula's assumptions really do hold. Use bootstrap when the formula doesn't fit — not as a universal replacement.
 
-**Percentile bootstrap fails for skewed statistics.** Use bias-corrected accelerated (BCa) or pivot methods when the bootstrap distribution is visibly skewed.
+**"Percentile bootstrap gets skew wrong."** When the bootstrap distribution is visibly skewed, use the pivot method or BCa instead of the percentile method.
 
-**CIs from misspecified models are meaningless.** If your data isn&rsquo;t iid, or your model assumption is wrong, CI coverage is not what it says on the tin. Standard practice: sanity-check with a bootstrap or a specification test.
+**"CIs from wrong models are meaningless."** If your data isn't independent, or the distribution assumption is off, the coverage guarantee breaks. Sanity-check with a bootstrap or plot residuals.
 
-**Wald CIs for proportions are broken near 0 and 1.** Use Wilson score or Agresti–Coull for small proportions (or small n). The Wald formula p̂ ± z · √(p̂(1 − p̂)/n) can produce intervals that extend below 0 or above 1, which is nonsensical.
+**"Wald CIs for proportions break near 0 and 1."** The formula p̂ ± z · √(p̂(1 − p̂)/n) can spit out intervals that go below 0 or above 1 — which is nonsensical for a proportion. Use Wilson or Agresti–Coull when p̂ is close to 0 or 1, or when n is small.
 
-**Multiple CIs need correction.** If you construct 20 independent 95% CIs, expect about 1 to fail to contain the true parameter (5%). If you want joint 95% coverage across all 20, use a Bonferroni-corrected multiplier (roughly 3.0 instead of 1.96). Same issue as multiple hypothesis testing in the next chapter.
+**"Making 20 CIs? Expect one to lie."** Each 95% CI has a 5% chance of missing the truth. If you make 20 of them, you'd expect about one to miss just by chance. If you need joint 95% coverage across all 20, use a wider multiplier (called a **Bonferroni correction**, about 3.0 for 20 intervals instead of 1.96). Same problem as multiple hypothesis testing — covered in the next chapter.
 
-<RealWorldML title="Error bars in ML: benchmarks, RL evaluation, and uncertainty quantification">
+<RealWorldML title="Error bars in ML — benchmarks, RL, uncertainty, A/B, LLM evals">
 
-**Benchmark accuracy**. When a paper reports &ldquo;our model achieves 87.3% on GLUE,&rdquo; the honest form is 87.3% ± 0.4% (or an explicit CI). The SE comes from CLT applied to per-example correctness (Bernoulli), giving SE = √(p(1 − p)/N) where N is the size of the test set. For GLUE with N ≈ 3000 and accuracy near 87%, SE ≈ 0.6%. A claimed improvement from 87.3% → 87.7% is well within noise and may not be a real effect. This is why leaderboards should report SEs and why single-run comparisons on small test sets are often misleading.
+**1. Benchmark accuracy.** When a paper says "our model got 87.3% on GLUE" (**GLUE** = General Language Understanding Evaluation, a common NLP benchmark), the honest version is "87.3% ± 0.4%" or an explicit CI. Where does that ± come from? Model per-example correctness as a coin flip: each example is either right (1) or wrong (0). Then the CI for accuracy p̂ is √(p̂(1−p̂)/N) times a multiplier. For GLUE with about N = 3,000 examples and accuracy near 87%, SE is around 0.6%. So a "new model got 87.7% vs old 87.3%" claim without any CI could easily be pure noise. This is why serious leaderboards report error bars, and why single-shot benchmark comparisons on small test sets are often misleading.
 
-**RL policy evaluation**. Reinforcement-learning agents evaluated on N = 10 rollouts have huge SE because rewards can be highly variable across episodes. The bootstrap is the standard tool: resample the N returns with replacement, get a CI. Report mean and CI, not just mean. Every RL benchmark paper that says &ldquo;our method beats prior work&rdquo; based on 3 seeds with no CI is doing worse science than it looks.
+**2. Reinforcement learning evaluation.** In RL, agents are usually judged by average "return" (reward per episode) across a bunch of runs. But rewards can vary wildly episode-to-episode, especially in games or robotics. Running an agent for just 10 episodes gives you a huge SE. The bootstrap is the fix: take your 10 returns, resample with replacement 5000 times, get a CI on the mean. Every RL paper that says "our method beats prior work" based on 3 seeds and no CI is doing worse science than it looks.
 
-**Uncertainty quantification in production ML**. When a model outputs a probability, you often want to know how *certain* it is about that probability. MC Dropout (running the model with dropout enabled multiple times and averaging) gives you a bootstrap-like distribution of predictions, from which you can extract a credible interval. Deep ensembles (average of several independently-trained models) work similarly. Both are used in practice to detect out-of-distribution inputs where the model is likely to be wrong.
+**3. Uncertainty quantification in production.** When your model outputs a probability like "85% chance this email is spam," you often want to know how *sure* the model is about that 85%. Two tools that are essentially bootstrap-in-disguise:
 
-**A/B testing**. Every A/B testing platform (Optimizely, Split, in-house tools) reports a CI or credible interval for the treatment effect. Two ways to test the same lift:
+- **MC Dropout** — leave dropout turned on at inference time and run the model 20 times. Different neurons drop out each time, so you get 20 slightly different predictions. The spread of those predictions estimates the model's uncertainty. Cheap, easy to add to any existing model.
+- **Deep ensembles** — train 5–10 copies of your model with different random seeds; average their predictions. Their disagreement measures uncertainty. Expensive to train, but very effective — often the most reliable uncertainty estimate you can get.
 
-- Frequentist: two-sample z-test, CI on the difference of means.
-- Bayesian: Beta prior on each arm&rsquo;s conversion rate, posterior draws, credible interval on the difference.
+Both are used in practice to detect **out-of-distribution inputs** (inputs unlike the training data), where models are much more likely to be confidently wrong.
 
-The Bayesian version is often preferred for continuous monitoring (see the peeking problem in ab-testing-power) because it doesn&rsquo;t have the &ldquo;multiple looks&rdquo; issue.
+**4. A/B testing.** Every A/B testing platform (Optimizely, Split, in-house tools at Netflix / Meta / etc.) reports a CI or credible interval for the lift ("how much better is B than A"). Two flavors:
 
-**LLM eval uncertainty**. When benchmarking LLMs, you evaluate on N examples and get an accuracy or a preference rate. Bootstrap CIs on those numbers give you a range you can defend. This is exactly what the LMSYS Chatbot Arena and other eval platforms do behind the scenes.
+- **Frequentist:** two-sample test → CI on the difference of conversion rates.
+- **Bayesian:** Beta prior on each arm's conversion rate → posterior samples → credible interval on the difference.
+
+The Bayesian version is often preferred when the team wants to peek at the experiment daily — it handles the "multiple looks" problem better (details in the A/B testing chapter next).
+
+**5. LLM evaluation.** When benchmarking LLMs, you evaluate on N examples and get an accuracy or preference rate. Bootstrap CIs on those numbers give you defensible ranges. This is exactly what the **LMSYS Chatbot Arena** (an LLM head-to-head leaderboard) and many other eval platforms compute behind the scenes. Their **Elo ratings** (a head-to-head ranking system originally from chess) come with bootstrap-derived CIs so you can see which models are statistically distinguishable.
 
 </RealWorldML>
 

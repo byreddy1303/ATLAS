@@ -166,26 +166,32 @@ print("and reach the deeper, wider (=better-generalizing) parts of the loss land
 
 <Motivation title="Real neural nets are trained with mini-batch SGD + momentum">
 
-Every deep-learning paper you'll read describes a training loop that (essentially) reads:
+Every deep-learning paper describes a training loop that basically looks like this:
 
 ```
 for step in range(N):
     batch = sample_from_dataset(size=B)
     loss = forward(model, batch)
     grads = backward(loss)
-    optimizer.step(grads)      # momentum/Adam update, not plain GD
+    optimizer.step(grads)      # momentum or Adam, not plain GD
 ```
 
-This is **mini-batch stochastic gradient descent with momentum**. The two words "stochastic" and "mini-batch" hide four choices that shape every training run: what fraction of your data goes into each gradient estimate, how those estimates combine over steps, and what noise floor the process runs at.
+This is called **mini-batch stochastic gradient descent with momentum**. Long name, three ideas:
+
+- **Mini-batch** = "use a small chunk of the data at a time, not the whole thing."
+- **Stochastic** = "the gradient we compute is noisy because it's based on a random chunk, not everything."
+- **Momentum** = "keep a running memory of past gradient directions."
+
+Those three words hide four questions that shape every training run — how much data per step, how gradient estimates combine over time, how much noise you tolerate, and how learning rate and batch size interact.
 
 For a GenAI engineer, this chapter answers:
 
-1. **Why not use the whole dataset for every step?** Full-batch GD converges nicely in theory — but each step is prohibitively expensive on large datasets, and its lack of noise turns out to be a bug rather than a feature in high-dim non-convex problems.
-2. **What does momentum actually do?** It accelerates progress along consistent directions and damps oscillations in noisy or badly-scaled ones — the single most important upgrade over plain SGD.
-3. **How do batch size and learning rate interact?** The linear scaling rule tells you how to keep training dynamics constant when you change hardware. Getting this wrong is the fastest way to burn compute on a divergent run.
-4. **Why does small-batch SGD sometimes generalize better than big-batch?** Because the noise in stochastic gradients biases the optimizer toward flatter (more robust) minima.
+1. **Why not use the whole dataset for every gradient step?** Full-batch gradient descent works nicely in theory, but each step is way too expensive on large datasets. Also, the lack of noise turns out to be a *bug*, not a feature, in high-dimensional non-convex problems.
+2. **What does momentum actually do?** It speeds up progress along consistent directions and dampens oscillations in noisy or badly-scaled ones. The single biggest upgrade over plain SGD.
+3. **How do batch size and learning rate interact?** A rule called the **linear scaling rule** tells you how to change the learning rate when you change batch size to keep training dynamics constant. Get this wrong and you can burn a lot of compute on a divergent run.
+4. **Why does small-batch SGD sometimes generalize better than big-batch?** Because the noise in noisy gradients quietly nudges the optimizer toward flatter (more robust) minima — a lucky accident that turns out to be a feature.
 
-Adam and its family (next chapter) are built on top of what you learn here.
+Adam and its family (next chapter) are built on top of everything you learn here.
 
 </Motivation>
 

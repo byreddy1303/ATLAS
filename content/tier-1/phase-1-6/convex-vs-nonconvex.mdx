@@ -193,22 +193,27 @@ print("phenomenon that makes NN training work despite non-convexity.")`;
   ]}
 />
 
-<Motivation title="Convex is 'solved'; non-convex is 'we shipped it anyway'">
+<Motivation title="Convex = 'math promises success.' Non-convex = 'we shipped anyway.'">
 
-Every classical-ML textbook opens with convex problems (linear regression, logistic regression, SVMs) and promises: **gradient descent will find THE minimum, no matter where you start.** Every modern deep-learning result operates in the opposite universe — non-convex, chaotic, no such guarantees — and shipped anyway.
+Every classical-ML textbook opens with **convex** problems (linear regression, logistic regression, SVMs) and promises: "gradient descent will find *the* best answer no matter where you start." Every modern deep-learning result operates in the *opposite* universe — non-convex, wild loss landscapes with no such guarantees — and yet somehow ships anyway.
 
-For a GenAI engineer, understanding convexity is a bright-line test that separates two very different worlds:
+Understanding **convexity** is a bright-line test that separates two very different worlds:
 
-- On the **convex** side, math promises success. Any local minimum is the global one. Convergence rates are provable. The choice of starting point doesn't matter. If your loss is convex, you can just fit it.
-- On the **non-convex** side (every neural net you'll ever train), math promises nothing. Different starting points reach different minima. GD can get stuck. Any convergence result is empirical, not proven.
+- **Convex side.** Math promises success. Any local minimum is *the* global minimum. Convergence rates are provable. Starting point doesn't matter — you always land at the same answer. If your problem is convex, you can just fit it.
+- **Non-convex side** (every neural net you'll ever train). Math promises nothing. Different starting points reach different minima. Gradient descent can get stuck. Any convergence claim is empirical, not proven.
 
-Both worlds coexist in real ML systems. Your logistic regression baseline is convex. The regularizer you add to a neural-net loss (L2 weight decay) is convex. Your neural net's loss is not. Knowing which parts of your system are convex tells you where you can trust the math, and where you have to fall back on empirical observation. It also tells you when adding a convex regularizer stabilizes an otherwise-hopeless non-convex problem.
+Two vocabulary unpacks so nothing's scary:
 
-This chapter covers three questions:
+- **Local minimum** = a point where the function is smaller than at every nearby point (it's a bottom of a nearby dip).
+- **Global minimum** = the smallest value the function takes anywhere. Every global min is also a local min, but not vice versa.
 
-1. What does "convex" actually mean, in three equivalent forms?
-2. Why does convexity give you global optimality?
-3. When your loss is non-convex (i.e., any deep learning), what changes — and what does modern practice do about it?
+Both worlds coexist in real ML. Your logistic regression baseline is convex. The L2 weight-decay term you add to a neural network is convex. The neural network's overall loss is *not* convex. Knowing which parts are convex tells you where you can trust the math and where you have to fall back on empirical observation. It also tells you *when* adding a convex regularizer stabilizes an otherwise-hopeless non-convex problem.
+
+This chapter answers three questions:
+
+1. What does "convex" actually mean (three equivalent ways to check)?
+2. Why does convexity guarantee you find the global optimum?
+3. When your loss is non-convex (deep learning), what changes — and what does modern practice do about it?
 
 </Motivation>
 

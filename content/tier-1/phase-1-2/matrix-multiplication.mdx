@@ -138,18 +138,25 @@ print("row sums:", attn.sum(axis=1))`;
   ]}
 />
 
-<Motivation title="Matmul is 90 percent of the compute — read it four ways">
+<Motivation title="Matrix multiplication is most of ML — four ways to read it">
 
-The forward pass of an LLM is basically a chain of matrix multiplications. Attention scores are `Q @ K.T`. Weighted values are `attn @ V`. Each MLP layer is two matmuls back-to-back, `up = x @ W_up` then `down = act(up) @ W_down`. The final logits are `hidden @ W_out.T`. Every training step is more matmuls (gradients, weight updates).
+The forward pass of any LLM is basically a chain of matrix multiplications ("matmul" for short). Attention scores are `Q @ K.T`. Weighted values are `attn @ V`. Each MLP layer is two matmuls back-to-back: `up = x @ W_up` then `down = act(up) @ W_down`. Final output logits are `hidden @ W_out.T`. Every training step piles on even more matmuls.
 
-For a GenAI engineer, one recipe for computing AB is not enough — you need to *interpret* what a matrix product means to reason about shapes, memory, gradients, and pathological cases. This chapter gives you the four canonical readings of the same computation:
+If matmul is the main character of ML, you should be fluent in reading it. One recipe for computing AB isn't enough. You need to *see* what a matrix product is doing so you can reason about shapes, memory, gradients, and edge cases. This chapter gives you **four ways to look at the same product** — pick whichever one makes your current question easy:
 
-1. **Entry-by-entry (row · column)** — the definition, used for hand computation and shape reasoning.
-2. **Column view** — each column of AB is A applied to the corresponding column of B; the fastest mental model for batched linear transformations.
-3. **Composition view** — AB is the linear map "B first, then A"; the model behind fused layers and neural network stacks.
-4. **Sum-of-outer-products view** — AB is the sum of rank-1 pieces (column of A × row of B); the mental model behind SVD, LoRA, low-rank approximation.
+1. **Entry-by-entry (row · column view)** — the textbook definition, used for hand computation and shape checking.
+2. **Column view** — each column of AB is A applied to the corresponding column of B. The best mental picture for "apply this map to a batch of vectors."
+3. **Composition view** — AB is the linear map "do B first, then do A." The right model for stacked neural network layers.
+4. **Sum-of-outer-products view** — AB is a sum of rank-1 pieces. This is the mental model behind SVD, LoRA (a huge fine-tuning trick), and every low-rank approximation.
 
-Each view answers different questions. Row-column view answers "what's this specific entry?" Column view answers "what does this map do to my batch of vectors?" Composition view answers "what map do these two matrices compose to?" Outer-product view answers "how simple could this really be?" Fluency in switching between them is what separates people who *use* matmul from people who *understand* what matmul is doing.
+Each view answers different questions:
+
+- Row-column view → "what's the value at entry (i, j)?"
+- Column view → "what does this map do to my batch?"
+- Composition view → "what's the combined effect of these two layers?"
+- Outer-product view → "how simple is this really?"
+
+Fluency in switching views is what separates people who *use* matmul from people who *understand* what it's doing.
 
 </Motivation>
 

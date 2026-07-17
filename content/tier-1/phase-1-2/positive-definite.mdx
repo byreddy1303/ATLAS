@@ -144,15 +144,27 @@ plt.close()
   ]}
 />
 
-<Motivation title="The 'nice' matrices — why covariance, kernels, and Hessians love them">
+<Motivation title="Positive-definite matrices — the 'well-behaved' matrices ML loves">
 
-Three of the most important matrices in ML are always symmetric and (typically) positive definite: **covariance matrices** in Gaussian models, **kernel Gram matrices** in kernel methods and Gaussian processes, and **Hessians** at local minima of well-behaved loss functions. Every time a symmetric-PSD matrix shows up, three good things become available:
+Three of the most common matrices in ML share a lucky property. They're all **symmetric** and **positive-definite**. Vocabulary first:
 
-- **Real eigenvalues and orthogonal eigenvectors** — the *spectral theorem*, which turns the matrix into a rotation-scale-unrotate sandwich.
-- **Cholesky factorization** — the fast, stable factorization for solving linear systems (2× cheaper than LU, always numerically stable).
-- **Meaningful quadratic form** — `xᵀAx ≥ 0` for all x, with equality only at the origin (positive definite) or on a subspace (positive semi-definite). This is what makes optimization problems *convex*.
+- **Symmetric** = the (i, j) entry equals the (j, i) entry. Or in one symbol: A = Aᵀ (A equals its transpose).
+- **Positive-definite (PD)** = the quadratic form xᵀAx is strictly positive for every nonzero x. In plainer language: applying A to any vector never sends it "backwards" past 90°.
+- **Positive semi-definite (PSD)** = same but with ≥ instead of > (some directions can flatten to zero).
 
-Understanding when a matrix is PSD, why it matters, and how to exploit its structure is a huge chunk of what makes practical ML fast and numerically stable. This chapter builds those instincts.
+Where do these show up?
+
+- **Covariance matrices** in Gaussian models. Always symmetric and (typically) PD.
+- **Kernel Gram matrices** in kernel methods and Gaussian processes (a Bayesian regression tool).
+- **Hessians** (second-derivative matrices) at local minima of well-behaved loss functions.
+
+When a matrix is symmetric-PSD, three amazing things become available:
+
+1. **Real eigenvalues, orthogonal eigenvectors** — a result called the **spectral theorem**. It means the matrix breaks into a rotation, a stretch, and an unrotation.
+2. **Cholesky factorization** — the fast, stable factorization for solving A·x = b. Roughly twice as fast as generic methods and never numerically unstable.
+3. **The quadratic form xᵀAx ≥ 0 for all x** — this is exactly what makes optimization problems **convex** (bowl-shaped, one clear minimum).
+
+Understanding when a matrix is PSD, why it matters, and how to exploit its structure is a huge chunk of what makes practical ML fast and numerically robust.
 
 </Motivation>
 

@@ -87,19 +87,33 @@ for word, v in emb.items():
   ]}
 />
 
-<Motivation title="The two moves every model is made of">
+<Motivation title="The two moves every ML model is really made of">
 
-Strip any neural network down to its atoms and you find exactly two vector operations: **add** and **scale**. Every layer computes weighted sums — scaled vectors added together. Every residual connection in a transformer is literally `x + f(x)`: vector addition, applied billions of times per forward pass. And the most famous demo in NLP — *king − man + woman ≈ queen* — is nothing but addition and subtraction of embedding vectors.
+Take any neural network — GPT, Stable Diffusion, whatever. Strip it down to atoms. What you find is basically two operations on vectors: **add** them, and **scale** them (multiply by a number).
 
-These two moves also compose into the single most important pattern in linear algebra: the **linear combination**, `c₁v₁ + c₂v₂ + …`. Matrix multiplication, attention outputs, data augmentation (mixup), interpolating between two images in latent space — all of them are linear combinations wearing different costumes.
+That's it. Everything else is built on those two moves.
 
-The mechanics take ten minutes. The payoff is that every formula in the next four chapters — and every layer in Tier 3's neural networks — stops looking like symbols and starts looking like walks and stretches you can picture.
+- Every neural network layer computes a **weighted sum**: take some vectors, scale each one, add them all up.
+- Every **residual connection** in a transformer is literally `x + f(x)` — vector addition, applied billions of times per forward pass.
+- The most famous NLP demo — **king − man + woman ≈ queen** — is just adding and subtracting word-embedding vectors.
+
+Add + scale together give you the most important pattern in all of linear algebra: the **linear combination** `c₁v₁ + c₂v₂ + …`. If that phrase sounds jargon-y, it isn't — it's just "scale each vector by a number, then add them all up." Matrix multiplication, transformer attention, image mixup (a data augmentation trick), interpolating between two images in latent space — all of them are linear combinations in disguise.
+
+The mechanics take about ten minutes to learn. The payoff is that every formula in the next four chapters — and every neural network layer you'll meet in Tier 3 — stops being a wall of symbols and starts being a walk or a stretch you can picture.
 
 </Motivation>
 
-<Intuition title="A vector is a walk">
+<Intuition title="A vector is just a walk you can take">
 
-Think of a vector as a **walk**: (2, 1) means "2 east, 1 north". Then everything in this chapter is one sentence each. **Addition** = do one walk, then the other — where you end up is the sum. **Scaling** = same direction, different stride: 3v takes the walk three times, −v walks it backwards, 0v stays home. **A linear combination** is an itinerary: "walk a twice, then b three times" reaches 2a + 3b. Every claim below is this picture translated into components.
+Picture a vector as a **walk**. (2, 1) means "2 steps east, then 1 step north." That's it.
+
+Once you have that picture, everything in this chapter fits in one sentence each:
+
+- **Addition** = do one walk, then a second walk from where you ended. Where you end up is the sum.
+- **Scaling** = same direction, different stride. `3v` walks the same direction but three times as far. `−v` walks it backwards. `0v` doesn't move at all.
+- A **linear combination** is just an itinerary: "walk a twice, then walk b three times" gets you to 2a + 3b.
+
+Every formula below is really this walking picture translated into numbers. Whenever the notation gets scary, come back to the walk.
 
 </Intuition>
 

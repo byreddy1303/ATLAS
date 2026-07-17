@@ -112,13 +112,22 @@ print(f"tiny change in b caused HUGE change in x — this is what condition numb
   ]}
 />
 
-<Motivation title="Two questions the determinant answers in one number">
+<Motivation title="The determinant answers two questions at once">
 
-Given a linear transformation, two questions come up constantly. First: **how much does it scale volume?** The determinant of a 2×2 matrix is the (signed) area of the parallelogram the columns span — the amount by which the transformation stretches or squishes any region. Same story in 3D with volume, and in n-D with n-dimensional "volume." A determinant of 2 means "doubles all areas." A determinant of 0 means "flattens every input into a lower-dimensional subspace" — no area left.
+Given a matrix (which is really a linear transformation), two questions come up over and over. The **determinant** — a single number computed from the matrix — answers both.
 
-Second: **is the transformation reversible?** A transformation that flattens things (det = 0) is fundamentally not invertible: it merges distinct inputs into a single output, and you can't undo a merge. A transformation that preserves nonzero volume (det ≠ 0) is invertible, and its inverse is a matrix A⁻¹ such that A·A⁻¹ = I. In ML terms: the input can be recovered from the output.
+**Question 1: How much does it scale volume?** In 2D, the determinant is the signed area of the parallelogram that the columns of the matrix trace out. Determinant of 2 means "doubles all areas." Determinant of 1 means "preserves areas." Determinant of 0 means "flattens everything to a lower-dimensional slice" — no area left. In 3D it's the same story but with volume; in higher dimensions, "n-dimensional volume."
 
-For a GenAI engineer, the determinant itself is almost never computed in production — but the ideas it captures (singular vs invertible, volume scaling, orientation) show up all the time: change-of-variables in normalizing flows, log-determinant in Jacobians, "well-conditioned" vs "singular" data in regression, invertibility of covariance matrices in Gaussian models. This chapter builds the geometric feel, then teaches you why `np.linalg.inv` is almost always the wrong tool — and what to use instead.
+**Question 2: Is the transformation reversible (invertible)?** A transformation that flattens things (det = 0) can't be undone — it merged distinct inputs into the same output, and you can't uncrush that. A transformation with nonzero volume-scaling (det ≠ 0) *is* reversible, and its inverse is another matrix A⁻¹ that undoes A. In symbols: A·A⁻¹ = I (the **identity matrix**, which does nothing).
+
+For a GenAI engineer, you almost never compute a determinant by hand in production. But the *ideas* it captures — singular vs invertible, volume scaling, orientation — show up constantly:
+
+- **Change-of-variables** in normalizing flows (a family of generative models).
+- **Log-determinant** in Jacobians for probabilistic models.
+- **Well-conditioned vs singular** data in regression.
+- **Invertibility of covariance matrices** in Gaussian models.
+
+This chapter builds the geometric feel, then teaches you *why `np.linalg.inv` is almost always the wrong tool* — and what to use instead.
 
 </Motivation>
 

@@ -142,16 +142,16 @@ print("which is why we use softmax during training and argmax only at inference.
   ]}
 />
 
-<Motivation title="Why 'continuous' is the requirement gradient descent secretly assumes">
+<Motivation title="'Continuous' is the silent assumption behind every training run">
 
-Every gradient-based ML method — SGD, Adam, backprop, everything — requires the loss function to be **differentiable**, which in turn requires it to be **continuous**. When a loss (or an activation, or an operation in the network) is discontinuous, gradient descent breaks: tiny weight changes produce tiny loss changes almost everywhere, then suddenly a huge jump. The "descent direction" isn't well defined at the jump; the algorithm oscillates or gets stuck.
+Every gradient-based ML method — SGD, Adam, backprop, everything — quietly requires the loss function to be **differentiable** (that means "has a well-defined slope everywhere"), which in turn requires it to be **continuous** (that means "no jumps or gaps"). When any part of your loss, activation, or network operation is discontinuous, gradient descent breaks. Tiny weight changes produce tiny loss changes almost everywhere, then *bang* — a huge sudden jump. The "downhill direction" isn't defined at the jump. The algorithm oscillates, gets stuck, or explodes.
 
-Two examples you deal with constantly:
+Two examples you deal with all the time:
 
-- **Softmax vs argmax at the output.** Argmax is discontinuous — a tiny change in logits can flip which class wins — so you cannot backprop through it. Softmax is a continuous, differentiable *smoothing* of argmax; it's why we train with cross-entropy on softmax outputs and only use argmax at inference. Every classification network's output layer is a workaround for this exact fact.
-- **ReLU at zero.** ReLU is continuous, but its derivative has a jump — the "corner" at z = 0 means the derivative is 0 on the left and 1 on the right, with no defined value at 0 itself. Libraries paper over this with a "subgradient" convention.
+- **Softmax vs argmax at the output.** **Argmax** ("which class scored highest?") is discontinuous — a tiny nudge to the logits can flip which class wins. You can't backprop through it. **Softmax** is a smooth version — it turns raw scores into probabilities that shift continuously as scores change. That's why we train with cross-entropy on softmax outputs and only use argmax at inference. Every classifier's output layer is really a workaround for this discontinuity.
+- **ReLU at zero.** ReLU (Rectified Linear Unit, the standard activation function: `max(0, x)`) is continuous, but its derivative has a corner at zero — slope is 0 on the left, 1 on the right, undefined right at zero. Libraries paper over this by picking a **subgradient** (any consistent value) and moving on.
 
-For a GenAI engineer, "limit" and "continuity" are not academic notions. They're the reason gradient-based training is possible, the reason certain hard optimization problems get "smoothed" into tractable ones, and the reason numerical issues creep in when a computation gets close to a discontinuity or a singularity. This chapter builds the vocabulary and intuition, then shows exactly how it maps to gradient-flow guarantees in ML.
+For a GenAI engineer, "limit" and "continuity" aren't academic notions. They're the reason gradient-based training works at all, the reason certain hard optimization problems get "smoothed" into tractable ones (like Gumbel-softmax for discrete choices), and the reason numerical issues creep in near singularities. This chapter builds the vocabulary and intuition, then shows exactly how it connects to gradients in ML.
 
 </Motivation>
 

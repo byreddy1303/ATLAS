@@ -112,21 +112,41 @@ print("'dog' IS the vector", embed("dog"), "— one row of E")`;
   ]}
 />
 
-<Motivation title="Every model sees the world as vectors">
+<Motivation title="Every ML model sees the world as vectors">
 
-When an LLM reads the word "dog", the first thing it does is replace it with a list of numbers — 768 of them in BERT, 12,288 in GPT-3. That list is a **vector**, and everything the model does afterward — attention, layers, the final prediction — is arithmetic on vectors. Images become vectors of pixel values, users become vectors of behavior, and a RAG system retrieves documents by comparing their vectors. Vectors are not one topic in ML; they are the *substance* models compute on.
+Here's something wild. When an LLM reads the word "dog," the very first thing it does is replace that word with a list of numbers — 768 numbers in BERT, 12,288 in GPT-3. That list is called a **vector**. Everything the model does after that — every attention step, every layer, every prediction — is arithmetic on vectors.
 
-The catch: this material lives in two languages. Papers write bold **x**, subscripts x₂, and "x ∈ ℝⁿ"; code writes `np.array`, `x[1]`, and `.shape`. Mistranslation causes real bugs — off-by-one indexing errors, and shape mismatches that silently produce a matrix where you wanted a vector.
+The same is true elsewhere in ML:
 
-This short chapter is the Rosetta stone: what the symbols mean, how they map to NumPy, and the two mental pictures (arrow, point) you'll reuse in every later chapter. Nothing here is hard — but everything in Tier 1 through Tier 4 is written in this language.
+- **Images** become vectors of pixel values.
+- **Users** become vectors of their behavior (clicks, watches, purchases).
+- **RAG systems** find relevant documents by comparing their vectors.
+
+Vectors aren't one topic in ML. They're the *substance* ML models compute on. If you don't feel comfortable with them, everything downstream is going to feel like magic.
+
+Here's the catch: this material lives in two languages that don't quite match up. Papers write **bold x**, subscripts like x₂, and things like "x ∈ ℝⁿ." Code writes `np.array`, `x[1]`, and `.shape`. Mistranslate between them and you get off-by-one bugs, or shape mismatches that quietly turn a vector into a 3×3 matrix without complaining.
+
+This short chapter is the Rosetta Stone. What do the symbols mean? How do they map to NumPy? And what are the two mental pictures — **arrow** and **point** — that you'll reuse in every later chapter? Nothing here is hard on its own, but every future chapter is written in this language. It's worth an hour to lock it in.
 
 </Motivation>
 
-<Intuition title="One object, three faces">
+<Intuition title="One vector, three faces you can look at it from">
 
-A vector is one thing with three faces. **Face 1: a list of numbers** — `(3, 4)` — this is what the computer stores. **Face 2: an arrow** — start at the origin, go 3 right and 4 up; direction and length live in those same two numbers. **Face 3: a point** — the tip of that arrow, a location in space; this is how a *dataset* looks, each sample one point.
+A vector is one thing with three different faces you can put on it. The neat trick is that the same numbers give you all three views — you pick which face to use based on what question you're asking.
 
-Same numbers, three pictures. Geometry questions (which way? how far? how aligned?) use the arrow. Data questions (which samples are near each other? what does the cloud look like?) use the point. Storage and computation use the list. Fluency in this chapter means switching faces without noticing you did it — and all the notation that follows is just a compact way of saying *which vector* and *which piece of it*.
+**Face 1: a list of numbers.** Like `(3, 4)`. This is how the computer stores it — just numbers in a row.
+
+**Face 2: an arrow.** Start at the origin, go 3 right and 4 up. That arrow has a direction (which way it points) and a length. The same two numbers give you both.
+
+**Face 3: a point.** The tip of that same arrow — a specific location in space. When you have a whole dataset, each sample is one point, and together they form a "cloud" of points you can visualize.
+
+Same numbers, three pictures. Which one you use depends on the question:
+
+- Geometry questions ("which way is this vector pointing?", "how long is it?", "is it aligned with that other one?") → use the arrow.
+- Data questions ("which samples are near each other?", "what shape is my dataset?") → use the point.
+- Storage and computation → use the list.
+
+Fluency in this chapter means switching between these three faces without even noticing you're doing it. All the fancy notation coming below is really just shorthand for saying *which vector* and *which piece of it*.
 
 </Intuition>
 

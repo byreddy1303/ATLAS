@@ -139,22 +139,28 @@ print("This is the RLHF trade-off: reward vs KL.  1/beta is the Lagrange multipl
   ]}
 />
 
-<Motivation title="Half the tricks in modern ML are constrained optimization in disguise">
+<Motivation title="Half of modern ML tricks are constrained optimization in disguise">
 
-You've seen unconstrained optimization: pick a loss L(θ), take gradients, minimize. But look at what modern GenAI systems actually do:
+You've seen **unconstrained optimization**: pick a loss L(θ), take gradients, minimize. Nothing standing in the way. But look at what modern GenAI systems actually do:
 
-- **RLHF** maximizes reward **subject to** KL(new-policy || reference-policy) ≤ budget. A hard constraint keeps the fine-tuned model close to its base.
-- **PPO** clips gradient updates so the new policy stays inside a **trust region** around the old one — an inequality constraint on how far you can move per step.
-- **SVMs** minimize weight norm **subject to** margin ≥ 1 on every training point.
-- **Weight decay** as a "soft constraint" on parameter norm — implemented as an L2 penalty, but the underlying problem is "minimize training loss subject to ‖w‖ ≤ C."
-- **LP-relaxation for combinatorial problems** shows up in ILP-based planners and OR-Tools schedulers.
+- **RLHF** maximizes reward *subject to* a KL constraint: "keep the fine-tuned policy close to the reference." The KL is a **hard constraint** with a budget.
+- **PPO** (Proximal Policy Optimization) clips gradient updates so the new policy stays inside a "trust region" around the old one — an **inequality constraint** on how far you can move per step.
+- **SVMs** minimize the weight vector's size *subject to* the classifier margin being ≥ 1 on every training point.
+- **Weight decay** in Adam is a **soft constraint** on how big the parameters can grow — implemented as an L2 penalty, but the underlying problem is really "minimize training loss subject to ‖w‖ being bounded."
 
-For a GenAI engineer, understanding constrained optimization unlocks two important things:
+Quick vocabulary before we dig in:
 
-1. **Reading modern papers.** When a paper says "we optimize L subject to some KL bound" or "we add a KL penalty with coefficient β," those two formulations are related by Lagrangian duality. Knowing that connection lets you understand what the "β" parameter is doing and how to set it.
-2. **Building your own trust-region-style updates.** If you want to fine-tune a model without destroying its prior behavior, you need to know how to formulate a distance constraint on parameters or on distributions.
+- **Constraint** = a rule the solution must obey (like "the KL divergence can't exceed 5" or "the norm of weights ≤ 10").
+- **Lagrangian** = a clever trick that turns constrained problems into unconstrained ones, by adding a "penalty term" for violating the constraint. You'll see this word everywhere.
+- **KKT conditions** (Karush-Kuhn-Tucker — three people's names) = the algebraic equations you solve to find optimal constrained solutions.
+- **Duality** = a beautiful theory that relates the original ("primal") problem to a mirror-image ("dual") one, often easier to solve.
 
-This chapter builds the machinery: Lagrangian, KKT conditions, dual problem, and the two ways to enforce constraints in practice (hard: Lagrangian; soft: penalty).
+Understanding constrained optimization unlocks two things for a GenAI engineer:
+
+1. **Reading modern papers.** When a paper says "we optimize L subject to some KL bound" and another says "we add a KL penalty with coefficient β," those two formulations are related by Lagrangian duality. Once you know the connection, you understand what β is doing and how to pick it.
+2. **Building trust-region-style updates.** If you want to fine-tune a model without destroying its prior behavior, you need to know how to write a distance constraint on parameters or on output distributions.
+
+This chapter builds the machinery: **Lagrangian**, **KKT conditions**, **duality**, and the two ways to enforce constraints in practice — hard (Lagrangian) and soft (penalty).
 
 </Motivation>
 

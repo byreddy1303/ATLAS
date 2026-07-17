@@ -170,12 +170,20 @@ print(f"reconstruction error (rank {r_lora} approx) : {np.linalg.norm(Delta_true
   ]}
 />
 
-<Motivation title="The one decomposition every GenAI engineer needs">
+<Motivation title="The single decomposition every GenAI engineer needs to know">
 
-Two of the most important techniques in modern deep learning are direct applications of SVD:
+**SVD** (Singular Value Decomposition) is the "master decomposition" of linear algebra. It says: **every matrix can be broken into three pieces — a rotation, a stretch, and another rotation.** That single fact powers a huge chunk of modern deep learning.
 
-- **LoRA (Low-Rank Adaptation)** — the standard method for parameter-efficient fine-tuning of large language models — represents each weight update as a product ΔW = B A with A and B thin rectangles. That's a rank-r decomposition; SVD is the mathematical machine that says "any matrix has a rank-r approximation, and here it is."
-- **Model compression, embedding compression, activation caching in inference** — all reduce to "approximate this matrix with a lower-rank one." Truncated SVD gives the *provably best* rank-k approximation (Eckart–Young theorem).
+Two of the biggest applications you'll hit:
+
+- **LoRA (Low-Rank Adaptation)** — the standard trick for parameter-efficient fine-tuning of large language models. It represents each weight update as a product of two thin rectangles: ΔW = B·A. That's a rank-r decomposition. SVD is the math machine that says "any matrix has a best rank-r approximation, and here it is."
+- **Model compression, embedding compression, activation caching** — all reduce to "approximate this matrix with a simpler one." Truncated SVD gives the *provably best* approximation of a given rank (a result called the **Eckart–Young theorem**).
+
+Quick vocabulary so nothing sounds scary:
+
+- **Rank** = "the number of independent directions in a matrix." Full-rank means every direction matters; low-rank means most of the matrix can be described by a few directions.
+- **Singular value** = the amount of "stretch" along each direction. Big singular values matter a lot; small ones can be safely ignored.
+- **Rotation** = "spin things around without stretching." Formally, an **orthogonal matrix**.
 
 SVD also unlocks the analyses you'll need to understand a model's guts: the singular values of the attention pattern tell you whether a head is focused or diffuse; the singular values of the weight matrix tell you the effective dimensionality of the map (a k=64 head with rank 4 is wasting capacity); the singular values of the covariance matrix are the variances of the principal components in PCA (via `SVD(X) → Σ² = variances`, no covariance-matrix construction needed — a numerical win).
 

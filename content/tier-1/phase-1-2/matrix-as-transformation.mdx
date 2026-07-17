@@ -126,27 +126,33 @@ print("Q[0] recomputed as dot products:",
   ]}
 />
 
-<Motivation title="Every transformer layer is a matrix acting on vectors">
+<Motivation title="Every LLM layer is really just a matrix acting on vectors">
 
-Open the source of any GPT-style model and count the operations that actually shape the answer: **`x @ W`**, **`Q @ K.T`**, **`attn @ V`**, **`h @ W_out`**. That's it. Layer norm, softmax, and ReLU do the nonlinear seasoning — but the *shape* of an LLM's computation is a chain of matrix multiplications acting on batches of token vectors.
+Open the source code of any GPT-style model and count the operations that actually shape the output. You'll find: `x @ W`, `Q @ K.T`, `attn @ V`, `h @ W_out`. That's basically it. Sure, there's layer normalization, softmax, and ReLU sprinkled in as "nonlinear seasoning," but the *shape* of an LLM's whole computation is a chain of matrix multiplications acting on batches of token vectors.
 
-For a GenAI engineer, "matrix" is not "grid of numbers you push through a solver." It's a **function you learn** — a map that pulls an embedding into a query space, or mixes 512-dim residuals into 2048-dim MLP activations, or averages value vectors weighted by attention scores. Every learned parameter tensor in a transformer is a matrix and every matrix is a linear map. This chapter builds the one mental model that turns matrix code into geometry you can picture — then every subsequent chapter (multiplication, eigen, SVD, LoRA) is just refinements of the same picture.
+For a GenAI engineer, "matrix" is not just "grid of numbers you push through a solver." It's a **function you learn** — a map that pulls an embedding into a query space, or mixes 512-dimension residuals into 2048-dimension MLP activations, or averages value vectors weighted by attention scores. Every learned parameter tensor in a transformer is a matrix, and every matrix is a **linear map** — a function that respects addition and scaling.
 
-The picture: **a matrix is a verb**. It takes vectors from one space and puts them somewhere. The columns tell you exactly where the standard-basis vectors land, and everything else follows.
+This chapter builds one core mental model: **a matrix is a verb**. It takes a vector from one space and moves it to another. Its columns tell you exactly where the "standard basis vectors" land (more on those in a sec), and every other calculation falls out of that.
+
+Once you've got this picture, every later chapter (matrix multiplication, eigenvectors, SVD, LoRA) is just refinements. The rewards keep coming.
 
 </Motivation>
 
-<Intuition title="A matrix is where the basis vectors land">
+<Intuition title="A matrix is 'where does each basic building-block vector land?'">
 
-Picture an m×n matrix A. It's a machine with n input dials (one per column) and m output wires (one per row). Feed it a vector x with n numbers; it hands back a vector Ax with m numbers.
+Here's the mental picture that unlocks everything.
 
-The trick: **you don't need to know what A does to *every* input to know everything about A** — you only need to know what it does to the n standard-basis vectors e₁ = (1, 0, …, 0), e₂ = (0, 1, 0, …), …, eₙ.
+Picture an m×n matrix A (m rows, n columns). Think of it as a little machine with n input slots and m output slots. Feed it any vector x with n numbers; it hands back a vector Ax with m numbers.
 
-Because every x can be written as x = x₁e₁ + x₂e₂ + … + xₙeₙ, and A is *linear* (A(u+v) = Au + Av, A(cv) = cAv), we get
+Now the beautiful trick: **you don't need to know what A does to every possible input to know everything about A.** You only need to know what it does to n specific "basic building block" vectors.
 
-Ax = x₁(Ae₁) + x₂(Ae₂) + … + xₙ(Aeₙ) — **a weighted sum of the images of the basis vectors**.
+Those building blocks are called the **standard basis vectors**: e₁ = (1, 0, 0, …), e₂ = (0, 1, 0, …), and so on. Just the ones with a single 1 and everything else 0. Any vector x can be written as a mix of these: x = x₁·e₁ + x₂·e₂ + … + xₙ·eₙ.
 
-And the images `Ae₁, Ae₂, …, Aeₙ` are literally the columns of A (proved in the derivation below). So A is fully determined by "where does each standard basis vector go?" — n arrows sketched on paper, and the whole map lives in them.
+Since A is **linear** (which means "respects addition and scaling") — the whole output is just:
+
+Ax = x₁·(Ae₁) + x₂·(Ae₂) + … + xₙ·(Aeₙ) — **a weighted sum of where the basis vectors landed.**
+
+And here's the punchline: the images Ae₁, Ae₂, …, Aeₙ are *literally the columns of A*. So the whole matrix is really just a compact way of saying "here's where each basic building-block vector ends up." Sketch those n landing points on paper, and you've captured everything the matrix does.
 
 </Intuition>
 

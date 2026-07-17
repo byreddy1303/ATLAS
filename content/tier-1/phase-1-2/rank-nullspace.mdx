@@ -107,25 +107,53 @@ print("W_adapted shape:", W_adapted.shape)
   ]}
 />
 
-<Motivation title="Why LoRA works — and why a 175B-parameter model can be fine-tuned with 1% of them">
+<Motivation title="Why LoRA works — fine-tuning a 175B model with 1% of its parameters">
 
-Fine-tuning a large language model used to mean updating every one of its billions of parameters. LoRA (Low-Rank Adaptation) changed that: it freezes the pretrained weights and adds a small update `ΔW = B · A` where A and B are skinny matrices of some rank r. For a 1024×1024 layer, a rank-8 LoRA update has ~16K parameters instead of ~1M — a 60× compression — and it works.
+Fine-tuning a large language model used to mean updating every single one of its billions of parameters. That's expensive — memory and compute both. **LoRA (Low-Rank Adaptation)** changed everything: it freezes the pretrained weights and adds a small update in the form `ΔW = B·A`, where A and B are skinny rectangles.
 
-The reason it works is a statement about **rank**. The claim is that the *update needed for a specific downstream task* lives in a low-dimensional subspace of the space of all possible updates — the fine-tuning signal is intrinsically low-rank. If you understand rank as "the effective dimension of what a matrix can do," this stops being magic and starts being obvious.
+Numbers: for a 1024×1024 weight matrix, a rank-8 LoRA update has ~16,000 parameters instead of ~1,000,000. That's a **60× reduction**, and it works well. How? The answer is a statement about **rank**.
 
-Rank is also what determines whether a linear system has a unique solution, how much a dataset can be compressed, how many independent features you really have, whether an attention head is "collapsed" or expressive, and whether an autoencoder bottleneck can preserve information. For a GenAI engineer, "rank" is one of the two or three most useful words in linear algebra — and this chapter gives you a working intuition, the rank-nullity theorem, and the code to compute both sides of it.
+Quick vocabulary before we dig in:
+
+- **Rank of a matrix** = the number of "truly independent directions" the matrix can produce. Not the number of columns — the number of *usefully different* directions.
+- **Nullspace** = the set of input vectors the matrix crushes to zero.
+
+LoRA's claim is: **the update needed to specialize a huge model for a specific task is low-rank.** In plain language: the change is small in a certain "directional" sense, so you only need a few dimensions of freedom to describe it. Once you understand rank as "the effective dimension of what a matrix can do," LoRA stops being magic.
+
+Rank shows up in a lot of other places too:
+
+- Whether a system of equations has a unique solution.
+- How much a dataset can be compressed.
+- How many independent features you really have (vs redundant ones).
+- Whether an attention head has collapsed to a boring subspace.
+- Whether an autoencoder bottleneck can preserve information.
+
+For a GenAI engineer, "rank" is one of the two or three most useful words in all of linear algebra. This chapter builds intuition, proves the rank-nullity theorem (a beautiful counting identity), and gives you the code to compute both sides of the story.
 
 </Motivation>
 
-<Intuition title="A matrix has an 'effective dimension' — the rank">
+<Intuition title="A matrix has an 'effective dimension' — that's its rank">
 
-A matrix maps input vectors to output vectors. Its **rank** is the dimension of the space of possible outputs — the size of the "shadow" it casts. Three columns in ℝ³ that all lie in one plane have rank 2, not 3: the transformation can only reach a 2D plane inside 3D space. The third column is redundant — a linear combination of the other two.
+A matrix takes input vectors and maps them to output vectors. Its **rank** is the dimension of the space of possible outputs — how much "room" the outputs actually fill.
 
-Equivalently, rank counts the number of *truly independent columns* (or rows — these are always equal, which is one of the small miracles of linear algebra). Big matrix, few independent columns = **low rank**. Big matrix, all columns independent = **full rank**.
+Concrete example: say you have a 3×3 matrix whose three columns all happen to lie on the same flat plane. The matrix can move inputs anywhere on that plane, but *never* off it. So even though the matrix has 3 columns, its rank is 2 — because there are only 2 truly independent directions in its output. One of the columns is redundant (it's a mix of the other two).
 
-The **nullspace** is the twin idea: the set of input vectors that the matrix crushes to the origin. If the transformation has any redundancy (rank less than the input dimension), some inputs get mapped to zero — those inputs make up the nullspace. High rank = small nullspace; low rank = big nullspace.
+Two equivalent definitions:
 
-Together: **rank + nullity = input dimension**. Every input direction either survives to output (contributes to rank) or gets crushed (contributes to nullity). Every input has to go somewhere, and this equation just counts.
+1. Rank = the number of truly independent columns.
+2. Rank = the number of truly independent rows. (Amazingly, these are always equal — one of the small miracles of linear algebra.)
+
+Rules of thumb:
+- **Full rank** = every column adds a new direction. The matrix has no redundancy.
+- **Low rank** = most columns are redundant. The matrix has a lot of internal structure.
+
+Now the twin idea: **nullspace**. This is the set of input vectors the matrix *crushes* to the zero vector. If your matrix has any redundancy, there will be inputs that map to zero. High rank = tiny nullspace. Low rank = big nullspace.
+
+The beautiful accounting identity that ties them together:
+
+$$\text{rank} + \text{nullity} = \text{input dimension}$$
+
+Read this out loud: "every input direction either survives (contributes to rank) or gets crushed (contributes to nullity). No direction can do both, and no direction escapes." It's just counting.
 
 </Intuition>
 

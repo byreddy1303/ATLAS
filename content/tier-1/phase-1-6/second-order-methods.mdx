@@ -197,16 +197,23 @@ print("L-BFGS quasi-Newton wins on well-behaved medium-scale problems.")`;
   ]}
 />
 
-<Motivation title="Second-order methods are theoretically superior — and rarely used for LLMs">
+<Motivation title="Second-order methods — theoretically amazing, rarely used for LLMs (but changing)">
 
-Every textbook introduces Newton's method as the "gold standard" of optimization: convergence in one step for quadratics, quadratic convergence rate for general convex problems (double the number of correct digits per iteration). Then in the same chapter it explains why nobody uses Newton to train GPT-3.
+Every textbook introduces **Newton's method** as the "gold standard" of optimization. It converges in one step for quadratic (bowl-shaped) problems, and reaches "quadratic convergence" for general convex problems — meaning near the answer, the number of correct digits *doubles* every iteration. Amazing on paper. Then in the very next paragraph, the same textbook explains why nobody uses Newton's method to train GPT-3.
 
-For a GenAI engineer, understanding second-order methods matters for two reasons:
+Quick vocabulary:
 
-1. **Knowing what you're leaving on the table.** L-BFGS reaches the same solution as SGD in 10-100x fewer iterations on small convex problems (sklearn's LogisticRegression uses L-BFGS by default, not SGD). Understanding why lets you decide when to reach for it.
-2. **Understanding modern "adaptive" optimizers.** Adam approximates the diagonal of the Fisher information matrix — it's second-order-*flavored*. K-FAC and Shampoo are legitimate second-order methods gaining traction in training research. Sophia (2024) uses a cheap Hessian estimate.
+- **First-order method** = uses only the gradient (SGD, Adam).
+- **Second-order method** = also uses the Hessian (matrix of second derivatives, i.e., curvature).
+- **Newton's method** = the classic second-order method: `x_new = x - H⁻¹ · gradient`.
+- **L-BFGS** = a clever way to approximate the Hessian without storing the whole thing. Used by scikit-learn's default logistic regression.
 
-The core question this chapter answers: **when does the extra cost of curvature information pay off, and when doesn't it?** The answer for LLMs is "usually doesn't (yet)," but the "yet" is important — training research is actively closing the gap.
+Why would you *ever* want the Hessian if the gradient is enough for training LLMs?
+
+- **You're often leaving performance on the table.** L-BFGS often reaches the same solution as SGD in 10-100× fewer iterations on small convex problems. Understanding why lets you decide when to reach for it.
+- **Modern "adaptive" optimizers are second-order in disguise.** Adam approximates the diagonal of the Fisher information matrix — a second-order-flavored quantity. K-FAC and Shampoo are real second-order methods gaining traction in training research. Sophia (a 2024 optimizer) uses a cheap Hessian estimate.
+
+The core question this chapter answers: **when does the extra cost of computing curvature pay off, and when doesn't it?** For LLMs today, "usually doesn't" — but "yet" is the operative word. Training research is closing the gap fast.
 
 </Motivation>
 

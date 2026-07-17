@@ -168,29 +168,39 @@ print(f"\\nEmpirical coverage over {n_experiments} experiments: {inside / n_expe
   ]}
 />
 
-<Motivation title="LLN and CLT are why averaging works — every ML metric relies on them">
+<Motivation title="Two theorems that explain why averaging works — LLN and CLT">
 
-Two theorems govern nearly everything in applied probability. The **law of large numbers (LLN)** says: as you draw more iid samples, the sample average converges to the true mean. The **central limit theorem (CLT)** says: the *fluctuation* of that sample average around the true mean is Gaussian-shaped with standard deviation σ/√N, no matter what the underlying distribution was.
+Two theorems drive almost all of applied probability. Both are simple to state; both are why every ML metric with a "±" behind it exists.
 
-Together, they justify essentially every ML measurement you do:
+- The **Law of Large Numbers (LLN)** says: as you gather more independent samples, their average gets closer and closer to the true underlying mean. If you flip a fair coin 10 times you might get 7 heads. If you flip it 10,000 times, you'll be very close to 5,000. That "getting closer" is LLN.
+- The **Central Limit Theorem (CLT)** says something even wilder: no matter what shape your original data has, the *sample mean* is bell-curve-shaped around the true mean, with standard deviation σ/√N. This is why bell curves show up everywhere — they're the universal shape of averaged noise.
 
-- **Test-set accuracy** is a sample mean. LLN says it converges to true accuracy as N grows; CLT gives you the error bars via SE = √(p(1 − p)/N).
-- **A/B testing** in production uses the CLT to compute the required sample size and to declare significance ("the observed 2% lift is 3.5 σ away from zero → significant").
-- **SGD gradient estimates** are sample means of per-example gradients. LLN says they converge to the true gradient; CLT says the noise is Gaussian-shaped with variance that shrinks as batch size grows.
-- **Monte Carlo integration** in reinforcement learning, Bayesian posterior estimation, and simulation-based inference: your estimate is a sample mean; SE and coverage guarantees come from LLN and CLT.
-- **Loss curves that "wiggle"** during training are fluctuations that CLT says are unavoidable; the size of the wiggle is Var(loss)/√batch_size.
+Together, these two theorems justify almost every ML measurement you make:
 
-Two-hour reads worth of theorem, one hour of pattern recognition, and then a lifetime of using the 1/√N rule. This chapter closes Phase 1.4 and leads directly into the statistical-estimation chapter of Phase 1.5.
+- **Test-set accuracy** is a sample mean over your test examples. LLN says it converges to the true accuracy as your test set grows. CLT gives you the error bars: SE = √(p(1−p)/N).
+- **A/B testing** uses CLT to compute how many users you need and to check whether a 2% observed lift is "3.5 standard deviations away from zero" — solidly significant.
+- **SGD gradient estimates** are sample means of per-example gradients. LLN says they converge to the true gradient; CLT says the wobble around it is bell-curve-shaped with variance that shrinks as you make the batch bigger.
+- **Monte Carlo integration** — RL policy evaluation, Bayesian posterior estimation, simulation-based inference. All of them estimate quantities as sample means. Error bars come from LLN + CLT.
+- **Loss curves that wiggle during training** — those wiggles are CLT-shaped noise on the loss, with size ≈ Var(loss)/√batch_size.
+
+Learn these two theorems once, use them forever. This chapter closes Phase 1.4 and sets up the statistical estimation chapter of Phase 1.5.
 
 </Motivation>
 
-<Intuition title="LLN: averages settle. CLT: they settle in a bell-curve-shaped cloud whose radius shrinks as 1/√N.">
+<Intuition title="LLN: averages settle down. CLT: they settle in a bell-shaped cloud that shrinks as 1/√N.">
 
-The **LLN** picture: throw a fair coin many times. Early on the running fraction of heads is jumpy — maybe 6/10 after ten flips. As you keep flipping, the running fraction stabilizes: 0.51 after 100 flips, 0.502 after 1000, 0.5003 after 10000. The sample average is *converging* to the true probability. Nothing exotic — the law is that this convergence is *inevitable* for iid samples with a finite mean.
+Two mental pictures — one for each theorem.
 
-The **CLT** picture: sample means are themselves random variables. If you generate many independent sample means (each an average of N draws), the *distribution* of those sample means is a Gaussian centered at the true mean μ, with standard deviation σ/√N. The remarkable part: this is true *regardless of the shape of the underlying distribution*, as long as it has finite variance. Uniform, exponential, Poisson, Bernoulli — all of them produce Gaussian-shaped sample-mean distributions once you average enough draws.
+**Picture 1 (LLN).** You start flipping a fair coin. After 10 flips you might have 6/10 heads — a decent chunk away from 0.5. After 100 flips you're at 0.51. After 1,000 flips, 0.502. After 10,000 flips, 0.5003. The running fraction is *homing in* on the true probability. Nothing magical is going on — this is just what "sample averages get close to the truth" looks like. LLN says this is *guaranteed* for iid samples with a finite mean.
 
-Two lessons combined: (1) averages are asymptotically correct (LLN), (2) their fluctuations have known shape and scale (CLT). This tells you not just *what* the answer is but *how confident* to be.
+**Picture 2 (CLT).** Now imagine doing that whole "flip 100 coins, count heads" experiment many times over. Each experiment gives you a slightly different fraction. If you plot the distribution of those fractions, guess what shape you get? A bell curve — specifically, one centered at the true 0.5 with standard deviation σ/√N. Doesn't matter what the original data looks like (uniform, exponential, Poisson, Bernoulli — anything with finite variance) — once you average enough draws, the sample-mean distribution is bell-curve-shaped.
+
+Two takeaways:
+
+1. Averages give you the right answer *eventually* (LLN).
+2. The wobble around that answer has a *known shape* (Gaussian) and a *known scale* (σ/√N). So you can put error bars on it (CLT).
+
+Together they tell you not just *what* the answer is but *how confident* you should be about it.
 
 </Intuition>
 

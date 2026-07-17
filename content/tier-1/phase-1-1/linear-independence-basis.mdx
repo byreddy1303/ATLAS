@@ -104,25 +104,38 @@ print("but w[0] + w[3] is well-determined:", round(w[0] + w[3], 3))`;
   ]}
 />
 
-<Motivation title="How many coordinates does your world need?">
+<Motivation title="How many 'real' axes does your world actually have?">
 
-An LLM embedding says a token lives in ℝ¹²²⁸⁸, but studies keep finding models actually use far fewer axes than that — the interesting motion happens on a lower-dimensional slab inside the space. The word for that slab is a **subspace**; the word for its true axis count is **dimension**; the tool for finding both is **linear independence**.
+Here's an interesting fact about big models. GPT-3's word embeddings put each token in a space with 12,288 axes (or "dimensions"). That sounds like a lot. But when researchers actually look at what the model uses, they find the meaningful motion happens on a much smaller slab inside that huge space — maybe a few hundred effective directions, not 12,288.
 
-The same concept catches bugs one step from your notebook. Two features in a table that are perfectly correlated (say, "height in cm" and "height in inches") aren't two features — they're one, wearing two hats. A linear model handed both will refuse to invert its normal equations; a neural net will learn a random split between them. The formal name for this pathology — features that can be built from each other — is **linear dependence**, and it's why libraries expose `matrix_rank`.
+The word for that slab is **subspace**. The word for its true axis count is **dimension**. And the tool for finding both is called **linear independence**. Two quick unpacks so nothing sounds scary:
 
-Later chapters lean on this hard. PCA finds a low-dimensional basis that captures the variance. Attention outputs live in the span of the value vectors. Neural-network initialization worries about the *rank* of weight matrices. Learning independence, span, and basis now unlocks all of that vocabulary — and closes the "why is my regression singular?" bug forever.
+- **Linear independence** = "each vector adds a genuinely new direction none of the others could reach."
+- **Basis** = "the smallest set of vectors needed to describe every point in the subspace."
+
+The same concept catches bugs a lot closer to your notebook, too. Say you have a table with columns "height in cm" and "height in inches." Those aren't really two features — they're one feature wearing two hats (2.54 times each other). A linear regression handed both will fail to invert its equations. A neural net will just learn a random split between them.
+
+The formal name for this "features that can be built from each other" problem is **linear dependence**, and it's exactly why NumPy exposes `matrix_rank`. If your feature matrix has rank less than its number of columns, you have redundancy.
+
+Later chapters lean hard on this. PCA finds a small basis that captures most of the variance in your data. Attention outputs in a transformer live in the "span" of the value vectors. LoRA (a huge fine-tuning trick for LLMs) exploits the fact that weight updates are low-rank. Getting **independence**, **span**, and **basis** now unlocks all that later vocabulary and eliminates the "why is my regression singular?" bug forever.
 
 </Motivation>
 
-<Intuition title="Independent = adds a new direction, redundant = doesn't">
+<Intuition title="Independent = adds a real new direction. Redundant = doesn't.">
 
-Imagine you're placing arrows in the plane, one at a time, and asking after each: *did the last arrow open up a genuinely new direction, or could I have gotten there already by scaling and adding what I had?*
+Here's the picture. Imagine you're placing arrows in a flat 2D plane, one at a time. After each new arrow, ask yourself: **"Did that arrow open up a direction I couldn't have reached before with what I already had?"**
 
-- **Arrow 1** (say (1, 0)): trivially new — from nothing, you can now reach a whole **line**.
-- **Arrow 2** (say (0, 1), not parallel to arrow 1): also new — you can now reach the entire **plane**.
-- **Arrow 3** (any vector in the plane): **not new**. Every point in ℝ² is already reachable from the first two; the third is a recipe of them wearing a hat.
+- **Arrow 1**: say (1, 0), pointing east. Definitely new — you started with nothing, now you can reach the whole east-west line by scaling this arrow. Progress.
+- **Arrow 2**: say (0, 1), pointing north (not parallel to arrow 1). Also new — combining arrows 1 and 2 lets you reach any point on the plane. More progress.
+- **Arrow 3**: pick any vector. Doesn't matter which. It's *not new* — you can already reach every point in the plane using just arrows 1 and 2. Arrow 3 is just a recipe of the first two wearing a hat.
 
-That's the whole idea. A set of vectors is **linearly independent** when every one of them adds a direction you couldn't previously build; **span** is the set of everything you can reach with them; a **basis** is an *efficient* generating set — enough vectors to reach everything, no wasted redundancies. The zero vector is the vanishing point: any set containing it is automatically dependent (you can scale it by anything without moving).
+That's the entire idea in one paragraph. Three quick vocabulary unpacks:
+
+- A set of vectors is **linearly independent** when every one of them adds a direction the others couldn't reach.
+- **Span** = the set of all points you can reach by scaling and adding your vectors.
+- **Basis** = the smallest set of vectors whose span is the whole space. Enough to reach everything, no wasted redundancy.
+
+One special case worth remembering: **the zero vector is always redundant.** Any set containing the zero vector is automatically linearly dependent, because you can multiply zero by anything and it still doesn't move.
 
 </Intuition>
 

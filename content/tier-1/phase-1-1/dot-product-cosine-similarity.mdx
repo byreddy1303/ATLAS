@@ -128,13 +128,25 @@ def most_similar_cities(home, cities, k=5):
   ]}
 />
 
-<Motivation title="Why the dot product had to be invented">
+<Motivation title="Why the dot product is the workhorse of modern ML">
 
-A user just finished *Arrival*. Out of ten thousand movies, which are most similar to what they enjoyed? Every movie is five numbers — `[sci-fi, romance, action, philosophy, pace]` — and the user's taste is five numbers too. "Similar" has to become arithmetic.
+Say a user just finished *Arrival* and loved it. Out of ten thousand other movies in your catalog, which ones should you recommend? Each movie is a list of five numbers describing its style — `[sci-fi, romance, action, philosophy, pace]` — and the user's taste is a similar five-number list. To say "which movie is similar to this taste?" you need to turn "similar" into arithmetic.
 
-Here's the observation that shapes everything. Taste = `(9, 3, 2, 9, 3)`. Movie B = `(90, 30, 20, 90, 30)` — the same *proportions*, ten times the magnitude. Movie C = `(3, 9, 9, 3, 9)` — smaller numbers, but the wrong *shape*. B is a great match and C is a bad one, even though C's raw numbers are "closer" in size. **What matters is direction, not magnitude.**
+Here's the key observation. Say taste = `(9, 3, 2, 9, 3)`. Now compare two movies:
 
-The **dot product** is the operation that measures alignment between two arrows; divide it by the two lengths and magnitude vanishes entirely, leaving **cosine similarity** — a pure measure of direction. This one identity powers every semantic search engine, every RAG pipeline, every recommender, and every attention head in every transformer. Get this chapter and you will recognize half of modern AI when you read its source code.
+- **Movie B** = `(90, 30, 20, 90, 30)` — same *proportions* as taste, just ten times bigger numbers.
+- **Movie C** = `(3, 9, 9, 3, 9)` — smaller numbers, but the *wrong shape*.
+
+Movie B is actually a great match — it has the same style profile, just measured on a bigger scale. Movie C is a bad match despite having numbers that are "closer" to taste in raw size. **What matters here is direction, not magnitude.**
+
+The **dot product** is the operation that measures alignment between two arrows. Divide it by the two vectors' lengths and the magnitude effect vanishes entirely, leaving **cosine similarity** — a pure measure of direction. This single identity powers:
+
+- Every semantic search engine.
+- Every RAG pipeline.
+- Every recommender system.
+- Every attention head in every transformer.
+
+Get this chapter and you'll recognize half of modern AI when you look inside its source code.
 
 </Motivation>
 

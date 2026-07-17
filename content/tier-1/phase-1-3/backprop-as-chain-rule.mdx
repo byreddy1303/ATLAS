@@ -164,17 +164,17 @@ print("That factor of a million is why every deep-learning framework uses revers
   ]}
 />
 
-<Motivation title="loss.backward() is the chain rule, algorithmically">
+<Motivation title="loss.backward() is really just the chain rule, walked as an algorithm">
 
-You call `loss.backward()` in PyTorch. In under a second, gradients appear on every one of hundreds of millions of parameters. Nothing is magic — it's the chain rule, executed as a graph algorithm called **reverse-mode automatic differentiation** (a.k.a. backpropagation).
+You call `loss.backward()` in PyTorch. In under a second, gradients appear on every one of hundreds of millions of parameters. It feels like magic. It isn't. It's the chain rule, executed as a graph algorithm called **reverse-mode automatic differentiation** — usually just shortened to **backpropagation** (or "backprop").
 
-For a GenAI engineer, understanding backprop mechanically matters for three practical reasons:
+Three reasons a GenAI engineer needs to understand backprop mechanically, not just as a black box:
 
-1. **Debugging**. When training diverges or gradients vanish/explode, knowing which nodes contribute what to the gradient lets you diagnose *which layer* is the problem — LayerNorm can save you, or activation choice, or initialization.
-2. **Custom operations**. Writing a new PyTorch layer sometimes requires implementing `.backward()` by hand — chain-rule bookkeeping over your op's local Jacobian. Same math, hand-coded.
-3. **Memory and speed**. Backprop's memory cost is *linear in the forward pass* because it stores every intermediate. Gradient checkpointing trades compute for memory by recomputing intermediates. Mixed-precision training relies on gradient magnitudes staying representable. All of these have chain-rule reasoning under the hood.
+1. **Debugging.** When training diverges or gradients explode/vanish, knowing which parts of the graph contribute what to the gradient lets you find *which layer* is causing the trouble. Maybe LayerNorm can save you. Maybe your activation function is wrong. Maybe initialization needs a fix.
+2. **Custom operations.** Writing a new PyTorch layer sometimes requires implementing `.backward()` by hand — that's just chain-rule bookkeeping over your operation's local derivatives.
+3. **Memory and speed.** Backprop stores every intermediate value from the forward pass, which is why it uses memory proportional to the network's depth. **Gradient checkpointing** trades compute for memory by re-computing some intermediates instead of storing them. Mixed-precision training relies on gradients staying representable in fewer bits. All of these have chain-rule logic underneath.
 
-This chapter shows the algorithm end-to-end. You've already seen the pieces: forward pass caches values, backward pass multiplies local slopes back. Here we put them together on a real (tiny) neural network, watch the shapes flow, and compare hand-written backprop against a torch reference. If you finish this chapter and *still* find `loss.backward()` mysterious, we've failed — because the whole algorithm is the chain rule with careful bookkeeping and nothing more.
+This chapter shows the algorithm end-to-end. You've already seen the pieces: the forward pass caches values; the backward pass walks the graph in reverse multiplying local slopes. Here we put them together on a real (tiny) neural network, watch the shapes flow, and compare hand-written backprop against a PyTorch reference. If you finish this chapter and `loss.backward()` still feels mysterious, we've failed — because the whole thing is chain rule + careful bookkeeping, nothing more.
 
 </Motivation>
 

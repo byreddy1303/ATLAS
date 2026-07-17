@@ -142,13 +142,17 @@ print("Recovered w and b are close — every gradient step needed the DERIVATIVE
   ]}
 />
 
-<Motivation title="Every optimization step in every ML model is one derivative">
+<Motivation title="Every step of every ML training is really one derivative">
 
-Training a neural network is an optimization problem: find weights that minimize a loss function. The algorithm — gradient descent — is a repeated `w := w − learning_rate · dLoss/dw`. That `dLoss/dw` is a **derivative**: the slope of the loss at the current weight value. It tells you which way to move to make the loss smaller, and by how much.
+Training a neural network is an optimization problem: find weights that make the loss small. The workhorse algorithm — **gradient descent** — is a simple update repeated over and over:
 
-Every ML training loop, every backprop pass, every step of every optimizer (SGD, Adam, RMSProp, everything) rests on being able to compute a derivative. Deep learning libraries automate the computation with autograd, but *what* they're automating is the derivative rules of single-variable calculus applied to a computation graph. To understand what your framework is doing (and to debug it when it goes wrong), you need a rock-solid picture of what a derivative is: geometric meaning, algebraic rules, numerical approximation, and what "the derivative doesn't exist here" means.
+$$w := w - \eta \cdot \frac{dL}{dw}$$
 
-This chapter builds that picture from scratch. It's the foundation the chain-rule, multivariable-partials, jacobian-hessian, and backprop chapters all build on. If a single ML paper's math has ever felt inscrutable, the odds are the missing skill was a comfortable feel for f′.
+Read that as: "new weight = old weight minus learning rate times the derivative." That last thing, dL/dw, is a **derivative** — the *slope* of the loss at the current weight. It tells you two things: which way to move to shrink the loss, and by how much.
+
+Every ML training loop, every backprop pass, every step of every optimizer (SGD, Adam, RMSProp — the whole family) boils down to computing derivatives. Deep-learning libraries automate this with **autograd** (automatic differentiation), but what they're automating is exactly the single-variable calculus rules you're about to learn, applied over a big computation graph. To understand what your framework is doing — and to debug it when things go wrong — you need a rock-solid feel for what a derivative *is*: its geometric meaning, the algebraic rules, how to approximate it numerically, and what it means when a derivative "doesn't exist."
+
+This chapter builds that picture from scratch. It's the foundation the chain-rule, multivariable partial, Jacobian/Hessian, and backprop chapters all build on. If ML math has ever felt inscrutable, the odds are strong the missing skill was a comfortable feel for f′ (read: "f-prime," another name for "the derivative of f").
 
 </Motivation>
 

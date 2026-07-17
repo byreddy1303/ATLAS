@@ -157,194 +157,244 @@ print(f"True p:            {true_p}")`;
   ]}
 />
 
-<Motivation title="Every regularization term is a prior — and knowing that unlocks the whole toolkit">
+<Motivation title="Every 'regularization' trick is actually a prior in disguise">
 
-Regularization in ML is not a mysterious &ldquo;anti-overfitting&rdquo; trick. Every common regularizer is a *prior belief* about parameter values expressed in log-space. Making this connection precise unlocks three things at once:
+**Regularization** is a word thrown around a lot in ML. It just means: "extra terms added to the loss that keep the model from going crazy." Weight decay, L2, L1, dropout, label smoothing — all regularization. Sounds like a bag of unrelated tricks, right?
 
-- **L2 (weight decay) = Gaussian prior**. Adding λ ||w||² / 2 to the loss is *exactly* MAP with w ~ 𝒩(0, σ² I) for some σ.
-- **L1 (lasso) = Laplace prior**. Adding λ ||w||₁ is MAP with w_j ~ Laplace(0, b) for some b. Laplace is heavier-tailed than Gaussian and has a spike at zero, which is *why* L1 produces exactly-zero (sparse) coefficients.
-- **Data augmentation, dropout, early stopping, label smoothing** — all of these can be reinterpreted as noise-injection priors, and each corresponds to a specific probabilistic assumption.
+Here's the neat truth: they're all the same underlying idea. Every common regularizer is a **prior belief** about what "reasonable" parameters look like, written in a way the optimizer can use. Once you see this, the whole toolkit collapses into one concept.
 
-For a GenAI engineer, three specific payoffs:
+Quick vocabulary before we start, so nothing feels scary:
 
-- **Weight decay in transformer training** is a Gaussian prior on every parameter. AdamW&rsquo;s "decoupled weight decay" makes this even more explicit — it&rsquo;s literally subtracting λw from the gradient at every step, which is the gradient of −log 𝒩(w | 0, I).
-- **KL regularization in RLHF / DPO** is a prior over policies. The penalty β · KL(π || π_ref) says "believe a priori that the fine-tuned policy stays close to the reference."
-- **Prior conditioning in diffusion / classifier-free guidance** literally uses a prior on the class label. The knob γ (guidance strength) is the prior strength.
+- **Prior**: your belief about what the parameters *probably* are before you see any data. "Small weights are more sensible than huge weights" is a prior.
+- **Likelihood**: how well each parameter setting explains the data you saw. (This came from the previous chapter.)
+- **Posterior**: your updated belief after seeing data. Bayes' rule combines prior and likelihood into this.
+- **MAP** ("maximum a posteriori"): the single most-probable parameter under the posterior — the peak. Think of it as MLE with a nudge from your prior.
 
-MAP is the bridge between two worlds: **the frequentist MLE that most ML training uses, and the fully Bayesian posterior distributions that principled uncertainty quantification requires**. Once you see the bridge, you can move between the two.
+Now the punchline:
+
+- **L2 regularization** (adding λ‖w‖² to the loss) = a Gaussian prior on the weights. In English: "I believe weights should probably be near zero." Every AdamW `weight_decay` parameter in every transformer is this.
+- **L1 regularization** (adding λ‖w‖₁) = a Laplace prior. Laplace is a heavy-tailed distribution with a sharp spike at zero. This spike is *why* L1 zeros out coefficients — it prefers "exactly zero" over "small."
+- **Dropout, label smoothing, data augmentation, early stopping** — all reinterpretable as priors. Not always exactly, but close enough that the intuition transfers.
+
+Three payoffs for a GenAI engineer that matter right now:
+
+- **Weight decay in transformer training.** Every big model (GPT, Llama, Claude family) trains with a `weight_decay` value in AdamW. That's a Gaussian prior on all billion+ parameters. Without it, transformers memorize instead of generalize.
+- **KL penalty in RLHF and DPO.** When fine-tuning a language model with human feedback, you add a "don't drift too far from the original model" term. That's literally a prior on the fine-tuned model, pointed at the pretrained one.
+- **Classifier-free guidance** in diffusion image generation. The strength knob γ ("guidance scale") on Stable Diffusion is dialing up how strongly the class label prior influences generation.
+
+MAP is the bridge between two views. On one side: **MLE**, where you just fit the data as well as you can. On the other side: **full Bayesian inference**, where you carry around a whole probability distribution over parameters. MAP is the middle ground — you keep the prior, but summarize the answer with a single "best" number. Get comfortable with MAP and you can walk between both sides.
 
 </Motivation>
 
-<Intuition title="Two sources of belief, combined into one: what the data says + what you thought before">
+<Intuition title="Two voices arguing: what the data says + what you already believed">
 
-Suppose a coworker tells you a new coin came out heads 7 times in 10 flips. What&rsquo;s the fairness of the coin? Two voices in your head:
+Picture this. A coworker slaps a coin on the table and says, "I just flipped this 10 times and got 7 heads. So it's biased, right?"
 
-- **Voice 1 (the data)**: &ldquo;7 out of 10 is more than half — the coin looks biased toward heads.&rdquo;
-- **Voice 2 (prior belief)**: &ldquo;But almost every coin I&rsquo;ve ever seen is basically fair. Maybe this is just luck.&rdquo;
+Two voices immediately pop up in your head:
 
-MAP is the formal way to combine these two voices. Voice 1 is the **likelihood** — a function that scores each candidate value of the parameter by how well it explains the data. Voice 2 is the **prior** — your beliefs about which parameter values were plausible before you saw any data. MAP multiplies the two, then picks the peak.
+- **Voice 1 (the data):** "7 out of 10 is more than half. Maybe the coin *is* biased toward heads."
+- **Voice 2 (your prior belief):** "But basically every coin I've ever handled is fair. Getting 7-out-of-10 by pure chance isn't even that rare."
 
-Bayes&rsquo; theorem is the recipe:
+Both voices have a point. MAP is just the mathematical way to combine them fairly.
+
+- Voice 1 is the **likelihood** — the score each candidate coin-fairness gets based on how well it explains the observed 7-out-of-10.
+- Voice 2 is the **prior** — your belief about coins before you saw this data.
+
+**Bayes' theorem** is the recipe for merging the two into a single updated belief called the **posterior**:
 
 $$
 p(\theta \mid D) \;=\; \frac{p(D \mid \theta) \cdot p(\theta)}{p(D)}.
 $$
 
-The numerator is (likelihood × prior). The denominator p(D) is a normalizer that doesn&rsquo;t depend on θ, so it drops out when we&rsquo;re just looking for the peak. Take log to turn products into sums:
+Read out: "the posterior over θ given the data D equals (likelihood × prior) divided by a normalizer." That normalizer p(D) is the same for every θ, so when we're just looking for the peak, we can ignore it.
+
+Take the log (same reason as the last chapter — turns product into sum, easier math):
 
 $$
-\log p(\theta \mid D) \;=\; \underbrace{\log p(D \mid \theta)}_{\text{likelihood term}} + \underbrace{\log p(\theta)}_{\text{prior term}} + \text{const}.
+\log p(\theta \mid D) \;=\; \underbrace{\log p(D \mid \theta)}_{\text{likelihood: data speaks}} + \underbrace{\log p(\theta)}_{\text{prior: you speak}} + \text{const}.
 $$
 
-**MAP** = argmax_θ of that. The likelihood term pulls θ toward values that explain the data; the prior term pulls θ toward values you thought plausible *before* seeing data. **MLE is the special case where the prior is flat** — treating every parameter value as equally plausible before seeing data, so the prior term is a constant and disappears.
+**MAP** is the θ that maximizes this. Think of it as a tug-of-war: the likelihood term pulls θ toward whatever fits the data best; the prior term pulls θ toward whatever you already believed. Where they balance is your answer.
 
-For point estimation, MAP gives a single θ̂. For full uncertainty quantification, you&rsquo;d want the whole posterior distribution — MAP is a summary, not the whole picture. But the summary is often exactly what a training loss needs.
+**MLE (last chapter) is just MAP with a flat prior** — meaning "before data, every θ looks equally plausible to me." When the prior is flat, its log is a constant and drops out, leaving only the likelihood. That's why MLE was our starting point.
+
+One important note. MAP gives you a single number: the peak of the posterior. That's fine for training a model. But if you want to say things like "how confident am I in this estimate?", you need the whole posterior distribution, not just its peak. Full Bayesian inference gives you the whole thing; MAP is the fast summary.
 
 </Intuition>
 
 <Recall term="Prior">
 
-A prior is a distribution p(θ) over parameters that encodes your beliefs *before* seeing data. Uninformative priors are flat (uniform on a bounded range, or improper &ldquo;flat over ℝ&rdquo;). Informative priors carry substantive belief (e.g., "weights should be near zero," "success rates should be near 0.5"). All Bayesian conclusions depend on which prior you choose.
+A **prior** is your best guess about the parameters *before* looking at the data. It takes the form of a probability distribution p(θ). Two flavors: **uninformative** priors are basically shrug emojis — "any value looks equally likely" (a flat distribution). **Informative** priors carry real belief — "weights are probably near zero," "success rates are probably near 50%." Every Bayesian answer depends on which prior you pick, which is a feature, not a bug — it makes your assumptions explicit.
 
 </Recall>
 
-## MAP = MLE + prior term
+<Recall term="Posterior">
 
-Given data D and a probabilistic model with parameter θ:
+The **posterior** p(θ | D) is your updated belief about θ *after* seeing data D. It's what Bayes' rule gives you: (likelihood × prior) / normalizer. It's still a distribution — not a single number — because you carry uncertainty. MAP just picks the peak of this distribution for use as a point estimate.
+
+</Recall>
+
+## MAP = MLE + a nudge from the prior
+
+Given data D and a model with parameter θ, MAP picks the θ that maximizes (log-likelihood + log-prior):
 
 $$
 \hat\theta_{\text{MAP}} \;=\; \arg\max_\theta \big[ \log p(D \mid \theta) + \log p(\theta) \big].
 $$
 
-- If p(θ) is uniform (flat) over the feasible set, the second term is constant and MAP = MLE.
-- If p(θ) is 𝒩(0, σ²) (Gaussian centered at zero), the second term is −||θ||² / (2σ²) + const — this is the L2 regularizer.
-- If p(θ) is Laplace(0, b), the second term is −||θ||₁ / b + const — this is the L1 regularizer.
-- If p(θ) is a peaked prior at some θ₀, MAP is pulled toward θ₀ when data is scarce.
+Depending on what you plug in for the prior, this becomes something you already recognize:
 
-**Small-N behavior**: MAP is more robust than MLE because the prior dampens overfitting. E.g., Bernoulli(p) with Beta(2, 2) prior and 0 successes in 5 trials gives p̂_MAP = (0 + 1)/(5 + 2) ≈ 0.14, whereas MLE gives p̂ = 0. The prior *keeps the estimator away from degenerate values*.
+- **Flat prior** (uniform, "no opinion"): the second term is constant → drops out → MAP = MLE.
+- **Bell-curve prior** 𝒩(0, σ²) (i.e., "weights should probably be small"): the log-prior is −||θ||²/(2σ²) + const → this is **L2 regularization**.
+- **Laplace prior** (spike at zero, heavy tails): the log-prior is −||θ||₁/b + const → this is **L1 regularization**.
+- **Peaked prior at some θ₀**: pulls MAP toward θ₀ when the data is thin.
 
-**Large-N behavior**: as data accumulates, the likelihood dominates and MAP → MLE. This is the Bayesian analog of consistency: with enough data, the prior no longer matters.
+**When the sample size is small.** MAP is much more stable than MLE because the prior gently pulls the estimate away from crazy answers. Example: you flip a coin 5 times and get 0 heads. MLE says "the coin has 0% chance of heads." That's a broken answer — one glance at the coin and you'd disagree. MAP with a Beta(2, 2) prior gives you (0 + 1)/(5 + 2) ≈ 0.14, which is much saner. The prior kept you out of the "degenerate zero" trap.
+
+**When the sample size is large.** The likelihood term grows with n, while the prior term stays fixed. So the data eventually drowns out the prior, and MAP quietly converges to MLE. This is the Bayesian version of "with enough data, your starting beliefs stop mattering."
 
 <RunnableCode title="MLE vs MAP for Bernoulli: MAP is more robust with small samples" code={mapVsMleCode} packages={["numpy", "scipy"]} />
 
-## L2 regularization = Gaussian prior
+## L2 regularization = a bell-curve prior on the weights
 
-Consider a linear regression setup: y = Xw + ε with ε ~ 𝒩(0, σ² I). MLE finds w to minimize
+Let's connect regularization to Bayes on a concrete example: linear regression. Setup:
+
+- You have y (a vector of true values) and X (a matrix where each row is one input).
+- Model: y = Xw + noise, where the noise is bell-curve-shaped 𝒩(0, σ²I).
+- Goal: find good weights w.
+
+MLE finds the w that minimizes the sum of squared errors (that's just squared distance, ‖y − Xw‖²):
 
 $$
 \frac{1}{2\sigma^2} \sum_i (y_i - x_i^\top w)^2 \;=\; \frac{1}{2\sigma^2} \| y - Xw \|^2.
 $$
 
-Add a Gaussian prior w ~ 𝒩(0, τ² I). The log-prior is:
+Now add a **prior** on the weights: 𝒩(0, τ²I). In plain English: "before seeing data, I believe each weight is probably small and near zero." That prior's log is:
 
 $$
 \log p(w) \;=\; -\frac{1}{2\tau^2} \|w\|^2 + \text{const}.
 $$
 
-MAP objective (negative log-posterior, up to constants):
+To find MAP, we minimize the negative-log-posterior (which is likelihood + prior, both negated):
 
 $$
 \frac{1}{2\sigma^2} \| y - Xw \|^2 + \frac{1}{2\tau^2} \|w\|^2.
 $$
 
-Multiply by σ² and let λ = σ² / τ²:
+Multiply through by σ² and give the ratio a name — let **λ = σ²/τ²** ("lambda," the regularization strength):
 
 $$
 \boxed{\;\text{MAP objective} \;=\; \frac{1}{2} \| y - Xw \|^2 + \frac{\lambda}{2} \|w\|^2\;}
 $$
 
-This is **ridge regression**, exactly. The knob λ trades likelihood fit vs prior strength. λ = 0: MLE (OLS). λ → ∞: prior dominates, w → 0.
+Congratulations — you just derived **ridge regression**. That's a fancy name for "least squares with a squared-weight penalty." The knob λ is a trade-off: λ = 0 means "trust the data" (MLE); λ → ∞ means "trust the prior" (all weights get pushed to zero). Cross-validation is how you pick the sweet spot.
 
-**Practical use**: weight decay in every modern deep-learning optimizer (AdamW, SGD with L2, RMSProp with weight decay) is this Gaussian prior in disguise. In PyTorch: `optimizer = torch.optim.AdamW(model.parameters(), lr=..., weight_decay=1e-2)`. The `weight_decay` parameter is λ (up to a factor).
+**Where you actually meet this in ML:** every deep-learning optimizer's `weight_decay` parameter. In PyTorch:
+
+```python
+optimizer = torch.optim.AdamW(model.parameters(), lr=..., weight_decay=1e-2)
+```
+
+That `weight_decay=1e-2` is literally λ. Every LLM (GPT, Llama, Claude family) trains with this. The Gaussian prior is why weights stay reasonable even with billions of parameters.
 
 <RunnableCode title="Ridge regression: Gaussian prior shrinks coefficients, improves generalization" code={l2RidgeCode} packages={["numpy", "sklearn"]} />
 
-## L1 regularization = Laplace prior
+## L1 regularization = a Laplace prior (and why it zeros things out)
 
-Replace the Gaussian prior with a **Laplace** (double-exponential) prior on each coefficient independently: $w_j \sim \text{Laplace}(0, b)$. The Laplace density is
+Now swap the bell-curve prior for a **Laplace prior** on each weight. Laplace is another distribution — think of it as "a bell curve that came to a sharp point at zero and has heavier tails." Density:
 
 $$
 p(w_j) \;=\; \frac{1}{2b} \exp(-|w_j| / b).
 $$
 
-Log-prior:
+The b is a spread parameter, similar to σ for a Gaussian. Log-prior:
 
 $$
 \log p(w) \;=\; -\frac{1}{b} \sum_j |w_j| + \text{const} \;=\; -\frac{1}{b} \|w\|_1 + \text{const}.
 $$
 
-MAP objective:
-
-$$
-\boxed{\;\text{MAP objective} \;=\; \frac{1}{2\sigma^2} \|y - Xw\|^2 + \frac{1}{b} \|w\|_1\;}
-$$
-
-Let λ = σ² / b:
+That ‖w‖₁ is the **L1 norm** — just "sum of absolute values of the weights." Plug this into the MAP objective, let λ = σ²/b again, and you get:
 
 $$
 \text{Lasso objective} \;=\; \frac{1}{2} \|y - Xw\|^2 + \lambda \|w\|_1.
 $$
 
-**Why L1 produces sparsity**: the Laplace prior has a *spike* (non-smooth peak) at zero. The negative log-prior |w_j| is not differentiable at zero — the subgradient at w_j = 0 is [−1, +1]. This creates a *thresholding* effect: for small enough coefficient values, the optimum sets them exactly to zero. Gaussian priors don&rsquo;t have this — L2 shrinks coefficients but rarely to exactly zero.
+This is **Lasso regression** ("lasso" is the historical name; it stands for "least absolute shrinkage and selection operator" — you don't need to memorize that). What makes it special: L1 zeros out weights that don't matter, giving you a **sparse** solution ("sparse" = "mostly zeros").
 
-**Practical use**: L1 is used when you suspect sparsity (only a few features actually matter). Lasso, Elastic Net (L1 + L2), and structured sparsity are all L1-flavored. In transformers, L1 is used less than L2 (which pairs well with SGD/Adam), but shows up in sparse-attention and MoE routing losses.
+**Why does L1 zero things out but L2 doesn't?** Here's the intuition. Both priors want weights near zero. But the Laplace prior has a sharp *spike* at zero — its log has a corner right there, and the derivative is jumpy across it. That corner creates a "dead zone" where the optimizer literally chooses w = 0 exactly. The Gaussian prior is smooth all the way through, so it can shrink weights *toward* zero but almost never *to* zero.
+
+**Where you'll see this:** Lasso is used when you suspect only a few features actually matter (say, thousands of possible medical markers but only 10 that predict a disease). It doubles as a feature selector, since it kills the useless ones. In transformers, L1 shows up less often than L2 (weight decay is the workhorse), but you'll spot it in things like sparse-attention losses and MoE (Mixture-of-Experts) routing penalties, where you want a small subset of things to activate.
 
 <RunnableCode title="Lasso: Laplace prior gives sparse solutions" code={l1LassoCode} packages={["numpy", "sklearn"]} />
 
-## Conjugate priors — where math stays closed-form
+## Conjugate priors — the "math stays clean" special case
 
-A prior is **conjugate** to a likelihood if the posterior is in the same family as the prior. Then Bayesian updating is closed-form: no numerical integration, no MCMC needed.
+Sometimes the universe is nice to you. If the prior and the likelihood are picked from the right pair of distributions, then the posterior turns out to be the *same family* as the prior — just with updated numbers. When that happens, the prior is called **conjugate** to the likelihood.
 
-**Beta–Bernoulli**: prior p ~ Beta(α, β), likelihood iid Bernoulli(p) with k successes in n trials, posterior:
+Why does anyone care? Because it means you can update your beliefs with a simple arithmetic step instead of doing a big numerical integration. No fancy sampling, no complicated math — just "add these numbers, divide by these."
+
+The most-used pair: **Beta prior + Bernoulli likelihood**. Say you start with a Beta(α, β) prior for a coin's probability of heads. Two knobs α and β control the shape. Now you flip the coin n times and see k heads. The posterior is:
 
 $$
 p \mid D \sim \text{Beta}(\alpha + k, \beta + n - k).
 $$
 
-Both posterior mean and MAP are closed-form:
+That's it. Add the successes (k) to α, add the failures (n − k) to β. Done. From this you can pull out both the posterior mean and MAP in closed form:
 
 $$
 E[p \mid D] = \frac{\alpha + k}{\alpha + \beta + n}, \quad \hat p_{\text{MAP}} = \frac{\alpha + k - 1}{\alpha + \beta + n - 2}.
 $$
 
-Same pattern for other conjugate pairs:
+You can think of α and β as "imaginary prior samples" — Beta(3, 7) is like "before I saw any real data, I had already imagined 3 heads and 7 tails." Watching real data update α and β makes Bayes feel intuitive.
 
-- **Dirichlet–Multinomial** (K-class version of Beta–Bernoulli). Prior π ~ Dirichlet(α), likelihood Multinomial(π), posterior Dirichlet(α + counts).
-- **Gaussian–Gaussian** with known variance. Prior μ ~ 𝒩(μ_0, σ_0²), likelihood x_i ~ 𝒩(μ, σ²), posterior is another Gaussian with precision-weighted mean.
-- **Gamma–Poisson**. Prior λ ~ Gamma, likelihood Poisson(λ), posterior Gamma.
-- **Inverse-Gamma–Gaussian variance**. Prior on σ² is Inverse-Gamma.
+Other conjugate pairs work the same way (their names, so you recognize them, but you don't need to memorize the formulas):
 
-Conjugate priors are less common in modern deep learning (where models are non-conjugate and inference is variational or MCMC), but they&rsquo;re everywhere in classical Bayesian statistics and in the theory that justifies specific regularizers.
+- **Dirichlet + Multinomial**: the multi-class version. Prior for K-class probabilities is Dirichlet; likelihood is Multinomial (which is just "counts across K classes"); posterior is another Dirichlet.
+- **Gaussian + Gaussian**: prior on a mean is Gaussian, likelihood is Gaussian → posterior is Gaussian with a weighted-average mean.
+- **Gamma + Poisson**: prior on a rate is Gamma; likelihood is Poisson (event-counting distribution); posterior is Gamma.
+- **Inverse-Gamma + Gaussian variance**: prior on a variance is Inverse-Gamma → clean posterior.
+
+You won't see conjugate priors much in modern deep learning — models like transformers are far too complicated for closed-form posteriors, so people use approximations like **variational inference** ("fit a simple distribution to the posterior") or **MCMC** ("Markov chain Monte Carlo — draw samples from the posterior"). But conjugate priors are everywhere in classical Bayesian stats and quietly justify the regularizers you meet every day.
 
 <RunnableCode title="Beta-Bernoulli conjugate updating: watch the posterior sharpen" code={conjugatePriorCode} packages={["numpy", "scipy", "matplotlib"]} />
 
-## The traps that matter
+## Things that trip people up
 
-**MAP is not the posterior mean.** For symmetric unimodal posteriors, they agree. For skewed posteriors (Beta with α ≠ β), MAP is the mode and the posterior mean is elsewhere. Posterior mean minimizes squared-error loss and is often preferred as a point estimate in Bayes.
+**"MAP is not the posterior mean."** They agree when the posterior is symmetric and has one peak. But for skewed posteriors, the peak (MAP) sits in one place and the average (mean) sits somewhere else. If you care about the "expected value" under squared-error losses, use the posterior mean, not MAP.
 
-**MAP is not invariant under reparameterization.** MLE is (from the previous chapter&rsquo;s problem set); MAP is not. If you transform parameters (e.g., from σ to log σ), the location of the posterior mode changes because the Jacobian appears. This is a subtle bug source — always be explicit about which parameterization your prior is on.
+**"MAP shifts if you change parameterization."** This one bites people. Say your parameter is σ (a standard deviation) and someone reparameterizes to log σ. The MLE gives you the same physical answer either way (that's called *invariance*). MAP does not — the mode of the distribution moves when you transform the variable, because the transformation stretches the density differently in different places. Moral: always be explicit about *which* parameterization your prior is on.
 
-**Improper priors can produce proper posteriors, but be careful.** &ldquo;Flat over ℝ&rdquo; is not a valid probability distribution (doesn&rsquo;t normalize), but sometimes the posterior it induces is proper. Modern practice: use proper priors, even if they&rsquo;re very weak.
+**"Flat priors on infinite ranges aren't really priors."** "Flat over all real numbers" is not a probability distribution because it doesn't integrate to 1. These are called **improper priors**. Sometimes the posterior they induce is still fine, but it's cleaner to use a proper (but wide) prior instead. Just pick a Gaussian with a big variance and move on.
 
-**Regularization strength must be tuned.** λ is a hyperparameter — grid-searched or cross-validated. Setting it too high underfits; too low overfits. In deep-learning practice, weight decay values like 1e-2 to 1e-4 are typical.
+**"You still have to tune the regularization strength."** λ is a **hyperparameter** — a knob that isn't learned from data automatically. Too high → the model underfits (ignores signal). Too low → it overfits (memorizes noise). Cross-validation is how you pick it in practice. Typical values for weight decay in transformers: 1e-2 to 1e-4.
 
-**Priors are subjective (and that&rsquo;s OK).** Different priors give different answers, especially with small data. Bayesians embrace this — the prior is your explicit domain knowledge. Frequentists sometimes object; if it bothers you, run a sensitivity analysis with a few different priors and see how much your answer changes.
+**"Priors are subjective (and that's actually fine)."** Different priors give different answers, especially when data is thin. Bayesians embrace this — the prior is where you get to be honest about what you already know. Frequentists sometimes object. If it worries you, do a **sensitivity analysis**: try a few different priors and see how much the answer changes. If it barely moves, you're fine. If it swings wildly, the data isn't strong enough to make a confident claim yet.
 
-**Regularization ≠ Bayesian estimation** in general. MAP is a point estimator; full Bayes gives you a distribution. If you need uncertainty quantification, you need the posterior, not just its mode.
+**"MAP is not full Bayes."** MAP gives you one number. Full Bayesian inference gives you a distribution over all plausible θ values. If you need real uncertainty (error bars, calibration, "how sure am I?"), MAP alone isn't enough — you need the whole posterior.
 
-<RealWorldML title="Weight decay in transformers, KL regularization in RLHF, and priors everywhere">
+<RealWorldML title="Priors everywhere: how modern LLMs quietly use Bayes">
 
-**Weight decay in transformer pretraining.** Every modern LLM (GPT, Llama, Claude-family) trains with weight decay ~ 0.1 (large!) using AdamW. This is a Gaussian prior on every model parameter with variance ~ 10. The prior is strong because there are billions of parameters and only a moderate amount of data — the prior helps prevent memorization and keeps the loss surface well-conditioned. Without weight decay, transformers overfit hard.
+Let's look at five real training tricks and see the prior hiding inside each one.
 
-**KL regularization in RLHF and DPO.** When fine-tuning a language model with reinforcement learning (PPO in RLHF) or preference optimization (DPO), you add a term β · KL(π_θ || π_ref) to the objective — a divergence penalty from the fine-tuned policy back to a reference (pretrained) policy. This is a prior over policies: &ldquo;a priori, the new policy should be close to the reference.&rdquo; β controls prior strength. Too small: policy drifts far, potentially into hallucination. Too large: barely fine-tunes anything.
+**1. Weight decay in transformer pretraining.** Every modern LLM (GPT, Llama, Claude family) trains with a `weight_decay` value like 0.1 in AdamW. That's a **Gaussian prior** on every model parameter — billions of them — saying "weights should probably be small." Why so strong? Because these models are enormous, and without a strong "keep it simple" nudge, they'd just memorize. The prior is what makes them generalize instead of overfit.
 
-**Classifier-free guidance in diffusion.** When generating conditional samples, the guidance scale γ effectively re-weights the conditional vs unconditional score. Mathematically, this is a *tempered* posterior — raising the class-conditional likelihood to a power. It&rsquo;s a way of dialing up the strength of the "class label" prior at sample-time. γ = 1: standard conditional. γ &gt; 1: sharper conditioning (looks more like the class); γ &lt; 1: closer to unconditional generation.
+**2. KL penalty in RLHF and DPO.** Some vocab first, so this doesn't sound scary:
 
-**Label smoothing** replaces the hard target &#123;0, 0, 1, 0, …&#125; with a smoothed target that puts a bit of probability mass on non-true classes. The Bayesian interpretation: it&rsquo;s a Dirichlet prior on the label distribution, making the model prefer softer output distributions. Empirically improves calibration and reduces overconfidence.
+- **RLHF** = **Reinforcement Learning from Human Feedback**. The process of teaching a language model to prefer answers humans like, using scores/rankings people gave.
+- **DPO** = **Direct Preference Optimization**. A simpler alternative to RLHF that skips the reinforcement learning bit.
+- **KL divergence** = a number measuring how different two probability distributions are.
+- **Policy** = the language model's "way of choosing what to say" — mathematically, the probability distribution it puts on next tokens.
+- **π_θ** ("pi-theta") = the current fine-tuned policy. **π_ref** = the reference (pretrained) policy.
 
-**Dropout as a Bayesian approximation.** Yarin Gal&rsquo;s "Dropout as Bayesian Approximation" (2016) formalized dropout as approximate variational inference — it&rsquo;s equivalent to placing a specific structured prior on the weights and doing a specific variational posterior fit. This is why "MC Dropout" (running dropout at test time and averaging predictions) gives useful uncertainty estimates: it&rsquo;s literally sampling from an approximate posterior.
+When fine-tuning, RLHF and DPO both add a term like β · KL(π_θ ‖ π_ref) to the loss. In English: "penalize any drift from the pretrained model, weighted by β." That is *literally a prior on policies* — you're saying "before fine-tuning, I believed the good policy is close to the pretrained one." β is the prior strength. Too small: the model drifts far, potentially into gibberish or hallucinations. Too large: it barely learns anything new.
 
-The theme: **every "regularization" or "auxiliary loss" in modern ML has a Bayesian interpretation**. Even if you don&rsquo;t use the interpretation to train, having it in your head unlocks a lot of intuition about what these tricks are actually doing and when to reach for which one.
+**3. Classifier-free guidance (CFG) in diffusion image generators.** In Stable Diffusion (and cousins), there's a knob called **guidance scale** (γ, gamma). Higher γ = the image sticks closer to the text prompt; lower γ = the image is more free-form. Under the hood, γ is dialing up the strength of the "class label prior" during sampling. γ = 1 is the standard conditional generation; γ > 1 is "sharpen the conditioning."
+
+**4. Label smoothing.** When you train a classifier, the usual target for the true class is 1 and everything else is 0. **Label smoothing** softens this — put 0.9 on the true class and spread 0.1 across the others. Result: the model becomes less overconfident and better calibrated. Bayesian view: this is a **Dirichlet prior** on the label distribution — you're saying "even the 'wrong' classes are not zero-probability."
+
+**5. Dropout as approximate Bayesian inference.** **Dropout** = "randomly zero out some neuron outputs during training." Turns out (Yarin Gal, 2016) that dropout is quietly doing approximate Bayesian inference. If you leave dropout on *at inference time* and average predictions across multiple runs, you get useful uncertainty estimates — this is called **MC Dropout** ("Monte Carlo" dropout).
+
+Big theme: **every "regularization" or "auxiliary loss" in modern ML has a Bayesian interpretation waiting behind it.** You don't have to use that interpretation to train the model. But keeping it in your head tells you *why* each trick works and *when* to reach for it.
 
 </RealWorldML>
 

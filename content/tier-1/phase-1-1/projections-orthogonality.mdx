@@ -122,11 +122,24 @@ plt.legend(); plt.grid(alpha=0.3); plt.tight_layout()`;
   ]}
 />
 
-<Motivation title="Least squares, attention, PCA — one operation">
+<Motivation title="Least squares, attention, PCA — all the same move">
 
-Regression fits a line to points by minimizing squared error — that turns out to be a **projection** of the target vector onto the space spanned by the features. PCA finds the direction that captures the most variance — the projection whose residual is smallest. Attention averages value vectors weighted by attention scores — a projection onto the span of the values. Layer normalization removes the mean from an activation — a projection onto the subspace where entries sum to zero.
+Here's a fun realization: four totally different-looking ML operations are secretly the same geometric move.
 
-Four apparently unrelated operations, one geometric shape: **drop a perpendicular from a vector onto a subspace, split it into (component in the subspace) + (residual perpendicular to it)**.
+- **Linear regression** fits a line by minimizing squared error. That turns out to be a **projection** of the target onto the space spanned by your features.
+- **PCA** (Principal Component Analysis, a way to reduce data to fewer dimensions) finds the direction that captures the most variance. That's a projection whose leftover residual is smallest.
+- **Attention** (the transformer building block) averages "value" vectors weighted by attention scores. That's a projection onto the span of the values.
+- **Layer normalization** subtracts the mean from a vector's entries. That's a projection onto the subspace where entries sum to zero.
+
+Four different-looking operations, one geometric shape: **drop a perpendicular from a vector onto a subspace, splitting it into the part inside the subspace + a leftover part perpendicular to it.**
+
+Vocabulary you'll need:
+
+- **Projection** = "the closest point in the subspace to your vector."
+- **Orthogonal** = another word for **perpendicular** ("makes a 90° angle").
+- **Subspace** = a flat "slab" through the origin — could be a line, a plane, or higher-dimensional.
+
+The math for all of this comes from a single identity: two vectors are perpendicular exactly when their dot product is zero. Everything below is turning that one fact into machinery.
 
 The specific formulas take a few lines. The mental picture — the *shadow* on a line, the *residual* perpendicular to it — is what makes least squares stop feeling like a matrix formula and start feeling like a right angle you can draw. That picture is the payoff of this chapter; the derivations below earn it once, so you never have to guess again.
 

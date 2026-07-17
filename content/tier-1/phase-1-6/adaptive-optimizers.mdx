@@ -174,19 +174,27 @@ for name, opt in [("Adam+L2", adam_with_l2), ("AdamW", adamw)]:
   ]}
 />
 
-<Motivation title="Adam trains every LLM you've heard of">
+<Motivation title="Adam is the optimizer training every LLM you've heard of">
 
-Look at any paper that trains a transformer — GPT-3, GPT-4, LLaMA, Claude, Gemini, DeepSeek, Mistral, Qwen. Somewhere in the training-details section, you'll find: "Optimizer: AdamW, β1 = 0.9, β2 = 0.95, weight decay = 0.1, cosine schedule, linear warmup for 2k steps." That single line encodes about 75% of what makes large-scale training work.
+Look at any paper that trains a transformer — GPT-3, GPT-4, Llama, Claude, Gemini, DeepSeek, Mistral, Qwen. Somewhere in the "training details" section you'll find a line like: "Optimizer: AdamW, β₁ = 0.9, β₂ = 0.95, weight decay = 0.1, cosine schedule, linear warmup for 2k steps." That one line encodes about 75% of what makes large-scale training work.
 
-For a GenAI engineer, understanding Adam is not optional. Every training run, every fine-tune, every LoRA update passes through this algorithm — and the hyperparameters are chosen based on properties of the algorithm you either understand or take on faith. This chapter builds Adam from first principles:
+Vocabulary before we start:
 
-- Start with vanilla SGD and see its problems on stretched loss surfaces.
-- Add per-parameter adaptive learning rates (RMSProp).
-- Add momentum (accelerating in consistent-gradient directions).
-- Combine them with bias correction — that's Adam.
-- Fix the weight-decay coupling bug — that's AdamW, the default for transformers.
+- **Adam** = an optimizer that adapts each parameter's effective step size based on how big its gradients have been. Name is from "Adaptive Moment Estimation."
+- **AdamW** = Adam with a small but important fix in how weight decay is applied. The default for transformers.
+- **β₁, β₂** ("beta-1, beta-2") = two knobs that control how much past information is remembered. Typically β₁ ≈ 0.9 (short-term memory of the gradient direction) and β₂ ≈ 0.999 or 0.95 (memory of gradient magnitude).
 
-Along the way we'll see WHY Adam works, when it fails (rare but real — some CNN training still prefers SGD with momentum), and what the β1/β2 hyperparameters actually control. By the end, "Adam" stops being a magical incantation and becomes an intelligible engineering choice.
+Understanding Adam is not optional for a GenAI engineer. Every training run, every fine-tune, every LoRA update passes through this algorithm. The hyperparameters are chosen based on properties of the algorithm that you either understand or take on faith.
+
+This chapter builds Adam from first principles:
+
+- Start with vanilla SGD and see where it breaks (stretched loss surfaces).
+- Add **per-parameter adaptive learning rates** (this is called RMSProp).
+- Add **momentum** (accelerate in consistent-gradient directions).
+- Combine them with **bias correction** to fix early-step underestimates → that's **Adam**.
+- Fix a subtle bug in how weight decay interacts with adaptive rescaling → that's **AdamW**, today's transformer default.
+
+Along the way you'll see *why* Adam works, when it fails (some CNN training still prefers plain SGD-with-momentum), and what β₁ and β₂ actually control. By the end, "Adam" stops being a magical incantation and becomes an intelligible engineering choice.
 
 </Motivation>
 

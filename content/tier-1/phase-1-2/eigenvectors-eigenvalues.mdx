@@ -162,11 +162,23 @@ print("explained variance ratio =", np.round(vals / vals.sum(), 3))`;
   ]}
 />
 
-<Motivation title="The DNA of a matrix — the two questions every eigenvalue answers">
+<Motivation title="Eigenvectors — the 'preferred directions' of a matrix">
 
-Given a big matrix A, two questions come up over and over in modern ML: (1) if I keep applying A — say, computing A^k or a Markov chain or an RNN's hidden-state update — where does it converge? (2) if I want to *summarize* A by a small number of directions and magnitudes, which ones matter most?
+Given a matrix A, two big questions keep showing up in ML:
 
-**Eigenvectors and eigenvalues answer both.** An eigenvector of A is a direction that A only stretches — the map's own preferred axis. Its eigenvalue is the stretch factor. If you write A in the coordinate system where the eigenvectors are the basis, A becomes a *diagonal* matrix — each coordinate just scales independently. High-power behavior of A is then trivial (each eigenvalue raised to that power); dimensionality reduction is direct (drop the small-eigenvalue directions).
+1. **"If I keep applying A over and over — like computing A^k or updating a Markov chain — where does that end up?"**
+2. **"If I want to *summarize* A with just a few 'important' directions, which ones matter most?"**
+
+**Eigenvectors and eigenvalues answer both.** Let's unpack those words:
+
+- An **eigenvector** of a matrix A is a special direction that A *only stretches* — it doesn't rotate or twist the arrow at all, just makes it longer or shorter. "Eigen" is German for "own" — so it's the matrix's own preferred axis.
+- The **eigenvalue** is the stretch factor — how much longer or shorter the arrow becomes.
+
+Big consequence: if you switch to a coordinate system where the eigenvectors are your basis, A becomes a **diagonal matrix** — a matrix that's zero everywhere except on the diagonal. In diagonal form, applying A is trivial: each coordinate scales independently by its eigenvalue. So:
+
+- High powers of A (like A^100)? Trivial. Just raise each eigenvalue to that power.
+- Which directions "matter most"? Easy. The ones with the biggest eigenvalues.
+- Drop the small-eigenvalue directions and you've compressed the matrix — that's exactly the idea behind PCA and dimensionality reduction.
 
 For a GenAI engineer, eigen-analysis shows up everywhere:
 

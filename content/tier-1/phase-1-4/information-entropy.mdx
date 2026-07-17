@@ -127,33 +127,62 @@ for V in vocab_sizes:
   ]}
 />
 
-<Motivation title="The LLM loss is cross-entropy — this chapter says WHY">
+<Motivation title="Cross-entropy is the loss every LLM trains on — this chapter says WHY">
 
-Every large language model on earth minimizes **cross-entropy** during training. It's not a coincidence, and it's not just "the standard classification loss." Cross-entropy is the *unique* loss that turns a probability model into an optimizer with the right calibration properties, and its close cousin the **KL divergence** underlies half of modern deep learning: RLHF for LLMs, distillation for compression, variational autoencoders for generation, contrastive learning for embeddings.
+Every large language model on earth trains by minimizing something called **cross-entropy**. That's not a coincidence, and it's not just "the standard classification loss." Cross-entropy is the *unique* loss that gives probability models the right properties, and its cousin **KL divergence** underlies half of modern deep learning: RLHF (fine-tuning with human feedback), knowledge distillation (making a small model imitate a big one), VAEs (image generators), and contrastive learning (how embedding models are trained).
 
-For a GenAI engineer, information theory is the single highest-leverage math chapter — one theorem in this chapter (cross-entropy = entropy + KL divergence) explains:
+Three quick vocabulary unpacks so nothing feels scary:
 
-- **Why we train with -log(p_correct_token) per token.** That's cross-entropy against a one-hot target — exactly what PyTorch's `nn.CrossEntropyLoss` computes.
-- **Why perplexity is the standard eval metric.** Perplexity = exp(cross-entropy per token) = "effective vocabulary size the model is uncertain over." Lower perplexity = sharper model.
-- **How RLHF's KL penalty prevents mode collapse.** RLHF adds a KL(π || π_ref) term to keep the fine-tuned model close to the reference; if the KL grows, the model has drifted from natural language.
-- **Why knowledge distillation works.** Student trained on teacher's softmax output = minimize KL(teacher || student), aka "match the teacher's probability distribution" instead of just top-1.
-- **What temperature really is in sampling.** Softmax with temperature T = distribution with entropy scaled by T; low T = confident, high T = high-entropy (creative).
+- **Entropy** (H, from Greek η) = "how uncertain a distribution is." A fair die has more entropy than a loaded one.
+- **Cross-entropy** = "how surprised are you by data from distribution p if you *believed* the distribution was q?" It's minimized when q = p.
+- **KL divergence** (KL for Kullback-Leibler) = "how different two distributions are." Zero if identical; grows as they diverge.
 
-Master this chapter and you can *read* every loss function in every modern paper without looking anything up. That's the payoff for a couple hours of study.
+For a GenAI engineer, information theory is one of the highest-leverage math topics. One little identity in this chapter — cross-entropy = entropy + KL divergence — explains:
+
+- **Why LLMs train with `-log(probability of correct next token)`.** That's cross-entropy against a one-hot target — exactly what PyTorch's `nn.CrossEntropyLoss` computes.
+- **Why perplexity is the standard LLM eval metric.** Perplexity = exp(cross-entropy per token). Loosely: "effective vocabulary size the model is uncertain over." Lower = sharper model.
+- **How the KL penalty in RLHF stops the fine-tuned model from going off the rails.** RLHF adds a KL(π ‖ π_ref) term to keep the fine-tuned policy close to the reference model. If the KL grows too much, the model has drifted from normal English.
+- **Why knowledge distillation works.** A small "student" model trained to match a big "teacher" model's probability distribution — that's minimizing KL(teacher ‖ student). Better than just copying the top answer.
+- **What temperature really does in sampling.** Softmax with a temperature T just rescales the distribution's entropy. Low T = confident and sharp. High T = spread out and creative.
+
+Master this chapter and you'll be able to *read* every loss function in every modern paper without looking anything up. That's the payoff for a couple hours of study.
 
 </Motivation>
 
-<Intuition title="Information = bits of surprise. Entropy = average surprise. Cross-entropy = surprise using the wrong code.">
+<Intuition title="Information = surprise. Entropy = average surprise. Cross-entropy = surprise if you assumed the wrong thing.">
 
-Rare events are informative; common events are not. If someone tells you "the sun rose this morning," the information content is ~0 bits — you already knew it. If they tell you "the sun didn't rise this morning," that's an enormous amount of information — you'd never predicted it.
+Here's the mental picture that makes information theory click. **Information is surprise.**
 
-**Shannon information** of an outcome with probability p is defined as I(p) = −log(p). Small p (rare event) → large I (lots of information). Large p (common event) → small I (little information). If we use log base 2, I is in **bits**; if we use natural log (base e), it's in **nats** — a scaling constant, same idea.
+- If someone tells you "the sun rose this morning," you learn basically nothing — you already knew it. Zero information.
+- If someone tells you "the sun did NOT rise this morning," that's a *huge* amount of information — you'd never predicted that in a million years.
 
-**Entropy** is the *expected* information content of a random draw from a distribution: H(p) = E[I(X)] = -Σ p_i log p_i. High-entropy distributions are unpredictable (uniform); low-entropy distributions are concentrated (nearly deterministic).
+So: **rare events carry more information; common events carry less.**
 
-**Cross-entropy** H(p, q) = -Σ p_i log q_i measures the average surprise if you *believe* q is the distribution but samples actually come from p. It's minimized when q = p (no surplus surprise), and it always ≥ H(p). The gap is called **KL divergence** — the extra bits/nats you pay for using the wrong distribution.
+Shannon (in 1948) put a formula on this: the information in an event with probability p is:
 
-That's the entire chapter. Everything below is turning these three mental pictures into formulas, code, and neural-network practice.
+$$I(p) = -\log p$$
+
+The minus sign is because probabilities are between 0 and 1, so log p is negative — the minus flips it to positive. Small p → big I (surprise). Large p → small I (no surprise). If you use log base 2, information is measured in **bits**; log base e gives **nats**. Same idea, different scale.
+
+**Entropy** H(p) is just the *average* information content when you draw from a distribution p:
+
+$$H(p) = -\sum_i p_i \log p_i.$$
+
+Think of it as "average surprise." A uniform distribution (like a fair die) is maximally uncertain — high entropy. A near-deterministic distribution (like a loaded die that always shows 6) is very predictable — low entropy. A perfectly deterministic distribution (only one outcome) has entropy zero.
+
+**Cross-entropy** H(p, q) is what happens when you compute average surprise using the *wrong* distribution:
+
+$$H(p, q) = -\sum_i p_i \log q_i.$$
+
+You're averaging using the true distribution p, but scoring each event's surprise with your guessed distribution q. It's minimized when your guess q equals reality p — then cross-entropy is just entropy H(p). Any mismatch makes cross-entropy larger.
+
+**KL divergence** is that mismatch:
+
+$$\text{KL}(p \| q) = H(p, q) - H(p) = \sum_i p_i \log(p_i / q_i).$$
+
+It's the extra surprise you pay for using the wrong model. Zero when q = p, positive otherwise. Never negative.
+
+That's it. Everything below is turning these three mental pictures into formulas, code, and neural-network practice.
 
 </Intuition>
 

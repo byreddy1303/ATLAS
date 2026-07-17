@@ -152,26 +152,41 @@ for T in [0.5, 1.0, 2.0]:
   ]}
 />
 
-<Motivation title="Every probability question in ML starts with 'what is the outcome universe?'">
+<Motivation title="Every probability question starts with the same question: 'what's the universe of possible outcomes?'">
 
-Probability is the language your model speaks. Every softmax output, every sampling decision, every train/test split, every RAG confidence score, every data augmentation — all of it is defined against a **sample space** of possible outcomes and a **probability measure** that assigns weight to each. If the sample space is wrong or you don't know what it is, everything downstream is guesswork.
+Probability is the language your model speaks — but before we can talk about probabilities, we need to be crisp about *what we're taking probabilities of*. Every softmax output, every token an LLM samples, every train/test split, every "confidence score" from a retrieval system, every data augmentation — all of it is built on top of a **sample space** (the universe of possible outcomes) and a **probability measure** (a rule assigning weight to each outcome). Get those wrong, and everything downstream is guesswork.
+
+Two vocabulary words up front so nothing sounds scary:
+
+- **Sample space** (usually written **Ω**, capital Greek "omega") = the set of every possible outcome. For a coin flip, Ω = &#123;heads, tails&#125;.
+- **Probability measure** (usually written **P**) = a rule that assigns a number between 0 and 1 to each subset of Ω, obeying a few simple rules we'll unpack below.
 
 For a GenAI engineer, this chapter shows up in every day of work:
 
-- **LLM token sampling.** The vocabulary is the sample space (30k–200k tokens); the softmax over logits is a probability measure on that space; top-k, top-p, temperature, and greedy decoding are all *events* or *restricted measures* you choose to sample from.
-- **RAG retrieval.** The corpus of documents is a sample space; a similarity score defines an implicit measure over it; picking the top-N documents is picking a small event.
-- **Data splits.** Train/val/test partitions are literally a partition of a sample space (your dataset) into disjoint events. The Kolmogorov additivity axiom is why "the total probability equals 1" survives partitioning.
-- **Evaluation.** Test-set accuracy is an empirical probability estimate — a Monte Carlo estimator of a population probability under an assumed sampling model.
+- **LLM token sampling.** The vocabulary (all possible tokens the model can output) is the sample space. A **softmax** over the model's raw scores ("logits") turns them into a probability measure on that space. Every decoding trick — **top-k** (only sample from the top k tokens), **top-p** (also called nucleus sampling — only sample from the smallest set summing to probability p), **temperature** (a knob that smooths or sharpens the distribution), **greedy** (just take the top token) — is a choice of *which measure to sample from*.
+- **RAG retrieval.** In a **RAG** (Retrieval-Augmented Generation) system, the sample space is your document corpus. A similarity score defines an implicit measure over it. Picking the top-N documents to feed the LLM is picking a small subset.
+- **Data splits.** Train/val/test are literally a partition of your dataset into three non-overlapping pieces. The math that says "the total probability across the three pieces equals 1" is exactly the additivity axiom.
+- **Evaluation.** Test-set accuracy is an empirical estimate of a true probability — a **Monte Carlo estimator** (that's the name for "sample repeatedly, average the outcomes") of how well the model works on the full population.
 
-You cannot skip the vocabulary. Two lines of math ("Ω is the set of outcomes; P assigns a number in [0, 1] to every event") do more downstream lifting than any single fancy technique. The whole rest of Phase 1.4 rests on this chapter.
+You cannot skip this vocabulary. Two lines of math — "Ω is the set of outcomes; P assigns a number to every subset" — do more downstream lifting than any fancy technique that comes later. The rest of Phase 1.4 sits on top of this chapter.
 
 </Motivation>
 
-<Intuition title="Probability = 'how much of the outcome universe does this event cover?'">
+<Intuition title="Probability = 'how much of the possible-outcome universe does this cover?'">
 
-Picture the sample space Ω as a rectangle with area 1. Every possible outcome lives somewhere inside. An **event** is a shape drawn on that rectangle — a subset of outcomes. Its **probability** is the area of that shape. The axioms fall out immediately from that picture: areas are non-negative, the whole rectangle has area 1, and the area of two non-overlapping shapes is the sum of their areas.
+Here's the mental picture that makes everything click.
 
-This "measure over an outcome universe" framing is why "probability" and "measure theory" are the same subject in mathematics. You don't need the measure-theory machinery to work in ML, but the picture is exactly right. Everything from Naive Bayes to score-based generative models to attention weights obeys the same three rules — the rest is which sample space you're on and which measure you've defined on it.
+Draw a rectangle with area 1 on a piece of paper. That's the sample space Ω — every possible outcome of your experiment lives somewhere inside it. Now draw a shape inside the rectangle. That shape is an **event** — a subset of outcomes you care about (like "the coin lands heads" or "the roll is even"). The **probability** of that event is just the area of the shape.
+
+From this one picture, everything else falls out:
+
+- Areas are never negative → probabilities are never negative.
+- The whole rectangle has area 1 → the probability of "something happens" is 1.
+- Two shapes that don't overlap: their combined area is the sum of each area → the probability of "either event A or event B, where they don't overlap" is P(A) + P(B).
+
+Those three facts have a fancy name — **Kolmogorov's axioms** (Andrey Kolmogorov, 1933) — but you already know them. Every probability rule you'll ever meet in ML is either these three or a direct consequence.
+
+Whether it's Naive Bayes, transformer attention weights, or a diffusion model's noise schedule, the same picture applies. The only differences are (a) what the sample space is and (b) which measure you've put on it.
 
 </Intuition>
 
@@ -210,25 +225,28 @@ An **event** is any subset of Ω. If the outcome of the experiment lands inside 
 
 For finite sample spaces where every outcome is equally likely, the probability of an event is just a counting ratio: P(A) = |A| / |Ω|. This is the "classical" definition of probability that Laplace worked with; it's still how most textbook problems are solved.
 
-## The three Kolmogorov axioms
+## The three rules probability has to obey
 
-Andrey Kolmogorov (1933) formalized probability with three axioms. Any function P mapping events to numbers that satisfies these axioms is a valid probability measure:
+Andrey Kolmogorov (1933) formalized these three "obvious" facts and called them **axioms**. That's just a fancy word for "rules we accept without further proof, from which everything else is derived." Any function P that assigns numbers to events *and* obeys all three is a valid probability measure. Here they are, in English then in symbols:
 
-$$
-\begin{aligned}
-\text{(1) Non-negativity:} \quad & P(A) \geq 0 \text{ for every event } A. \\\\
-\text{(2) Normalization:} \quad & P(\Omega) = 1. \\\\
-\text{(3) Countable additivity:} \quad & P(A_1 \cup A_2 \cup \cdots) = \sum_i P(A_i) \text{ if the } A_i \text{ are pairwise disjoint.}
-\end{aligned}
-$$
+**(1) Probabilities are never negative.**
+$$P(A) \geq 0 \text{ for every event } A.$$
 
-Every property you know about probability follows from these three. Two important corollaries:
+**(2) The probability that "something happens" is 1.**
+$$P(\Omega) = 1.$$
 
-**Complement rule.** For any event A, $P(A^c) = 1 - P(A)$. Proof: A and Aᶜ are disjoint and their union is Ω, so P(A) + P(Aᶜ) = P(Ω) = 1.
+**(3) For non-overlapping events, "or" means "add."**
+$$P(A_1 \cup A_2 \cup \cdots) = \sum_i P(A_i) \text{ if the } A_i \text{ don't share any outcomes.}$$
 
-**Inclusion–exclusion.** For any events A, B: $P(A \cup B) = P(A) + P(B) - P(A \cap B)$. Proof: split A ∪ B into three disjoint pieces (A only, B only, both), apply axiom 3, count each piece the right number of times.
+That third one is called **countable additivity**. "Countable" just means "you can list them one by one, even if the list is infinite." The **pairwise disjoint** condition means "no two of them overlap." The union symbol ∪ means "or" — outcomes in this event *or* that one.
 
-These two identities plus the axioms will solve most probability problems you meet in ML.
+Everything else you know about probability follows from these three. Two consequences you'll use constantly:
+
+**Complement rule.** For any event A: $P(A^c) = 1 - P(A)$, where $A^c$ ("A-complement") means "not A." The proof is one line: A and "not A" are disjoint and together cover Ω, so by axiom 3, P(A) + P(A^c) = P(Ω) = 1.
+
+**Inclusion–exclusion for two events.** $P(A \cup B) = P(A) + P(B) - P(A \cap B)$. In English: "the probability of A-or-B is the probability of A plus the probability of B minus the overlap (so we don't count it twice)." The overlap A ∩ B means "outcomes in both A *and* B."
+
+Those two identities plus the axioms will solve about 90% of the probability problems you'll meet.
 
 <RunnableCode title="Verify the three Kolmogorov axioms empirically" code={axiomsCode} packages={["numpy"]} />
 
@@ -246,42 +264,46 @@ For a GenAI engineer, simulation is the dominant tool: token sequences, image la
 
 The relative error of a Monte Carlo estimate shrinks as 1/√N — quadruple the samples for half the error. This is a fundamental scaling law you meet everywhere: A/B test sample sizes, SGD mini-batch noise, Bayesian posterior sampling, RL policy evaluation.
 
-## Frequentist vs Bayesian readings
+## Two ways to read probability: frequentist vs Bayesian
 
-The **axioms** don't care how you *interpret* probability — but two rival interpretations coexist in practice:
+The axioms don't care how you *interpret* probability. But there are two competing philosophies out there, and they'll come up whether you want them to or not:
 
-**Frequentist.** P(A) is the long-run fraction of trials in which A occurs, if you could repeat the experiment infinitely many times. Speaks only about *repeatable* experiments. Common in classical statistics, hypothesis testing, and much of the ML evaluation literature ("this model achieves 87% accuracy" is a frequentist statement — an average over held-out samples).
+**Frequentist.** "P(A) is the long-run fraction of times A would happen, if you could repeat the experiment infinitely many times." This is the intuitive interpretation for repeatable experiments — coin flips, dice rolls, benchmark evaluations. When a paper says "the model achieves 87% accuracy," that's a frequentist statement: it's a long-run rate over held-out samples.
 
-**Bayesian.** P(A) is a *degree of belief* in A given the information you have. Can assign probabilities to one-off events ("P(this specific hypothesis is true)") because probability is subjective and updates with evidence via Bayes' theorem. Dominant in Bayesian ML, decision theory under uncertainty, and modern LLM calibration research.
+**Bayesian.** "P(A) is a *degree of belief* in A, given the information you have right now." This lets you put probabilities on one-off things ("what's the probability my hypothesis is true?"), because probability is treated as a subjective belief that updates as new evidence arrives. Updates use Bayes' theorem (next chapter). Dominant in Bayesian ML, decision theory, and modern LLM calibration research.
 
-The axioms hold for both. The disagreement is only about which events are *allowed* to have a probability. Practical ML uses whichever framing is more useful for the problem — cross-validation is frequentist-flavoured, Bayesian optimization is Bayesian-flavoured, and both live inside the same measure-theoretic framework.
+Both interpretations obey the same three axioms. The fight is only about *which events you're willing to assign probabilities to*. Practical ML happily mixes both — cross-validation feels frequentist, Bayesian optimization is Bayesian by design. Same math, different mindset.
 
-## The traps that matter
+## Things that trip people up
 
-**Choose Ω before doing anything else.** Half of probability mistakes come from ambiguity about the sample space. "Given a family with two children, at least one is a boy — what's the probability both are?" has different answers depending on whether Ω = &#123;BB, BG, GB, GG&#125; or Ω = &#123;families with at least one boy&#125;. Always write down Ω explicitly.
+**"Write down Ω first, always."** Half of probability mistakes come from being fuzzy about the sample space. A classic puzzle: "A family has two children, at least one is a boy. What's the probability both are boys?" The answer is 1/3 or 1/2 depending on whether Ω is &#123;BB, BG, GB, GG&#125; or "families that have at least one boy." Neither is wrong — but you have to be explicit about which universe you're in.
 
-**Equally-likely is an assumption, not a default.** The uniform measure P(ω) = 1/|Ω| is convenient but *assumed*. Real experiments rarely have exactly uniform outcomes; you need domain knowledge or data to justify the measure.
+**"Equally-likely is an assumption, not the default."** Assuming P(ω) = 1/|Ω| for every outcome is convenient but not automatic. Real experiments rarely have exactly uniform outcomes; you need reasoning or data to justify uniformity.
 
-**Empty events have probability zero, but zero-probability events aren&rsquo;t always empty.** In continuous sample spaces (Ω = the real line, say) every specific point has probability zero even though the set is not empty. This is why continuous probability uses **densities** instead of point probabilities — the topic of the random-variables chapter.
+**"Zero probability doesn't always mean 'impossible.'"** In continuous sample spaces (Ω = the real line, for example), every single point has probability exactly zero — but the point still exists, and can still be observed. That's why continuous probability uses **densities** (probability *per unit interval*) instead of raw point probabilities. Details in the random-variables chapter.
 
-**Countable vs uncountable additivity.** Kolmogorov's third axiom allows countably infinite disjoint unions but not uncountably many. This is a measure-theoretic subtlety you rarely hit in practice, but it&rsquo;s the reason not every subset of ℝ has a well-defined probability — some pathological sets escape.
+**"Simulation estimates come with wobble."** A Monte Carlo estimate is itself random — run the simulation twice, get slightly different numbers. Always report an error bar. The standard error of a probability estimate over N samples is √(p(1−p)/N), which shrinks as 1/√N. Quadrupling samples cuts the error in half.
 
-**Simulation-based estimates come with noise.** A Monte Carlo estimate is itself random. Report a confidence interval or standard error, not just a point estimate. Standard error of a proportion estimate: sqrt(p(1−p)/N).
+<RealWorldML title="LLM sampling: every decoding trick is a choice of probability measure">
 
-<RealWorldML title="LLM sampling as a probability measure over a vocabulary sample space">
+Here's the payoff. When an LLM writes text, it produces one token at a time. Each step is a mini probability problem with these ingredients:
 
-Every autoregressive text generation is a walk through a sequence of probability measures. At each step:
+- **Sample space Ω** = the **vocabulary** (all the tokens the model can output — around 32,000 for Llama, roughly 200,000 for a GPT-4-class model). A **token** is a word or word-piece, roughly.
+- **Probability measure P** at that step = softmax(logits / T). Here **logits** are the model's raw output scores for each token (unnormalized), **T** is the **temperature** (a knob), and **softmax** turns the scores into probabilities that sum to 1. This measure obeys all three of Kolmogorov's rules: non-negative, sums to 1, "or means add" for non-overlapping token subsets.
+- **Events** = subsets of the vocabulary you might care about: "the next token is a noun," "the next token starts a new sentence," "the next token is the special `end-of-text` token."
+- **Sampling strategies** = choices of *which measure* to actually sample from. All the fancy names you've heard are just different measures on the same Ω:
+  - **Greedy** = pick the top-scoring token, always. This is a point-mass measure: probability 1 on the top token, 0 on everything else.
+  - **Top-k** = restrict to the top k tokens (say k = 40), zero out the rest, renormalize so it sums to 1. Now you're sampling from a smaller sample space.
+  - **Top-p** (also called **nucleus sampling**) = restrict to the smallest set of top tokens whose combined probability is at least p (say p = 0.9), then renormalize. This adapts the size of the restricted set to the situation.
+  - **Temperature** = the T in `softmax(logits / T)`. High T (like 1.5) flattens the distribution — the model becomes more random. Low T (like 0.3) sharpens it — the model becomes more decisive. T = 0 is greedy.
 
-- **Sample space** Ω = the vocabulary V (say 32,000 tokens for a Llama-class model).
-- **Probability measure** P at that step = softmax(logits / T) where the logits are the model's output for the next token and T is the temperature. This measure satisfies all three Kolmogorov axioms: each P(token) is non-negative, they sum to 1, and disjoint token subsets add.
-- **Events** = subsets of the vocabulary you might care about: "the next token is a noun," "the next token starts a new sentence," "the next token is `&lt;end&gt;`."
-- **Sampling strategies** = restricted measures.
-  - *Greedy* = point-mass on the argmax; P(top token) = 1, others 0. (A valid but degenerate measure.)
-  - *top-k* = restrict support to the k most probable tokens and renormalize. New sample space is a k-element subset of V.
-  - *top-p (nucleus)* = restrict to the smallest set of tokens whose cumulative probability is at least p, then renormalize.
-  - *Temperature* = smooth adjustment to the measure. High T flattens (approaches uniform); low T sharpens (approaches the argmax point-mass).
+Big picture: every decoding trick is a choice about *which measure on Ω to sample from*. Once you see it this way, common LLM problems get much easier to reason about:
 
-Every design choice for a decoding strategy is a choice about *which measure on Ω to sample from*. This clarity — that decoding is measure design, not just "picking a token" — is what lets you reason cleanly about phenomena like mode collapse (measure too sharp), repetitive text (measure ignores recent history), and hallucination (measure places positive mass on off-manifold outputs).
+- **Mode collapse** — the model keeps saying the same thing → your measure is too sharp; try higher T or nucleus sampling.
+- **Repetitive text** — the model loops → your measure isn't accounting for recent history; add a repetition penalty.
+- **Hallucinations** — the model confidently says false things → your measure is placing weight on tokens that lead the model down bad paths; try lower T or top-p to concentrate on more confident options.
+
+Decoding isn't magic. It's measure design.
 
 </RealWorldML>
 

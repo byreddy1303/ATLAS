@@ -187,26 +187,33 @@ print("is drawing exactly this picture per input example.")`;
   ]}
 />
 
-<Motivation title="Every ML modeling choice picks a distribution family — knowing the catalog is the difference between guessing and reasoning">
+<Motivation title="Every ML model quietly picks a distribution — knowing the catalog is a superpower">
 
-Distributions are the vocabulary of ML modeling. Every architectural or algorithmic choice implicitly picks one:
+**Distributions** are the vocabulary of ML modeling. A distribution is just "a rule that assigns probabilities to outcomes" — think coin flip, bell curve, dice roll. Different real-world situations call for different shapes of distribution. Every ML model, whether it announces it or not, picks a distribution family and lives with its assumptions.
 
-- **Classification loss = negative log-likelihood of a categorical.** Cross-entropy is literally −log p(true class) under the model&rsquo;s categorical distribution over classes. Every softmax layer is a parameterization of Categorical(π).
-- **Regression loss = negative log-likelihood of a Gaussian.** MSE is (up to constants) −log p(y | ŷ) when y | ŷ ~ 𝒩(ŷ, σ²) for a fixed σ. Mean-absolute-error corresponds to a Laplace likelihood instead. Every loss function is a chosen distribution family.
-- **VAE latents are Gaussians.** Encoder outputs μ(x), σ(x); the latent z ~ 𝒩(μ(x), diag(σ²(x))). KL to prior 𝒩(0, I) is closed-form because both are Gaussians.
-- **Diffusion noise is standard Gaussian.** ε ~ 𝒩(0, I). Forward process is a scheduled sequence of Gaussians; reverse process learns to invert them.
-- **Rewards in reinforcement learning are often modeled as exponential-family** (Gaussian, Gamma, Bernoulli depending on the domain). Policy gradients decompose neatly for exponential-family distributions.
-- **Bayesian priors on positive quantities** (variances, precisions, rates) are usually Gamma or InverseGamma. Priors on probabilities are Beta or Dirichlet.
+Here's what that looks like in practice:
+
+- **Classification loss = negative log-likelihood of a Categorical.** A **Categorical** distribution puts probabilities on K options (like K classes). Cross-entropy loss (the standard classifier loss) is literally −log p(true class) under the model's Categorical output. Every softmax layer is a Categorical in disguise.
+- **Regression loss = negative log-likelihood of a Gaussian (bell curve).** When you use MSE, you're implicitly assuming the true target is your prediction plus bell-curve noise. If you use MAE (mean absolute error) instead, you've secretly assumed **Laplace** noise (a heavier-tailed distribution with a sharp spike). Every loss function is a picked distribution family.
+- **VAE latents are Gaussians.** A **VAE** (Variational Autoencoder) is an image generator. Its encoder outputs μ(x) and σ(x) — the mean and standard deviation of a Gaussian for each input. Sampling from that Gaussian is what makes the model generative.
+- **Diffusion noise is Gaussian.** Diffusion models (Stable Diffusion, DALL-E) generate images by starting with pure bell-curve noise and gradually removing it. Every step assumes Gaussian noise.
+- **Rewards in reinforcement learning** are often modeled with one of a family called the **exponential family** (which includes Gaussian, Bernoulli, Gamma, Poisson). These distributions have very clean math for gradients.
+- **Bayesian priors** you pick depend on what you're constraining. Variances get Gamma or InverseGamma priors. Probabilities get Beta or Dirichlet priors.
 
 You don&rsquo;t need to memorize every distribution; you need to know the shapes and the typical settings so you can pattern-match. A count of arrivals per hour? Poisson. Time-until-event? Exponential. Probability of success? Beta prior. Ellipsoidal cluster? Multivariate Gaussian. This chapter builds that pattern library, then dives deep into the Gaussian (the most-important-single-distribution in ML).
 
 </Motivation>
 
-<Intuition title="A distribution family is a *shape* parameterized by a small set of knobs">
+<Intuition title="A distribution family is just a shape with knobs">
 
-Each family is a parameterized shape. Turning a knob changes the shape, but the family stays what it is. **Gaussian** = a smooth bell, knobs = (mean, variance). **Bernoulli** = two vertical bars whose heights sum to 1, knob = P(success). **Poisson** = a decaying tail of bars over the non-negative integers, knob = rate. **Beta** = a curve on [0, 1] whose shape ranges from U-shaped to bell-shaped to skewed, knobs = (α, β).
+Each named distribution is really a *shape* you can turn knobs on. The knobs are called **parameters**. Turning them changes the shape's proportions but keeps it in the same family. Some examples:
 
-Real data is never *exactly* any of these — but many phenomena are approximately one of them, and that&rsquo;s enough. Choosing a distribution is choosing which family&rsquo;s knobs to fit to the data. When the family fits well, downstream math becomes tractable (closed-form posteriors, low-variance estimators, calibrated confidence intervals). When it doesn&rsquo;t, you switch families or use a non-parametric method.
+- **Gaussian** — a smooth bell. Two knobs: mean (where the bell sits) and variance (how wide it is).
+- **Bernoulli** — two vertical bars whose heights add to 1. One knob: probability of success.
+- **Poisson** — a decaying tail of bars over the non-negative whole numbers 0, 1, 2, … One knob: the average rate.
+- **Beta** — a smooth curve on [0, 1]. Two knobs (α and β) that let it be U-shaped, bell-shaped, or skewed depending on values.
+
+Real data is never *exactly* any of these — but a lot of phenomena are approximately one of them, and approximate is enough. Choosing a distribution is choosing which family's knobs to fit. When the family fits well, the math downstream gets clean (closed-form posteriors, tight confidence intervals). When it fits badly, you switch families or use non-parametric methods (methods that don't assume a specific shape).
 
 </Intuition>
 

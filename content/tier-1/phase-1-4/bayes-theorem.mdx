@@ -119,32 +119,44 @@ print(f"each 'H' multiplies the ratio P(bias)/P(fair) by 0.75/0.5 = 1.5")`;
   ]}
 />
 
-<Motivation title="Bayes = how any rational system updates belief">
+<Motivation title="Bayes' theorem — the recipe for updating beliefs">
 
-Bayes' theorem is a one-line formula: **posterior = (prior × likelihood) / evidence**. But it's a mental model much bigger than a formula. It's how any rational belief system should update when new data arrives — and it directly powers half of practical ML: Naive Bayes classifiers, spam filters, Bayesian regression, RAG confidence estimates, Kalman filters, latent-variable models, and the entire Bayesian deep-learning literature.
+**Bayes' theorem** is a one-liner:
 
-For a GenAI engineer, Bayes appears in several critical places:
+$$\text{posterior} = \frac{\text{prior} \times \text{likelihood}}{\text{evidence}}$$
 
-- **Understanding model outputs.** When an LLM outputs "The capital of France is Paris" with confidence 0.99, Bayes helps you reason about whether that confidence is calibrated (does the model's 99% probability match the actual 99% correctness rate? — usually not, models are often overconfident).
-- **Retrieval-augmented generation.** RAG scores documents against a query with a similarity metric; if you interpret those scores as unnormalized probabilities, ranking and re-scoring become Bayesian inference problems.
-- **Reasoning under uncertainty.** "The model says the answer is X; how much should I trust that?" is a Bayesian question. Prior: baseline model reliability. Likelihood: evidence from the specific output. Posterior: your updated belief.
-- **Bayesian deep learning.** Not mainstream in vanilla LLM training, but foundational for uncertainty estimation, active learning, and hyperparameter tuning (Bayesian optimization).
+But it's much bigger than a formula. It's the recipe for how any rational reasoning system — a person, a doctor, a spam filter, an LLM, a self-driving car — should update its beliefs when new information arrives. Miss it and you'll misread confident-looking outputs your whole career. Get it and you'll see it everywhere.
 
-The chapter is short: derive the theorem, work through the base-rate example everyone gets wrong on the first try, build a Naive Bayes spam classifier from scratch, and sketch sequential Bayesian updating. The formula is trivial; the mental model is the payoff.
+Three pieces of vocabulary before we go further:
+
+- **Prior**: what you believed before seeing new evidence.
+- **Likelihood**: how well each possible answer *explains* the evidence you saw.
+- **Posterior**: your updated belief after combining the prior and the evidence.
+
+Bayes appears in several places you'll actually work with as a GenAI engineer:
+
+- **Reading model outputs correctly.** When an LLM says "The answer is X with 99% confidence," Bayes helps you check whether that 99% is *calibrated* — that is, does the model actually get things right 99% of the time when it says 99%? Usually not — most models are overconfident. Bayesian thinking helps you tell.
+- **RAG (retrieval-augmented generation).** RAG scores documents against a query and ranks them. Interpret the scores as unnormalized probabilities and the whole "which document is most relevant?" question becomes Bayesian inference.
+- **Reasoning under uncertainty.** "The model says X — how much should I trust it?" is a Bayesian question. Your prior: how reliable is the model in general? Your evidence: this specific answer. Your posterior: your updated belief in X.
+- **Bayesian deep learning.** Not mainstream in vanilla LLM training, but critical for uncertainty estimation, active learning, and hyperparameter tuning (via Bayesian optimization).
+
+The chapter is short and payoff-heavy: derive the theorem, walk through the "medical test paradox" that trips up almost everyone the first time, build a Naive Bayes spam filter from scratch, and sketch how beliefs update as data streams in.
 
 </Motivation>
 
-<Intuition title="Reweight the prior by how much the evidence supports each hypothesis">
+<Intuition title="Reweight your beliefs by how well each explanation fits the evidence">
 
-You have several possible explanations for what's true (hypotheses H₁, H₂, …). Before seeing any evidence, you have a **prior** belief in each — often just "they're equally likely" if you have no reason to prefer one. Then evidence E arrives. For each hypothesis, you ask: **"How likely was this evidence to occur if this hypothesis were true?"** — that's the *likelihood* P(E | H_i).
+Imagine you have several possible explanations for something — call them hypotheses H₁, H₂, H₃… Before seeing any evidence, you have some starting beliefs about each. That's your **prior**. If you have no reason to prefer one, you'd say "equally likely."
 
-Bayes says: multiply each hypothesis's prior by its likelihood of producing the evidence, then normalize so the total is 1. Hypotheses that predicted the evidence well get boosted; hypotheses that predicted otherwise get demoted. The result is your updated (posterior) belief.
+Now evidence E shows up. For each hypothesis, ask: **"If this hypothesis were true, how likely would I have seen this evidence?"** That answer is the **likelihood** P(E | Hᵢ) — read as "probability of the evidence given hypothesis i."
+
+Bayes' recipe: multiply each hypothesis's prior by its likelihood, then rescale so all your beliefs add up to 1. Hypotheses that predicted the evidence well get boosted. Hypotheses that didn't get demoted. What comes out is your **posterior** — your updated beliefs.
 
 $$
 \text{posterior} \;=\; \frac{\text{prior} \times \text{likelihood}}{\text{evidence}}
 $$
 
-The **evidence** in the denominator is just the total probability of the evidence occurring (summed over all hypotheses) — a normalizing constant that ensures the posterior probabilities sum to 1. Often you can compute the posterior *up to* this constant, do arithmetic in log-space, and normalize at the end.
+That "evidence" in the denominator is just the total probability of the evidence occurring, summed over all hypotheses. It's a normalizing constant — its only job is to make the posteriors add to 1. In practice you often compute up to this constant, work in log-space (to avoid underflow), and normalize at the very end.
 
 </Intuition>
 
@@ -175,20 +187,29 @@ That's Bayes' theorem. In model-fitting language: A is a hypothesis (e.g., "dise
 - **P(A | B)** = **posterior** — belief in A after seeing B.
 - **P(B)** = **evidence / marginal likelihood** — total probability of seeing B, summed over all hypotheses. For two-hypothesis problems, P(B) = P(B | A) P(A) + P(B | ¬A) P(¬A).
 
-## The base-rate trap — why "99% accurate tests" still give bad news
+## The base-rate trap — the "99% accurate test" that isn't
 
-Everyone learns Bayes with this example: a rare disease affects 1% of the population. A test is 99% sensitive (P(pos | disease) = 0.99) and 99% specific (P(neg | healthy) = 0.99). If you test positive, what's the probability you have the disease?
+Here's the classic Bayes example that trips up almost everyone the first time. You'll be tempted to guess wrong. That's fine — this one is *supposed* to be counter-intuitive.
 
-Intuition says "about 99%." Bayes says otherwise:
+**Setup.** A rare disease affects 1% of the population. There's a test with two nice properties:
 
-- P(disease) = 0.01 (prior)
-- P(pos | disease) = 0.99 (likelihood, "sensitivity")
-- P(pos | healthy) = 0.01 (false-positive rate = 1 − specificity)
-- P(pos) = 0.99 · 0.01 + 0.01 · 0.99 = 0.0198 (evidence)
+- **Sensitivity** 99% — meaning if you have the disease, the test says "positive" 99% of the time. In our notation: P(positive | disease) = 0.99.
+- **Specificity** 99% — meaning if you're healthy, the test says "negative" 99% of the time. In our notation: P(negative | healthy) = 0.99.
 
-Bayes: P(disease | pos) = (0.99 · 0.01) / 0.0198 = **0.5**. A 99% accurate test on a 1% base-rate disease still leaves you with only 50% probability of actually being sick. **Half of the people who test positive are false alarms.**
+You take the test. It comes back positive. **What's the probability you actually have the disease?**
 
-This is the *base-rate fallacy* — the human tendency to ignore the prior and focus only on the likelihood. Doctors get this wrong on medical school exams. Journalists get it wrong in reporting. Machine-learning models — if they're trained on class-imbalanced data without careful calibration — get it wrong too.
+Intuition screams "about 99%." Bayes says otherwise. Let's compute:
+
+- P(disease) = 0.01 (the prior — 1% base rate)
+- P(positive | disease) = 0.99 (likelihood if you have it)
+- P(positive | healthy) = 0.01 (the false-positive rate — 1 minus specificity)
+- P(positive) = 0.99·0.01 + 0.01·0.99 = 0.0198 (total probability of testing positive, summed over both cases)
+
+Bayes' theorem: P(disease | positive) = (0.99 · 0.01) / 0.0198 = **0.5**.
+
+A 99% accurate test on a 1% disease still leaves you with only 50% probability of actually being sick. **Half of positive tests are false alarms.** Why? Because 1% of healthy people (a much larger group) test positive by mistake, and their numbers balance out the actual sick people who test positive.
+
+This is called the **base-rate fallacy** — the human tendency to focus on the "99% accurate" (the likelihood) and ignore the "1% base rate" (the prior). Doctors get this wrong on their exams. Journalists get it wrong in health reporting. Machine learning models — if trained on class-imbalanced data without careful calibration — get it wrong too.
 
 <RunnableCode title="Medical test paradox: 99% accurate test, still only 50% posterior" code={medicalTestCode} packages={[]} />
 

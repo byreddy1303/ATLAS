@@ -96,13 +96,19 @@ print(f"gradient norm ||g|| = {np.linalg.norm(g):.4f}  <- the LARGEST directiona
   ]}
 />
 
-<Motivation title="Every parameter of an LLM is one axis in a giant space">
+<Motivation title="Every parameter of an LLM is one axis in a giant landscape">
 
-A modern LLM has hundreds of billions of parameters. The loss L is a scalar function of all of them: give the model a set of weights, it computes a loss. The optimization job is: **for each weight, how much does the loss change if I nudge just this one weight by a tiny amount?**
+A modern LLM has hundreds of billions of parameters. The loss L is a single number that depends on all of them. Give the model any specific set of weights, it computes one loss value. The optimization job is: **for each weight, figure out how much the loss would change if I nudged just this one weight by a tiny amount — while holding all the others fixed.**
 
-That "how much does L change per unit nudge of weight w_i, holding all other weights fixed" is exactly the **partial derivative** ∂L/∂w_i. There are as many of them as there are weights — hundreds of billions. Bundle all those partials into a vector (with one entry per weight) and you get the **gradient** ∇L — a single vector in the same space as the parameters. That's the object every optimizer takes a step against.
+That "how much does L change if I nudge only w_i" is called a **partial derivative**, written ∂L/∂w_i. The symbol ∂ (rounded, not italic d) is the standard math notation for "we're taking a derivative but pretending everything else is frozen." For a billion-parameter model, you have a billion of these partial derivatives.
 
-The chain rule taught us how derivatives compose. This chapter teaches how they *bundle*: how derivatives with respect to many inputs live in a single vector object, how you can extract "the slope in this direction" from that bundle via a dot product, and how gradient descent, second-order methods, natural gradients, and the entire optimizer toolkit boil down to operations on this vector object.
+Bundle all of them into a single vector — one entry per weight — and you get the **gradient**, written ∇L (nabla-L). This is one giant vector, living in the same space as your parameters. Every optimizer (SGD, Adam, etc.) takes a step *against* this vector to lower the loss.
+
+The chain rule (last chapter) taught us how derivatives *compose*. This chapter teaches how they *bundle*. Specifically:
+
+- Derivatives with respect to many inputs live in a single vector object (the gradient).
+- The slope in *any* direction (not just along an axis) can be pulled out with a dot product.
+- Gradient descent, second-order methods, natural gradients, and the whole optimizer toolkit are really operations on this vector.
 
 </Motivation>
 
